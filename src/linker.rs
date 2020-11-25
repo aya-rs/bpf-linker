@@ -4,7 +4,7 @@ use llvm_sys::core::*;
 use llvm_sys::error_handling::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
-use log::{debug, info};
+use log::*;
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
@@ -50,6 +50,12 @@ pub enum LinkerError {
 
     #[error("LLVMPrintModuleToFile failed: {0}")]
     WriteIRError(String),
+
+    #[error("error reading embedded bitcode: {0}")]
+    EmbeddedBitcodeError(String),
+
+    #[error("no bitcode section found in {0}")]
+    MissingBitcodeSection(PathBuf),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +206,10 @@ impl Linker {
                                 info!("ignoring archive item {:?}: unknown file type", name);
                                 continue;
                             }
+                            Err(LinkerError::MissingBitcodeSection(_)) => {
+                                warn!("ignoring archive item {:?}: no embedded bitcode", name);
+                                continue;
+                            }
                             Err(_) => {
                                 return Err(LinkerError::LinkArchiveModuleError(path.clone(), name))
                             }
@@ -231,13 +241,17 @@ impl Linker {
 
         use InputType::*;
         let bitcode = match in_type {
-            Bitcode => &data[..],
-            Elf => unimplemented!(),
+            Bitcode => data,
+            Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
+                Ok(Some(bitcode)) => bitcode,
+                Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
+                Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
+            },
             // this can't really happen
             Archive => panic!("nested archives not supported duh"),
         };
 
-        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, bitcode) } {
+        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
             return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 

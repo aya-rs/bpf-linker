@@ -5,19 +5,22 @@ use std::{
     collections::HashSet,
     ffi::{c_void, CStr, CString},
     os::raw::c_char,
-    ptr,
+    ptr, slice,
 };
 
+use llvm_sys::bit_reader::*;
+use llvm_sys::core::*;
 use llvm_sys::debuginfo::LLVMStripModuleDebugInfo;
 use llvm_sys::linker::LLVMLinkModules2;
+use llvm_sys::object::*;
 use llvm_sys::prelude::*;
 use llvm_sys::support::LLVMParseCommandLineOptions;
 use llvm_sys::target::*;
 use llvm_sys::target_machine::*;
+use llvm_sys::transforms::ipo::*;
 use llvm_sys::transforms::pass_manager_builder::*;
 use llvm_sys::LLVMAttributeFunctionIndex;
-use llvm_sys::{bit_reader::LLVMParseBitcodeInContext2, LLVMLinkage, LLVMVisibility};
-use llvm_sys::{core::*, transforms::ipo::LLVMAddGlobalDCEPass};
+use llvm_sys::{LLVMLinkage, LLVMVisibility};
 use log::*;
 
 use self::message::Message;
@@ -53,6 +56,46 @@ pub unsafe fn create_module(name: &str, context: LLVMContextRef) -> Option<LLVMM
     }
 
     Some(module)
+}
+
+pub unsafe fn find_embedded_bitcode(
+    _context: LLVMContextRef,
+    data: &[u8],
+) -> Result<Option<Vec<u8>>, String> {
+    let buffer_name = CString::new("mem_buffer").unwrap();
+    let buffer = LLVMCreateMemoryBufferWithMemoryRange(
+        data.as_ptr() as *const i8,
+        data.len() as usize,
+        buffer_name.as_ptr(),
+        0,
+    );
+
+    let mut message = Message::new();
+    let bin = LLVMCreateBinary(buffer, ptr::null_mut(), message.as_mut_ptr());
+    if bin.is_null() {
+        return Err(message.to_string());
+    }
+
+    let mut ret = None;
+    let iter = LLVMObjectFileCopySectionIterator(bin);
+    while LLVMObjectFileIsSectionIteratorAtEnd(bin, iter) == 0 {
+        let name = LLVMGetSectionName(iter);
+        if !name.is_null() {
+            let name = CStr::from_ptr(name);
+            if name.to_str().unwrap() == ".llvmbc" {
+                let buf = LLVMGetSectionContents(iter) as *const u8;
+                let size = LLVMGetSectionSize(iter) as usize;
+                ret = Some(slice::from_raw_parts(buf, size).to_vec());
+                break;
+            }
+        }
+        LLVMMoveToNextSection(iter);
+    }
+    LLVMDisposeSectionIterator(iter);
+    LLVMDisposeBinary(bin);
+    LLVMDisposeMemoryBuffer(buffer);
+
+    Ok(ret)
 }
 
 #[must_use]
