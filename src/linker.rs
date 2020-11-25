@@ -109,7 +109,6 @@ pub struct LinkerOptions {
     pub cpu: Cpu,
     pub cpu_features: String,
     pub bitcode: Vec<PathBuf>,
-    pub rlib: Vec<PathBuf>,
     pub output: PathBuf,
     pub output_type: OutputType,
     pub libs: Vec<PathBuf>,

@@ -69,9 +69,6 @@ struct CommandLine {
     #[structopt(long, value_name = "features", default_value = "")]
     cpu_features: String,
 
-    #[structopt(long, number_of_values = 1)]
-    rlib: Vec<PathBuf>,
-
     /// Write output to <output>
     #[structopt(short, long)]
     output: PathBuf,
@@ -118,10 +115,39 @@ struct CommandLine {
 
     /// Bitcode files
     bitcode: Vec<PathBuf>,
+
+    // The options below are for wasm-ld compatibility
+    /// Comma separated list of symbols to export. See also `--export-symbols`
+    #[structopt(long, value_name = "symbols", use_delimiter = true, multiple = true)]
+    export: Vec<String>,
+
+    #[structopt(short = "l", use_delimiter = true, multiple = true, hidden = true)]
+    lib: Option<String>,
+    #[structopt(long, hidden = true)]
+    debug: bool,
+    #[structopt(long, hidden = true)]
+    rsp_quoting: Option<String>,
+    #[structopt(long, hidden = true)]
+    flavor: Option<String>,
+    #[structopt(long, hidden = true)]
+    no_entry: bool,
+    #[structopt(long, hidden = true)]
+    gc_sections: bool,
+    #[structopt(long, hidden = true)]
+    strip_debug: bool,
+    #[structopt(long, hidden = true)]
+    strip_all: bool,
 }
 
 fn main() {
-    let cli = CommandLine::from_args();
+    let args = env::args().map(|arg| {
+        if arg == "-flavor" {
+            "--flavor".to_string()
+        } else {
+            arg
+        }
+    });
+    let cli = CommandLine::from_iter(args);
 
     if cli.bitcode.is_empty() {
         error("no input files", clap::ErrorKind::TooFewValues);
@@ -151,7 +177,6 @@ fn main() {
         cpu,
         cpu_features,
         bitcode,
-        rlib,
         output,
         emit,
         libs,
@@ -161,10 +186,11 @@ fn main() {
         ignore_inline_never,
         dump_module,
         llvm_args,
+        mut export,
         ..
     } = cli;
 
-    let export_symbols = export_symbols
+    let mut export_symbols = export_symbols
         .map(|path| match fs::read_to_string(path) {
             Ok(symbols) => symbols
                 .lines()
@@ -175,12 +201,12 @@ fn main() {
             }
         })
         .unwrap_or_else(HashSet::new);
+    export_symbols.extend(export.drain(..));
 
     let options = LinkerOptions {
         cpu,
         cpu_features,
         bitcode,
-        rlib,
         output,
         output_type: emit.0,
         libs,
