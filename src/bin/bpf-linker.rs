@@ -117,8 +117,8 @@ struct CommandLine {
     #[structopt(long, value_name = "args", use_delimiter = true, multiple = true)]
     llvm_args: Vec<String>,
 
-    /// Bitcode files
-    bitcode: Vec<PathBuf>,
+    /// Input files. Can be object files or static libraries
+    inputs: Vec<PathBuf>,
 
     // The options below are for wasm-ld compatibility
     /// Comma separated list of symbols to export. See also `--export-symbols`
@@ -153,7 +153,7 @@ fn main() {
     });
     let cli = CommandLine::from_iter(args);
 
-    if cli.bitcode.is_empty() {
+    if cli.inputs.is_empty() {
         error("no input files", clap::ErrorKind::TooFewValues);
     }
 
@@ -181,7 +181,7 @@ fn main() {
         target,
         cpu,
         cpu_features,
-        bitcode,
+        inputs,
         output,
         emit,
         libs,
@@ -212,7 +212,7 @@ fn main() {
         target,
         cpu,
         cpu_features,
-        bitcode,
+        inputs,
         output,
         output_type: emit.0,
         libs,

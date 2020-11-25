@@ -141,7 +141,7 @@ pub struct LinkerOptions {
     pub target: Option<String>,
     pub cpu: Cpu,
     pub cpu_features: String,
-    pub bitcode: Vec<PathBuf>,
+    pub inputs: Vec<PathBuf>,
     pub output: PathBuf,
     pub output_type: OutputType,
     pub libs: Vec<PathBuf>,
@@ -180,7 +180,7 @@ impl Linker {
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
         let mut buf = [0u8; 8];
-        for path in self.options.bitcode.clone() {
+        for path in self.options.inputs.clone() {
             let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
             file.read(&mut buf)
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
