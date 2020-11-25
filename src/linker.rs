@@ -8,14 +8,15 @@ use log::{debug, info};
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
+    fs::File,
     io,
+    io::Read,
+    io::Seek,
+    io::SeekFrom,
+    path::Path,
     path::PathBuf,
     ptr, str,
     str::FromStr,
-};
-use std::{
-    fs::{self, File},
-    io::Read,
 };
 use thiserror::Error;
 
@@ -32,11 +33,14 @@ pub enum LinkerError {
     #[error("`{0}`: {1}")]
     IoError(PathBuf, io::Error),
 
+    #[error("invalid input file `{0}`")]
+    InvalidInputType(PathBuf),
+
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
 
     #[error("failure linking module {1} from {0}")]
-    LinkRlibModuleError(PathBuf, PathBuf),
+    LinkArchiveModuleError(PathBuf, PathBuf),
 
     #[error("LLVMTargetMachineEmitToFile failed: {0}")]
     EmitCodeError(String),
@@ -96,6 +100,28 @@ pub enum OptLevel {
     SizeMin,    // -Oz
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum InputType {
+    Bitcode,
+    Elf,
+    Archive,
+}
+
+impl std::fmt::Display for InputType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use InputType::*;
+        write!(
+            f,
+            "{}",
+            match self {
+                Bitcode => "bitcode",
+                Elf => "elf",
+                Archive => "archive",
+            }
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum OutputType {
     Bitcode,
@@ -146,33 +172,42 @@ impl Linker {
     }
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
-        for module in &self.options.bitcode {
-            info!("linking module {:?}", module);
-            let data = fs::read(module).map_err(|e| LinkerError::IoError(module.clone(), e))?;
-            if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, data) } {
-                return Err(LinkerError::LinkModuleError(module.clone()));
-            }
-        }
+        let mut buf = [0u8; 8];
+        for path in self.options.bitcode.clone() {
+            let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
+            file.read(&mut buf)
+                .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+            file.seek(SeekFrom::Start(0))
+                .map_err(|e| LinkerError::IoError(path.clone(), e))?;
 
-        for rlib in &self.options.rlib {
-            info!("linking rlib {:?}", rlib);
-            let archive_reader =
-                File::open(rlib).map_err(|e| LinkerError::IoError(rlib.clone(), e))?;
-            let mut archive = Archive::new(archive_reader);
+            let in_type =
+                input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()));
 
-            while let Some(Ok(mut item)) = archive.next_entry() {
-                let name = PathBuf::from(str::from_utf8(item.header().identifier()).unwrap());
-                info!("linking rlib module {:?}", name);
+            match in_type? {
+                InputType::Archive => {
+                    info!("linking archive {:?}", path);
 
-                if name.extension().unwrap() == "o" {
-                    let mut bitcode_bytes = vec![];
-                    item.read_to_end(&mut bitcode_bytes)
-                        .map_err(|e| LinkerError::IoError(rlib.clone(), e))?;
-                    if unsafe {
-                        !llvm::link_bitcode_buffer(self.context, self.module, bitcode_bytes)
-                    } {
-                        return Err(LinkerError::LinkRlibModuleError(rlib.clone(), name));
+                    let mut archive = Archive::new(file);
+                    while let Some(Ok(item)) = archive.next_entry() {
+                        let name =
+                            PathBuf::from(str::from_utf8(item.header().identifier()).unwrap());
+                        info!("linking archive item {:?}", name);
+
+                        match self.link_reader(&name, item) {
+                            Ok(_) => continue,
+                            Err(LinkerError::InvalidInputType(_)) => {
+                                info!("ignoring archive item {:?}: unknown file type", name);
+                                continue;
+                            }
+                            Err(_) => {
+                                return Err(LinkerError::LinkArchiveModuleError(path.clone(), name))
+                            }
+                        };
                     }
+                }
+                ty => {
+                    info!("linking file {:?} type {}", path, ty);
+                    self.link_reader(&path, file)?;
                 }
             }
         }
@@ -180,6 +215,29 @@ impl Linker {
         if let Some(path) = &self.options.dump_module {
             let path = CString::new(path.as_os_str().to_str().unwrap()).unwrap();
             self.write_ir(&path)?;
+        }
+
+        Ok(())
+    }
+
+    fn link_reader(&mut self, path: &Path, mut reader: impl Read) -> Result<(), LinkerError> {
+        let mut data = Vec::new();
+        reader
+            .read_to_end(&mut data)
+            .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+        let in_type =
+            input_type(&data).ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
+
+        use InputType::*;
+        let bitcode = match in_type {
+            Bitcode => &data[..],
+            Elf => unimplemented!(),
+            // this can't really happen
+            Archive => panic!("nested archives not supported duh"),
+        };
+
+        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, bitcode) } {
+            return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 
         Ok(())
@@ -276,7 +334,7 @@ impl Linker {
             args.extend_from_slice(&self.options.llvm_args);
             info!("LLVM command line: {:?}", args);
             llvm::init(&args, "BPF linker");
-    
+
             self.context = LLVMContextCreate();
             LLVMContextSetDiagnosticHandler(
                 self.context,
@@ -305,6 +363,25 @@ impl Drop for Linker {
             }
             if !self.context.is_null() {
                 LLVMContextDispose(self.context);
+            }
+        }
+    }
+}
+
+fn input_type(data: &[u8]) -> Option<InputType> {
+    if data.len() < 8 {
+        return None;
+    }
+
+    use InputType::*;
+    match &data[..4] {
+        b"\x42\x43\xC0\xDE" => Some(Bitcode),
+        b"\x7FELF" => Some(Elf),
+        _ => {
+            if &data[..8] == b"!<arch>\x0A" {
+                Some(Archive)
+            } else {
+                None
             }
         }
     }

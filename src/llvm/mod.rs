@@ -59,7 +59,7 @@ pub unsafe fn create_module(name: &str, context: LLVMContextRef) -> Option<LLVMM
 pub unsafe fn link_bitcode_buffer(
     context: LLVMContextRef,
     module: LLVMModuleRef,
-    buffer: Vec<u8>,
+    buffer: &[u8],
 ) -> bool {
     let mut linked = false;
     let buffer_name = CString::new("mem_buffer").unwrap();
