@@ -132,6 +132,7 @@ pub enum OutputType {
 
 #[derive(Debug)]
 pub struct LinkerOptions {
+    pub target: Option<String>,
     pub cpu: Cpu,
     pub cpu_features: String,
     pub bitcode: Vec<PathBuf>,
@@ -245,10 +246,18 @@ impl Linker {
 
     fn create_target_machine(&mut self) -> Result<(), LinkerError> {
         unsafe {
-            let c_triple = LLVMGetTarget(self.module);
-            let triple = CStr::from_ptr(c_triple).to_string_lossy().to_string();
-            let target = llvm::target_from_module(self.module)
-                .map_err(|_msg| LinkerError::InvalidTarget(triple.clone()))?;
+            let (triple, target) = match self.options.target.clone() {
+                Some(triple) => (
+                    triple.clone(),
+                    llvm::target_from_triple(&CString::new(triple).unwrap()),
+                ),
+                None => {
+                    let c_triple = LLVMGetTarget(self.module);
+                    let triple = CStr::from_ptr(c_triple).to_string_lossy().to_string();
+                    (triple, llvm::target_from_module(self.module))
+                }
+            };
+            let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.clone()))?;
 
             debug!(
                 "creating target machine: triple: {} cpu: {} features: {}",

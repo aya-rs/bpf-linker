@@ -59,6 +59,10 @@ impl FromStr for CliOutputType {
 }
 #[derive(Debug, StructOpt)]
 struct CommandLine {
+    /// LLVM target triple. When not provided, the target is inferred from the inputs
+    #[structopt(long)]
+    target: Option<String>,
+
     /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`
     #[structopt(long, default_value = "generic")]
     cpu: Cpu,
@@ -174,6 +178,7 @@ fn main() {
     );
 
     let CommandLine {
+        target,
         cpu,
         cpu_features,
         bitcode,
@@ -204,6 +209,7 @@ fn main() {
     export_symbols.extend(export.drain(..));
 
     let options = LinkerOptions {
+        target,
         cpu,
         cpu_features,
         bitcode,
