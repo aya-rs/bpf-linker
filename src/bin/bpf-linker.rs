@@ -89,7 +89,7 @@ struct CommandLine {
     #[structopt(short = "O", default_value = "2", multiple = true)]
     optimize: CliOptLevel,
 
-    /// Export the symbols specified in the file `path`. The symbols are separated by new lines
+    /// Export the symbols specified in the file `path`. The symbols must be separated by new lines
     #[structopt(long, value_name = "path")]
     export_symbols: Option<PathBuf>,
 
