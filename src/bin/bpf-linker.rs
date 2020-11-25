@@ -66,7 +66,7 @@ struct CommandLine {
     /// Enable or disable CPU features. The available features are: alu32, dummy, dwarfris. Use
     /// +feature to enable a feature, or -feature to disable it.  For example
     /// --cpu-features=+alu32,-dwarfris
-    #[structopt(long, default_value = "")]
+    #[structopt(long, value_name = "features", default_value = "")]
     cpu_features: String,
 
     #[structopt(long, number_of_values = 1)]
@@ -88,25 +88,32 @@ struct CommandLine {
     #[structopt(short = "O", default_value = "2", multiple = true)]
     optimize: CliOptLevel,
 
-    #[structopt(long)]
+    /// Export the symbols specified in the file `path`. The symbols are separated by new lines
+    #[structopt(long, value_name = "path")]
     export_symbols: Option<PathBuf>,
 
-    #[structopt(long)]
+    /// Output logs to the given `path`
+    #[structopt(long, value_name = "path")]
     log_file: Option<PathBuf>,
 
-    #[structopt(long, default_value = "warn")]
+    /// Set the log level. Can be one of `off`, `info`, `warn`, `debug`, `trace`.
+    #[structopt(long, value_name = "level", default_value = "warn")]
     log_level: LevelFilter,
 
+    /// Try hard to unroll loops. Useful when targeting kernels that don't support loops
     #[structopt(long)]
     unroll_loops: bool,
 
+    /// Ignore `noinline`/`#[inline(never)]`. Useful when targeting kernels that don't support function calls
     #[structopt(long)]
     ignore_inline_never: bool,
 
-    #[structopt(long)]
+    /// Dump the final IR module to the given `path` before generating the code
+    #[structopt(long, value_name = "path")]
     dump_module: Option<PathBuf>,
 
-    #[structopt(long, use_delimiter = true, multiple = true)]
+    /// Extra command line arguments to pass to LLVM
+    #[structopt(long, value_name = "args", use_delimiter = true, multiple = true)]
     llvm_args: Vec<String>,
 
     /// Bitcode files
