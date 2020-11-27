@@ -87,7 +87,7 @@ struct CommandLine {
 
     /// Optimization level. 0-3, s, or z
     #[structopt(short = "O", default_value = "2", multiple = true)]
-    optimize: CliOptLevel,
+    optimize: Vec<CliOptLevel>,
 
     /// Export the symbols specified in the file `path`. The symbols must be separated by new lines
     #[structopt(long, value_name = "path")]
@@ -216,7 +216,7 @@ fn main() {
         output,
         output_type: emit.0,
         libs,
-        optimize: optimize.0,
+        optimize: optimize.last().unwrap().0,
         export_symbols,
         unroll_loops,
         ignore_inline_never,
