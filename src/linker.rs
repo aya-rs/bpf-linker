@@ -294,8 +294,8 @@ impl Linker {
 
     fn optimize(&mut self) -> Result<(), LinkerError> {
         debug!(
-            "linking exporting symbols {:?}",
-            self.options.export_symbols
+            "linking exporting symbols {:?}, opt level {:?}",
+            self.options.export_symbols, self.options.optimize
         );
         unsafe {
             llvm::optimize(
