@@ -15,8 +15,8 @@ simplelog = {version = "0.7.6", optional = true}
 thiserror = { version = "1.0", optional = true }
 ar = { version = "0.8", optional = true }
 log = { version = "0.4", optional = true }
-llvm-sys = { version = "80", optional = true }
-rustc-llvm-proxy = { version = "0.2", optional = true }
+llvm-sys = { version = "110", optional = true }
+rustc-llvm-proxy = { version = "0.2", optional = true, git = "https://github.com/alessandrod/rustc-llvm-proxy.git" }
 
 [dev-dependencies]
 compiletest_rs = { version = "*", git = "https://github.com/alessandrod/compiletest-rs" }
