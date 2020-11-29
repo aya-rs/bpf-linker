@@ -185,7 +185,7 @@ pub unsafe fn optimize(
 
     use OptLevel::*;
     let (inline_threshold, opt) = match opt_level {
-        No | SizeMin => (0, 0), // the linker doesn't support
+        No | SizeMin => (0, 1), // Pretty much nothing compiles with -O0 s∫o make it an alias for -O1
         Less => (25, 1),
         Default => (225, 2),
         Aggressive => (275, 3),
