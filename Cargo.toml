@@ -25,7 +25,6 @@ compiletest_rs = { version = "*", git = "https://github.com/alessandrod/compilet
 name = "bpf-linker"
 
 [features]
-llvm = ["llvm-sys"]
 llvm-proxy = [
     "rustc-llvm-proxy",
     "llvm-sys/no-llvm-linking",
@@ -33,4 +32,6 @@ llvm-proxy = [
 ]
 lib = ["thiserror", "ar", "log"]
 cli = ["structopt", "clap", "anyhow", "simplelog"]
-default = ["cli", "lib", "llvm-proxy"]
+system-llvm = ["cli", "lib", "llvm-sys"]
+rust-llvm = ["cli", "lib", "llvm-proxy"]
+default = ["system-llvm"]
