@@ -58,3 +58,13 @@ llvm_iterator!(
     LLVMGetFirstGlobal,
     LLVMGetNextGlobal
 );
+
+llvm_iterator!(
+    IterModuleGlobalAliases,
+    GlobalAliasessIter,
+    LLVMModuleRef,
+    global_aliases_iter,
+    LLVMValueRef,
+    LLVMGetFirstGlobalAlias,
+    LLVMGetNextGlobalAlias
+);

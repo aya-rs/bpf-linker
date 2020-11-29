@@ -25,7 +25,7 @@ use log::*;
 
 use self::message::Message;
 use crate::OptLevel;
-use iter::{IterModuleFunctions, IterModuleGlobals};
+use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 
 pub unsafe fn init<T: AsRef<str>>(args: &[T], overview: &str) {
     LLVMInitializeBPFTarget();
@@ -207,6 +207,9 @@ pub unsafe fn optimize(
     LLVMPassManagerBuilderPopulateModulePassManager(pmb, mpm);
 
     for sym in module.globals_iter() {
+        internalize(sym, &symbol_name(sym), export_symbols);
+    }
+    for sym in module.global_aliases_iter() {
         internalize(sym, &symbol_name(sym), export_symbols);
     }
 
