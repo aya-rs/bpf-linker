@@ -3,6 +3,8 @@
 bpf-linker aims to simplify building modern BPF programs while still supporting
 older, more restrictive kernels.
 
+![Build](https://github.com/alessandrod/bpf-linker/workflows/Build/badge.svg)
+
 # Overview
 
 bpf-linker can be used to statically link multiple BPF object files together
