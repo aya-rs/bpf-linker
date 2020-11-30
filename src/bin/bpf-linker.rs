@@ -2,7 +2,7 @@
 extern crate rustc_llvm_proxy;
 
 use log::*;
-use simplelog::{Config, LevelFilter, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger};
 use std::{collections::HashSet, env, fs::File, str::FromStr};
 use std::{fs, path::PathBuf};
 use structopt::StructOpt;
@@ -178,7 +178,9 @@ fn main() {
         };
         WriteLogger::init(log_level, Config::default(), log_file).unwrap();
     } else {
-        TermLogger::init(log_level, Config::default(), TerminalMode::Mixed).unwrap();
+        if let Err(_) = TermLogger::init(log_level, Config::default(), TerminalMode::Mixed) {
+            SimpleLogger::init(log_level, Config::default()).unwrap();
+        }
     }
 
     info!(
