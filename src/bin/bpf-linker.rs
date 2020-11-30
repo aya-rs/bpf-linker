@@ -96,8 +96,8 @@ struct CommandLine {
     log_file: Option<PathBuf>,
 
     /// Set the log level. Can be one of `off`, `info`, `warn`, `debug`, `trace`.
-    #[structopt(long, value_name = "level", default_value = "warn")]
-    log_level: LevelFilter,
+    #[structopt(long, value_name = "level")]
+    log_level: Option<LevelFilter>,
 
     /// Try hard to unroll loops. Useful when targeting kernels that don't support loops
     #[structopt(long)]
@@ -155,6 +155,17 @@ fn main() {
         error("no input files", clap::ErrorKind::TooFewValues);
     }
 
+    let env_log_level = match env::var("RUST_LOG") {
+        Ok(s) if !s.is_empty() => match s.parse::<LevelFilter>() {
+            Ok(l) => Some(l),
+            Err(e) => error(
+                &format!("invalid RUST_LOG value: {}", e),
+                clap::ErrorKind::InvalidValue,
+            ),
+        },
+        _ => None,
+    };
+    let log_level = cli.log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
     if let Some(path) = cli.log_file.clone() {
         let log_file = match File::create(path) {
             Ok(f) => f,
@@ -165,9 +176,9 @@ fn main() {
                 );
             }
         };
-        WriteLogger::init(cli.log_level, Config::default(), log_file).unwrap();
+        WriteLogger::init(log_level, Config::default(), log_file).unwrap();
     } else {
-        TermLogger::init(cli.log_level, Config::default(), TerminalMode::Mixed).unwrap();
+        TermLogger::init(log_level, Config::default(), TerminalMode::Mixed).unwrap();
     }
 
     info!(
