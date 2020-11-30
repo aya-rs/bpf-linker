@@ -8,7 +8,6 @@ edition = "2018"
 # cli deps
 structopt = { version = "0.3", optional = true }
 clap = { version = "2", optional = true }
-anyhow = { version = "1.0", optional = true }
 simplelog = {version = "0.7.6", optional = true}
 
 # lib deps
