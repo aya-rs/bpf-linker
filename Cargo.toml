@@ -31,7 +31,7 @@ llvm-proxy = [
     "llvm-sys/disable-alltargets-init"
 ]
 lib = ["thiserror", "ar", "log"]
-cli = ["structopt", "clap", "anyhow", "simplelog"]
+cli = ["structopt", "clap", "simplelog"]
 system-llvm = ["cli", "lib", "llvm-sys"]
 rust-llvm = ["cli", "lib", "llvm-proxy"]
 default = ["system-llvm"]

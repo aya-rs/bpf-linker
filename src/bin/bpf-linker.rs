@@ -1,20 +1,28 @@
 #[cfg(feature = "llvm-proxy")]
 extern crate rustc_llvm_proxy;
 
-use anyhow::anyhow;
 use log::*;
 use simplelog::{Config, LevelFilter, TermLogger, TerminalMode, WriteLogger};
 use std::{collections::HashSet, env, fs::File, str::FromStr};
 use std::{fs, path::PathBuf};
 use structopt::StructOpt;
+use thiserror::Error;
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+
+#[derive(Debug, Error)]
+enum CliError {
+    #[error("optimization level needs to be between 0-3, s or z (instead was `{0}`)")]
+    InvalidOptimization(String),
+    #[error("unknown emission type: `{0}` - expected one of: `llvm-bc`, `asm`, `llvm-ir`, `obj`")]
+    InvalidOutputType(String),
+}
 
 #[derive(Copy, Clone, Debug)]
 struct CliOptLevel(OptLevel);
 
 impl FromStr for CliOptLevel {
-    type Err = anyhow::Error;
+    type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use OptLevel::*;
@@ -25,12 +33,7 @@ impl FromStr for CliOptLevel {
             "3" => Aggressive,
             "s" => Size,
             "z" => SizeMin,
-            _ => {
-                return Err(anyhow!(
-                    "optimization level needs to be between 0-3, s or z (instead was `{}`)",
-                    s
-                ))
-            }
+            _ => return Err(CliError::InvalidOptimization(s.to_string())),
         }))
     }
 }
@@ -39,7 +42,7 @@ impl FromStr for CliOptLevel {
 struct CliOutputType(OutputType);
 
 impl FromStr for CliOutputType {
-    type Err = anyhow::Error;
+    type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use OutputType::*;
@@ -48,12 +51,7 @@ impl FromStr for CliOutputType {
             "asm" => Assembly,
             "llvm-ir" => LlvmAssembly,
             "obj" => Object,
-            _ => {
-                return Err(anyhow!(
-                "unknown emission type: `{}` - expected one of: `llvm-bc`, `asm`, `llvm-ir`, `obj`",
-                s
-            ))
-            }
+            _ => return Err(CliError::InvalidOutputType(s.to_string())),
         }))
     }
 }
