@@ -11,7 +11,7 @@ extern crate loop_panic_handler;
 #[no_mangle]
 fn foo(arg: &mut u64) {
     for i in 0..=200 {
-        *arg += i;
+        *arg += *arg + i;
         // CHECK: r{{[1-9]}} += 200
     }
 }
