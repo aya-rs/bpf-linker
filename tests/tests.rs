@@ -5,18 +5,17 @@ use std::{env, path::PathBuf};
 fn run_mode(mode: &'static str) {
     let mut config = compiletest::Config::default();
 
-    let cross = env::var("TESTS_HOST_TARGET")
+    let mut rustc_flags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
+    let host_target = env::var("TESTS_HOST_TARGET")
         .ok()
         .unwrap_or("0".to_string())
         == "1";
-    if !cross {
-        config.target = "bpfel-unknown-none".to_string();
+    if host_target {
+        rustc_flags += " -C linker-plugin-lto -C linker-flavor=wasm-ld -C panic=abort -C link-arg=--target=bpf";
     } else {
-        config.target_rustcflags = Some(format!(
-            "-C linker-plugin-lto -C linker-flavor=wasm-ld -C linker={} -C panic=abort -C link-arg=--target=bpf",
-            env!("CARGO_BIN_EXE_bpf-linker")
-        ));
+        config.target = "bpfel-unknown-none".to_string();
     }
+    config.target_rustcflags = Some(rustc_flags);
     config.llvm_filecheck = Some("FileCheck-11".into());
     config.mode = mode.parse().expect("Invalid mode");
     config.src_base = PathBuf::from(format!("tests/{}", mode));
