@@ -23,7 +23,12 @@ jobs:
         echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-11 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt-get update
         sudo apt-get install llvm-11-dev libclang-11-dev
+
     - name: Build linking to external LLVM
       run: cargo build --verbose
+
     - name: Build linking to rustc's LLVM
       run: cargo build --verbose --no-default-features --features rust-llvm
+
+    - name: Run tests (rustc target = HOST_TARGET, link target = BPF)
+      run: TESTS_HOST_TARGET=1 RUST_BACKTRACE=full cargo test --verbose
