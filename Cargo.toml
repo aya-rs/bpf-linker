@@ -24,7 +24,7 @@ llvm-sys = { version = "110", optional = true }
 rustc-llvm-proxy = { version = "0.2", optional = true, path = "third-party/rustc-llvm-proxy" }
 
 [dev-dependencies]
-compiletest_rs = { version = "*", path = "third-party/compiletest-rs" }
+compiletest_rs = { version = "0.5", path = "third-party/compiletest-rs" }
 
 [[bin]]
 name = "bpf-linker"
