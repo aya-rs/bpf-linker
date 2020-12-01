@@ -8,7 +8,7 @@ fn run_mode(mode: &'static str) {
     let mut rustc_flags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
     let host_target = env::var("TESTS_HOST_TARGET")
         .ok()
-        .unwrap_or("0".to_string())
+        .unwrap_or_else(|| "0".to_string())
         == "1";
     if host_target {
         rustc_flags += " -C linker-plugin-lto -C linker-flavor=wasm-ld -C panic=abort -C link-arg=--target=bpf";

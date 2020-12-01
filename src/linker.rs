@@ -211,7 +211,7 @@ impl Linker {
                                 continue;
                             }
                             Err(_) => {
-                                return Err(LinkerError::LinkArchiveModuleError(path.clone(), name))
+                                return Err(LinkerError::LinkArchiveModuleError(path, name))
                             }
                         };
                     }
@@ -335,14 +335,14 @@ impl Linker {
         info!("writing IR to {:?}", output);
 
         unsafe { llvm::write_ir(self.module, &output) }
-            .map_err(|msg| LinkerError::WriteIRError(msg))
+            .map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
         info!("emitting {:?} to {:?}", output_type, output);
 
         unsafe { llvm::codegen(self.target_machine, self.module, output, output_type) }
-            .map_err(|msg| LinkerError::EmitCodeError(msg))
+            .map_err(LinkerError::EmitCodeError)
     }
 
     fn llvm_init(&mut self) {

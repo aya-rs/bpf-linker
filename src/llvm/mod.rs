@@ -259,7 +259,7 @@ fn symbol_name(value: *mut llvm_sys::LLVMValue) -> String {
         .to_string()
 }
 
-unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) -> () {
+unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
     let attr = CString::new(name).unwrap();
     let attr_kind = LLVMGetEnumAttributeKindForName(attr.as_ptr(), name.len());
     LLVMRemoveEnumAttributeAtIndex(function, LLVMAttributeFunctionIndex, attr_kind);

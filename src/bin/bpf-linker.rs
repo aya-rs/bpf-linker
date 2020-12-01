@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 #[cfg(feature = "llvm-proxy")]
 extern crate rustc_llvm_proxy;
 
@@ -177,10 +179,8 @@ fn main() {
             }
         };
         WriteLogger::init(log_level, Config::default(), log_file).unwrap();
-    } else {
-        if let Err(_) = TermLogger::init(log_level, Config::default(), TerminalMode::Mixed) {
-            SimpleLogger::init(log_level, Config::default()).unwrap();
-        }
+    } else if TermLogger::init(log_level, Config::default(), TerminalMode::Mixed).is_err() {
+        SimpleLogger::init(log_level, Config::default()).unwrap();
     }
 
     info!(
