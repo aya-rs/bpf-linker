@@ -15,10 +15,10 @@ thiserror = { version = "1.0", optional = true }
 ar = { version = "0.8", optional = true }
 log = { version = "0.4", optional = true }
 llvm-sys = { version = "110", optional = true }
-rustc-llvm-proxy = { version = "0.2", optional = true, git = "https://github.com/alessandrod/rustc-llvm-proxy.git" }
+rustc-llvm-proxy = { version = "0.2", optional = true, path = "third-party/rustc-llvm-proxy" }
 
 [dev-dependencies]
-compiletest_rs = { version = "*", git = "https://github.com/alessandrod/compiletest-rs" }
+compiletest_rs = { version = "*", path = "third-party/compiletest-rs" }
 
 [[bin]]
 name = "bpf-linker"
