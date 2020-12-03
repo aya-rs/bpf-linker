@@ -186,11 +186,10 @@ impl Linker {
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
             file.seek(SeekFrom::Start(0))
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+            let in_type = detect_input_type(&buf)
+                .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
-            let in_type =
-                input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()));
-
-            match in_type? {
+            match in_type {
                 InputType::Archive => {
                     info!("linking archive {:?}", path);
 
@@ -200,7 +199,7 @@ impl Linker {
                             PathBuf::from(str::from_utf8(item.header().identifier()).unwrap());
                         info!("linking archive item {:?}", name);
 
-                        match self.link_reader(&name, item) {
+                        match self.link_reader(&name, item, None) {
                             Ok(_) => continue,
                             Err(LinkerError::InvalidInputType(_)) => {
                                 info!("ignoring archive item {:?}: unknown file type", name);
@@ -210,15 +209,13 @@ impl Linker {
                                 warn!("ignoring archive item {:?}: no embedded bitcode", name);
                                 continue;
                             }
-                            Err(_) => {
-                                return Err(LinkerError::LinkArchiveModuleError(path, name))
-                            }
+                            Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
                         };
                     }
                 }
                 ty => {
                     info!("linking file {:?} type {}", path, ty);
-                    self.link_reader(&path, file)?;
+                    self.link_reader(&path, file, Some(ty))?;
                 }
             }
         }
@@ -231,13 +228,20 @@ impl Linker {
         Ok(())
     }
 
-    fn link_reader(&mut self, path: &Path, mut reader: impl Read) -> Result<(), LinkerError> {
+    fn link_reader(
+        &mut self,
+        path: &Path,
+        mut reader: impl Read,
+        in_type: Option<InputType>,
+    ) -> Result<(), LinkerError> {
         let mut data = Vec::new();
         reader
             .read_to_end(&mut data)
             .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
-        let in_type =
-            input_type(&data).ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
+        // in_type is unknown when we're linking an item from an archive file
+        let in_type = in_type
+            .or_else(|| detect_input_type(&data))
+            .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
         use InputType::*;
         let bitcode = match in_type {
@@ -391,7 +395,7 @@ impl Drop for Linker {
     }
 }
 
-fn input_type(data: &[u8]) -> Option<InputType> {
+fn detect_input_type(data: &[u8]) -> Option<InputType> {
     if data.len() < 8 {
         return None;
     }
