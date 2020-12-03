@@ -25,7 +25,7 @@ If your distro doesn't have them you can get them from Fedora Rawhide.
 
 Once you have installed LLVM 11 you can install the linker running:
 ```
-cargo install --git https://github.com/alessandrod/bpf-linker --rev origin/main
+cargo install bpf-linker
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
