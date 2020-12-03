@@ -22,42 +22,55 @@ use thiserror::Error;
 
 use crate::llvm;
 
+/// Linker error
 #[derive(Debug, Error)]
 pub enum LinkerError {
+    /// Invalid Cpu.
     #[error("invalid CPU {0}")]
     InvalidCpu(String),
 
+    /// Invalid LLVM target.
     #[error("invalid LLVM target {0}")]
     InvalidTarget(String),
 
+    /// An IO Error occurred while linking a module.
     #[error("`{0}`: {1}")]
     IoError(PathBuf, io::Error),
 
+    /// The file is not bitcode, an object file containing bitcode or an archive file.
     #[error("invalid input file `{0}`")]
     InvalidInputType(PathBuf),
 
+    /// Linking a module failed.
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
 
+    /// Linking a module included in an archive failed.
     #[error("failure linking module {1} from {0}")]
     LinkArchiveModuleError(PathBuf, PathBuf),
 
+    /// Generating the BPF code failed.
     #[error("LLVMTargetMachineEmitToFile failed: {0}")]
     EmitCodeError(String),
 
+    /// Writing the bitcode failed.
     #[error("LLVMWriteBitcodeToFile failed")]
     WriteBitcodeError,
 
+    /// Writing the LLVM IR failed.
     #[error("LLVMPrintModuleToFile failed: {0}")]
     WriteIRError(String),
 
+    /// There was an error extracting the bitcode embedded in an object file.
     #[error("error reading embedded bitcode: {0}")]
     EmbeddedBitcodeError(String),
 
+    /// The input object file does not have embedded bitcode.
     #[error("no bitcode section found in {0}")]
     MissingBitcodeSection(PathBuf),
 }
 
+/// BPF Cpu type
 #[derive(Clone, Copy, Debug)]
 pub enum Cpu {
     Generic,
@@ -96,20 +109,31 @@ impl FromStr for Cpu {
     }
 }
 
+/// Optimization level
 #[derive(Clone, Copy, Debug)]
 pub enum OptLevel {
-    No,         // -O0
-    Less,       // -O1
-    Default,    // -O2
-    Aggressive, // -O3
-    Size,       // -Os
-    SizeMin,    // -Oz
+    /// No optimizations. Equivalent to -O0.
+    No,
+    /// Less than the default optimizations. Equivalent to -O1.
+    Less,
+    /// Default level of optimizations. Equivalent to -O2.
+    Default,
+    /// Aggressive optimizations. Equivalent to -O3.
+    Aggressive,
+    /// Optimize for size. Equivalent to -Os.
+    Size,
+    /// Aggressively optimize for size. Equivalent to -Oz.
+    SizeMin,
 }
 
+/// Linker input type
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum InputType {
+    /// LLVM bitcode.
     Bitcode,
+    /// ELF object file.
     Elf,
+    /// Archive file. (.a)
     Archive,
 }
 
@@ -128,31 +152,52 @@ impl std::fmt::Display for InputType {
     }
 }
 
+/// Output type
 #[derive(Clone, Copy, Debug)]
 pub enum OutputType {
+    /// LLVM bitcode.
     Bitcode,
+    /// Assembly.
     Assembly,
+    /// LLVM IR.
     LlvmAssembly,
+    /// ELF object file.
     Object,
 }
 
+/// Options to configure the linker
 #[derive(Debug)]
 pub struct LinkerOptions {
+    /// The LLVM target to generate code for. If None, the target will be inferred from the input
+    /// modules.
     pub target: Option<String>,
+    /// Cpu type.
     pub cpu: Cpu,
+    /// Cpu features.
     pub cpu_features: String,
+    /// Input files. Can be bitcode, object files with embedded bitcode or archive files.
     pub inputs: Vec<PathBuf>,
+    /// Where to save the output.
     pub output: PathBuf,
+    /// The format to output.
     pub output_type: OutputType,
     pub libs: Vec<PathBuf>,
+    /// Optimization level.
     pub optimize: OptLevel,
+    /// Set of symbol names to export.
     pub export_symbols: HashSet<String>,
+    /// Whether to aggressively unroll loops. Useful for older kernels that don't support loops.
     pub unroll_loops: bool,
+    /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
+    /// support function calls.
     pub ignore_inline_never: bool,
+    /// Write the linked module IR before generating code.
     pub dump_module: Option<PathBuf>,
+    /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<String>,
 }
 
+/// BPF Linker
 pub struct Linker {
     options: LinkerOptions,
     context: LLVMContextRef,
@@ -161,6 +206,7 @@ pub struct Linker {
 }
 
 impl Linker {
+    /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
         Linker {
             options,
@@ -170,6 +216,7 @@ impl Linker {
         }
     }
 
+    /// Link and generate the output code.
     pub fn link(mut self) -> Result<(), LinkerError> {
         self.llvm_init();
         self.link_modules()?;
@@ -179,9 +226,13 @@ impl Linker {
     }
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
+        // buffer used to perform file type detection
         let mut buf = [0u8; 8];
         for path in self.options.inputs.clone() {
             let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
+
+            // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
+            // or an invalid file
             file.read(&mut buf)
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
             file.seek(SeekFrom::Start(0))
@@ -193,6 +244,7 @@ impl Linker {
                 InputType::Archive => {
                     info!("linking archive {:?}", path);
 
+                    // uncompress the archive and call link_reader() for each item
                     let mut archive = Archive::new(file);
                     while let Some(Ok(item)) = archive.next_entry() {
                         let name =
@@ -221,6 +273,7 @@ impl Linker {
         }
 
         if let Some(path) = &self.options.dump_module {
+            // dump IR for the final linked module for debugging purposes
             let path = CString::new(path.as_os_str().to_str().unwrap()).unwrap();
             self.write_ir(&path)?;
         }
@@ -228,6 +281,7 @@ impl Linker {
         Ok(())
     }
 
+    // link in a `Read`-er, which can be a file or an archive item
     fn link_reader(
         &mut self,
         path: &Path,
@@ -264,6 +318,15 @@ impl Linker {
 
     fn create_target_machine(&mut self) -> Result<(), LinkerError> {
         unsafe {
+            // use the target set with --target or fallback to the target set in the input module.
+            // This is to support the following cases:
+            //
+            // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
+            //      the input modules are already configured for the correct target
+            //
+            // 2) rustc with no BPF support: cargo rustc -- -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
+            //      the input modules are configured for the *host* target, so there needs to be a
+            //      way to specify the BPF target
             let (triple, target) = match self.options.target.clone() {
                 Some(triple) => (
                     triple.clone(),
@@ -301,6 +364,8 @@ impl Linker {
             "linking exporting symbols {:?}, opt level {:?}",
             self.options.export_symbols, self.options.optimize
         );
+        // run optimizations. Will optionally remove noinline attributes, intern all non exported
+        // programs and maps and remove dead code.
         unsafe {
             llvm::optimize(
                 self.target_machine,
@@ -338,8 +403,7 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, &output) }
-            .map_err(LinkerError::WriteIRError)
+        unsafe { llvm::write_ir(self.module, &output) }.map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
@@ -353,6 +417,8 @@ impl Linker {
         unsafe {
             let mut args = vec!["bpf-linker".to_string()];
             if self.options.unroll_loops {
+                // setting cmdline arguments is the only way to customize the unroll pass with the
+                // C API.
                 args.push("--unroll-runtime".to_string());
                 args.push("--unroll-runtime-multi-exit".to_string());
                 args.push(format!("--unroll-max-upperbound={}", std::u32::MAX));
