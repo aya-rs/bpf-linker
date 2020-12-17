@@ -318,16 +318,21 @@ impl Linker {
 
     fn create_target_machine(&mut self) -> Result<(), LinkerError> {
         unsafe {
-            // use the target set with --target or fallback to the target set in the input module.
-            // This is to support the following cases:
+            // Here's how the output target is selected:
             //
             // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
-            //      the input modules are already configured for the correct target
+            //      the input modules are already configured for the correct output target
             //
-            // 2) rustc with no BPF support: cargo rustc -- -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
-            //      the input modules are configured for the *host* target, so there needs to be a
-            //      way to specify the BPF target
+            // 2) rustc with no BPF support: cargo rustc -- -C linker-flavor=wasm-ld -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
+            //      the input modules are configured for the *host* target, and the output target
+            //      is configured with the `--target` linker argument
+            //
+            // 3) rustc with no BPF support: cargo rustc -- -C linker-flavor=wasm-ld -C linker=bpf-linker
+            //      the input modules are configured for the *host* target, the output target isn't
+            //      set via `--target`, so default to `bpf` (bpfel or bpfeb depending on the host
+            //      endianness)
             let (triple, target) = match self.options.target.clone() {
+                // case 1
                 Some(triple) => (
                     triple.clone(),
                     llvm::target_from_triple(&CString::new(triple).unwrap()),
@@ -335,7 +340,17 @@ impl Linker {
                 None => {
                     let c_triple = LLVMGetTarget(self.module);
                     let triple = CStr::from_ptr(c_triple).to_string_lossy().to_string();
-                    (triple, llvm::target_from_module(self.module))
+                    if triple.starts_with("bpf") {
+                        // case 2
+                        (triple, llvm::target_from_module(self.module))
+                    } else {
+                        // case 3.
+                        info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
+                        (
+                            "bpf".to_string(),
+                            llvm::target_from_triple(&CString::new("bpf").unwrap()),
+                        )
+                    }
                 }
             };
             let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.clone()))?;
