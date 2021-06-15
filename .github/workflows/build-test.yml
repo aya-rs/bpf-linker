@@ -20,9 +20,9 @@ jobs:
     - name: Install LLVM
       run: |
         wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-11 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+        echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-12 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt-get update
-        sudo apt-get install llvm-11-dev libclang-11-dev
+        sudo apt-get install llvm-12-dev libclang-12-dev
 
     - name: Build linking to external LLVM
       run: cargo build --verbose
