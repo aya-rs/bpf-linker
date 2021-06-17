@@ -16,7 +16,7 @@ fn run_mode(mode: &'static str) {
         config.target = "bpfel-unknown-none".to_string();
     }
     config.target_rustcflags = Some(rustc_flags);
-    config.llvm_filecheck = Some("FileCheck-11".into());
+    config.llvm_filecheck = Some("FileCheck-12".into());
     config.mode = mode.parse().expect("Invalid mode");
     config.src_base = PathBuf::from(format!("tests/{}", mode));
     config.link_deps(); // Populate config.target_rustcflags with dependencies on the path

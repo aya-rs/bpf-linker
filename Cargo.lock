@@ -118,7 +118,7 @@ dependencies = [
  "ar",
  "clap",
  "compiletest_rs",
- "llvm-sys 120.0.0",
+ "llvm-sys",
  "log",
  "rustc-llvm-proxy",
  "simplelog",
@@ -355,19 +355,6 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "110.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0062a0c6635fb5d57c6ebba072dcae50e41651030363cf06d220b0d016840f2"
-dependencies = [
- "cc",
- "lazy_static",
- "libc",
- "regex",
- "semver 0.11.0",
-]
-
-[[package]]
-name = "llvm-sys"
 version = "120.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b883556196140c6b6e7a18b19236b9a699c8611aad2e48a0a6403cf1123945a"
@@ -570,7 +557,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "libloading",
- "llvm-sys 110.0.0",
+ "llvm-sys",
  "quote 0.6.13",
  "syn 0.15.44",
 ]

@@ -14,16 +14,16 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 # Installation
 
-The linker requires LLVM 11.
+The linker requires LLVM 12.
 
-On Debian based distributions you need to install the `llvm-11-dev` and
-`libclang-11-dev` packages. If your distro doesn't have them you can get them
+On Debian based distributions you need to install the `llvm-12-dev` and
+`libclang-12-dev` packages. If your distro doesn't have them you can get them
 from the official LLVM repo at https://apt.llvm.org.
 
 On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
 If your distro doesn't have them you can get them from Fedora Rawhide.
 
-Once you have installed LLVM 11 you can install the linker running:
+Once you have installed LLVM 12 you can install the linker running:
 ```
 cargo install bpf-linker
 ```
