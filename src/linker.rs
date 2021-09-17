@@ -195,6 +195,8 @@ pub struct LinkerOptions {
     pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<String>,
+    /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
+    pub disable_expand_memcpy_in_order: bool,
 }
 
 /// BPF Linker
@@ -438,6 +440,9 @@ impl Linker {
                 args.push("--unroll-runtime-multi-exit".to_string());
                 args.push(format!("--unroll-max-upperbound={}", std::u32::MAX));
                 args.push(format!("--unroll-threshold={}", std::u32::MAX));
+            }
+            if !self.options.disable_expand_memcpy_in_order {
+                args.push("--bpf-expand-memcpy-in-order".to_string());
             }
             args.extend_from_slice(&self.options.llvm_args);
             info!("LLVM command line: {:?}", args);

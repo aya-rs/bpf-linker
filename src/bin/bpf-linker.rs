@@ -117,6 +117,10 @@ struct CommandLine {
     #[structopt(long, value_name = "args", use_delimiter = true, multiple = true)]
     llvm_args: Vec<String>,
 
+    /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
+    #[structopt(long)]
+    disable_expand_memcpy_in_order: bool,
+
     /// Input files. Can be object files or static libraries
     inputs: Vec<PathBuf>,
 
@@ -202,6 +206,7 @@ fn main() {
         ignore_inline_never,
         dump_module,
         llvm_args,
+        disable_expand_memcpy_in_order,
         mut export,
         ..
     } = cli;
@@ -233,6 +238,7 @@ fn main() {
         ignore_inline_never,
         dump_module,
         llvm_args,
+        disable_expand_memcpy_in_order,
     };
 
     if let Err(e) = Linker::new(options).link() {
