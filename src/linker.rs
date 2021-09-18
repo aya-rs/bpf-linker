@@ -197,6 +197,10 @@ pub struct LinkerOptions {
     pub llvm_args: Vec<String>,
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
     pub disable_expand_memcpy_in_order: bool,
+    /// Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
+    /// those is commonly needed when LLVM does not manage to expand memory
+    /// intrinsics to a sequence of loads and stores.
+    pub disable_memory_builtins: bool,
 }
 
 /// BPF Linker
@@ -377,6 +381,13 @@ impl Linker {
     }
 
     fn optimize(&mut self) -> Result<(), LinkerError> {
+        if !self.options.disable_memory_builtins {
+            self.options.export_symbols.extend(
+                ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
+                    .iter()
+                    .map(|&s| s.to_owned()),
+            );
+        };
         debug!(
             "linking exporting symbols {:?}, opt level {:?}",
             self.options.export_symbols, self.options.optimize

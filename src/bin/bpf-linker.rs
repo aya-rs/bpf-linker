@@ -121,6 +121,12 @@ struct CommandLine {
     #[structopt(long)]
     disable_expand_memcpy_in_order: bool,
 
+    /// Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
+    /// those is commonly needed when LLVM does not manage to expand memory
+    /// intrinsics to a sequence of loads and stores.
+    #[structopt(long)]
+    disable_memory_builtins: bool,
+
     /// Input files. Can be object files or static libraries
     inputs: Vec<PathBuf>,
 
@@ -207,6 +213,7 @@ fn main() {
         dump_module,
         llvm_args,
         disable_expand_memcpy_in_order,
+        disable_memory_builtins,
         mut export,
         ..
     } = cli;
@@ -239,6 +246,7 @@ fn main() {
         dump_module,
         llvm_args,
         disable_expand_memcpy_in_order,
+        disable_memory_builtins,
     };
 
     if let Err(e) = Linker::new(options).link() {
