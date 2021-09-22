@@ -22,7 +22,7 @@ or it can use an external LLVM installation.
 All you need to do is run:
 
 ```sh
-cargo install bpf-linker --no-default-features --features rust-llvm
+cargo install --git https://github.com/aya-rs/bpf-linker  --tag v0.9.2 --no-default-features --features rust-llvm -- bpf-linker
 ```
 
 ### Using external LLVM
