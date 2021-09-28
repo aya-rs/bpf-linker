@@ -22,6 +22,8 @@ ar = { version = "0.8", optional = true }
 log = { version = "0.4", optional = true }
 llvm-sys = { version = "120", optional = true }
 aya-rustc-llvm-proxy = { version = "0.3.0", optional = true }
+object = { version = "0.28", features = ["write"], optional = true }
+memmap2 = { version = "0.5", optional = true }
 
 [dev-dependencies]
 compiletest_rs = { version = "0.5", path = "third-party/compiletest-rs" }
@@ -36,7 +38,7 @@ llvm-proxy = [
     "llvm-sys/no-llvm-linking",
     "llvm-sys/disable-alltargets-init"
 ]
-lib = ["thiserror", "ar", "log"]
+lib = ["thiserror", "ar", "log", "object", "memmap2" ]
 cli = ["structopt", "clap", "simplelog"]
 system-llvm = ["cli", "lib", "llvm-sys"]
 rust-llvm = ["cli", "lib", "llvm-proxy"]

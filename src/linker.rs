@@ -21,6 +21,8 @@ use std::{
 use thiserror::Error;
 
 use crate::llvm;
+use crate::objcopy::objcopy_strip_debug;
+use crate::objcopy::ObjCopyError;
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -68,6 +70,10 @@ pub enum LinkerError {
     /// The input object file does not have embedded bitcode.
     #[error("no bitcode section found in {0}")]
     MissingBitcodeSection(PathBuf),
+
+    /// Error copying to final output object
+    #[error(transparent)]
+    ObjCopyError(#[from] ObjCopyError),
 }
 
 /// BPF Cpu type
@@ -201,6 +207,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    // Include BTF in the final ELF file
+    pub btf: bool,
 }
 
 /// BPF Linker
@@ -209,16 +217,22 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
+    codegen_output: PathBuf,
 }
 
 impl Linker {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
+        let mut codegen_output = options.output.clone();
+        if options.btf {
+            codegen_output.set_extension(".codegen");
+        }
         Linker {
             options,
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
+            codegen_output,
         }
     }
 
@@ -228,7 +242,11 @@ impl Linker {
         self.link_modules()?;
         self.create_target_machine()?;
         self.optimize()?;
-        self.codegen()
+        self.codegen()?;
+        if self.options.btf {
+            self.strip_debug()?;
+        }
+        Ok(())
     }
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
@@ -399,6 +417,7 @@ impl Linker {
                 self.target_machine,
                 self.module,
                 self.options.optimize,
+                self.options.btf,
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
             )
@@ -408,7 +427,7 @@ impl Linker {
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
-        let output = CString::new(self.options.output.as_os_str().to_str().unwrap()).unwrap();
+        let output = CString::new(self.codegen_output.as_os_str().to_str().unwrap()).unwrap();
 
         match self.options.output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
@@ -416,6 +435,13 @@ impl Linker {
             OutputType::Assembly => self.emit(&output, LLVMCodeGenFileType::LLVMAssemblyFile),
             OutputType::Object => self.emit(&output, LLVMCodeGenFileType::LLVMObjectFile),
         }
+    }
+
+    fn strip_debug(&mut self) -> Result<(), LinkerError> {
+        objcopy_strip_debug(self.codegen_output.as_path(), self.options.output.as_path())
+            .map_err(LinkerError::ObjCopyError)?;
+
+        Ok(())
     }
 
     fn write_bitcode(&mut self, output: &CStr) -> Result<(), LinkerError> {

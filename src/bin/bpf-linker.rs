@@ -135,6 +135,10 @@ struct CommandLine {
     #[structopt(long, value_name = "symbols", use_delimiter = true, multiple = true)]
     export: Vec<String>,
 
+    // Strip debug symbols and do not emit BTF
+    #[structopt(long)]
+    btf: bool,
+
     #[structopt(short = "l", use_delimiter = true, multiple = true, hidden = true)]
     lib: Option<String>,
     #[structopt(long, hidden = true)]
@@ -147,8 +151,6 @@ struct CommandLine {
     no_entry: bool,
     #[structopt(long, hidden = true)]
     gc_sections: bool,
-    #[structopt(long, hidden = true)]
-    strip_debug: bool,
     #[structopt(long, hidden = true)]
     strip_all: bool,
 }
@@ -215,6 +217,7 @@ fn main() {
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
         mut export,
+        btf,
         ..
     } = cli;
 
@@ -247,6 +250,7 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
+        btf,
     };
 
     if let Err(e) = Linker::new(options).link() {

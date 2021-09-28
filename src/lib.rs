@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
-mod llvm;
 mod linker;
+mod llvm;
+mod objcopy;
 
 pub use linker::*;
