@@ -5,30 +5,87 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    - cron: '00 4 * * *'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+         - "1.54"
+         - "1.55"
+         - "beta"
+         - "nightly"
+        llvm: ["12", "13", "rustc"]
+    name: "rustc: ${{ matrix.rust }}, llvm: ${{ matrix.llvm }}"
 
+    env:
+      CARGO_ARGS: ${{ matrix.llvm == 'rustc' && '--no-default-features --features rust-llvm' || '' }}
+      RUST_BACKTRACE: full
+    
     steps:
-    - uses: actions/checkout@v2
-    - uses: Swatinem/rust-cache@v1
-    - name: Install LLVM
-      run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-12 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
-        sudo apt-get update
-        sudo apt-get install llvm-12-dev libclang-12-dev
+      - uses: actions/checkout@v2
 
-    - name: Build linking to external LLVM
-      run: cargo build --verbose
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust != 'nightly'
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
 
-    - name: Build linking to rustc's LLVM
-      run: cargo build --verbose --no-default-features --features rust-llvm
+      - uses: Swatinem/rust-cache@v1
+        if: matrix.rust != 'nightly'
 
-    - name: Run tests (rustc target = HOST_TARGET, link target = BPF)
-      run: TESTS_HOST_TARGET=1 RUST_BACKTRACE=full cargo test --verbose
+      - name: Checkout Rust Source
+        uses: actions/checkout@v2
+        if: matrix.rust == 'nightly'
+        with:
+          repository: rust-lang/rust
+          path: rust
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install rustup
+        if: matrix.rust == 'nightly'
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+      - name: Install Rust ${{ matrix.rust }} From Source
+        if: matrix.rust == 'nightly'
+        run: |
+          pushd rust
+          rm -rf build
+          echo -e 'profile = "user"\nchangelog-seen = 2\n\n[llvm]\ndownload-ci-llvm = true' > config.toml
+          ./x.py clean
+          ./x.py build -i --stage 2 --host x86_64-unknown-linux-gnu --target bpfel-unknown-none --target x86_64-unknown-linux-gnu library/std src/tools/rustdoc
+          rustup toolchain link stage2 build/x86_64-unknown-linux-gnu/stage2
+          popd
+          rustup override set stage2
+
+      - name: Install LLVM
+        if: matrix.llvm != 'rustc'
+        shell: bash
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-${{ matrix.llvm }} main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install llvm-${{ matrix.llvm }}-dev libclang-${{ matrix.llvm }}-dev
+
+      - name: Build
+        run: cargo build --verbose ${CARGO_ARGS}
+
+      - name: Test (rustc target = HOST_TARGET, link target = BPF)
+        env:
+          TESTS_HOST_TARGET: 1       
+        run: cargo test --verbose ${CARGO_ARGS}
+
+      - name: Tests (rustc target = BPF, link target = BPF)
+        if: matrix.rust == 'nightly'
+        env:
+          TESTS_HOST_TARGET: 0
+        run: cargo test --verbose ${CARGO_ARGS}
