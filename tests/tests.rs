@@ -1,5 +1,6 @@
 extern crate compiletest_rs as compiletest;
 
+use which::which;
 use std::{env, path::PathBuf};
 
 fn run_mode(mode: &'static str) {
@@ -16,7 +17,13 @@ fn run_mode(mode: &'static str) {
         config.target = "bpfel-unknown-none".to_string();
     }
     config.target_rustcflags = Some(rustc_flags);
-    config.llvm_filecheck = Some("FileCheck-12".into());
+    if let Ok(filecheck) = which("FileCheck") {
+        config.llvm_filecheck = Some(filecheck)
+    } else if let Ok(filecheck) = which("FileCheck-12") {
+        config.llvm_filecheck = Some(filecheck)
+    } else {
+        panic!("no FileCheck binary found");
+    };
     config.mode = mode.parse().expect("Invalid mode");
     config.src_base = PathBuf::from(format!("tests/{}", mode));
     config.link_deps(); // Populate config.target_rustcflags with dependencies on the path
