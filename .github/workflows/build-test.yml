@@ -2,11 +2,11 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   schedule:
-    - cron: '00 4 * * *'
+    - cron: "00 4 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,17 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         rust:
-         - "1.54"
-         - "1.55"
-         - "beta"
-         - "nightly"
+          - "1.55"
+          - "1.56"
+          - "beta"
+          - "nightly"
         llvm: ["12", "13", "rustc"]
     name: "rustc: ${{ matrix.rust }}, llvm: ${{ matrix.llvm }}"
 
     env:
       CARGO_ARGS: ${{ matrix.llvm == 'rustc' && '--no-default-features --features rust-llvm' || '' }}
       RUST_BACKTRACE: full
-    
+
     steps:
       - uses: actions/checkout@v2
 
@@ -81,7 +81,7 @@ jobs:
 
       - name: Test (rustc target = HOST_TARGET, link target = BPF)
         env:
-          TESTS_HOST_TARGET: 1       
+          TESTS_HOST_TARGET: 1
         run: cargo test --verbose ${CARGO_ARGS}
 
       - name: Tests (rustc target = BPF, link target = BPF)
