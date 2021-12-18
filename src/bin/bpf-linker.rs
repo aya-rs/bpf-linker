@@ -1,7 +1,7 @@
 #![deny(clippy::all)]
 
 #[cfg(feature = "llvm-proxy")]
-extern crate rustc_llvm_proxy;
+extern crate aya_rustc_llvm_proxy;
 
 use log::*;
 use simplelog::{Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger};
