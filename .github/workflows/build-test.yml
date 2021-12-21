@@ -26,7 +26,7 @@ jobs:
     name: "rustc: ${{ matrix.rust }}, llvm: ${{ matrix.llvm }}"
 
     env:
-      CARGO_ARGS: ${{ matrix.llvm == 'rustc' && '--no-default-features --features rust-llvm' || '' }}
+      CARGO_ARGS: ${{ matrix.llvm != 'rustc' && '--no-default-features --features system-llvm' || '' }}
       RUST_BACKTRACE: full
 
     steps:
