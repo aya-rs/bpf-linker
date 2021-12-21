@@ -62,10 +62,10 @@ jobs:
           rm -rf build
           echo -e 'profile = "user"\nchangelog-seen = 2\n\n[llvm]\ndownload-ci-llvm = true' > config.toml
           ./x.py clean
-          ./x.py build -i --stage 2 --host x86_64-unknown-linux-gnu --target bpfel-unknown-none --target x86_64-unknown-linux-gnu library/std src/tools/rustdoc
-          rustup toolchain link stage2 build/x86_64-unknown-linux-gnu/stage2
+          ./x.py build -i --stage 1 --host x86_64-unknown-linux-gnu --target bpfel-unknown-none --target x86_64-unknown-linux-gnu library/std src/tools/rustdoc
+          rustup toolchain link stage1 build/x86_64-unknown-linux-gnu/stage1
           popd
-          rustup override set stage2
+          rustup override set stage1
 
       - name: Install LLVM
         if: matrix.llvm != 'rustc'
