@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         rust:
-          - "1.55"
-          - "1.56"
+          - "1.58.1"
+          - "1.57"
           - "beta"
           - "nightly"
         llvm: ["12", "13", "rustc"]

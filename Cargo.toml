@@ -6,7 +6,7 @@ description = "BPF static linker"
 license = "MIT OR Apache-2.0"
 keywords = ["BPF", "eBPF", "linker", "llvm"]
 categories = ["development-tools", "command-line-utilities", "no-std", "os::linux-apis"]
-repository = "https://github.com/alessandrod/bpf-linker"
+repository = "https://github.com/aya-rs/bpf-linker"
 readme = "README.md"
 edition = "2018"
 

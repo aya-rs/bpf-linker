@@ -3,7 +3,7 @@
 bpf-linker aims to simplify building modern BPF programs while still supporting
 older, more restrictive kernels.
 
-[![Build](https://github.com/alessandrod/bpf-linker/workflows/Build/badge.svg)](https://github.com/alessandrod/bpf-linker/actions?query=workflow%3ABuild)
+[![Build](https://github.com/aya-rs/bpf-linker/workflows/Build/badge.svg)](https://github.com/aya-rs/bpf-linker/actions?query=workflow%3ABuild)
 
 ## Overview
 
