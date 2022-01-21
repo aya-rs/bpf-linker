@@ -137,6 +137,7 @@ dependencies = [
  "aya-rustc-llvm-proxy",
  "clap",
  "compiletest_rs",
+ "libc",
  "llvm-sys",
  "log",
  "simplelog",

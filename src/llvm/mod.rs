@@ -8,6 +8,7 @@ use std::{
     ptr, slice,
 };
 
+use libc::c_char as libc_char;
 use llvm_sys::bit_reader::*;
 use llvm_sys::core::*;
 use llvm_sys::debuginfo::LLVMStripModuleDebugInfo;
@@ -64,7 +65,7 @@ pub unsafe fn find_embedded_bitcode(
 ) -> Result<Option<Vec<u8>>, String> {
     let buffer_name = CString::new("mem_buffer").unwrap();
     let buffer = LLVMCreateMemoryBufferWithMemoryRange(
-        data.as_ptr() as *const i8,
+        data.as_ptr() as *const libc_char,
         data.len() as usize,
         buffer_name.as_ptr(),
         0,
@@ -107,7 +108,7 @@ pub unsafe fn link_bitcode_buffer(
     let mut linked = false;
     let buffer_name = CString::new("mem_buffer").unwrap();
     let buffer = LLVMCreateMemoryBufferWithMemoryRange(
-        buffer.as_ptr() as *const i8,
+        buffer.as_ptr() as *const libc_char,
         buffer.len() as usize,
         buffer_name.as_ptr(),
         0,

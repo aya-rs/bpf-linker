@@ -2,13 +2,14 @@ use std::ffi::CStr;
 use std::fmt;
 use std::ptr;
 
+use libc::c_char;
 use llvm_sys::core::LLVMDisposeMessage;
 
 /// Convinient LLVM Message pointer wrapper.
 /// Does not own the ptr, so we have to call `LLVMDisposeMessage` to free message memory.
 #[repr(C)]
 pub struct Message {
-    pub ptr: *mut i8,
+    pub ptr: *mut c_char,
 }
 
 impl Message {
@@ -22,7 +23,7 @@ impl Message {
         self.ptr.is_null()
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut *mut i8 {
+    pub fn as_mut_ptr(&mut self) -> *mut *mut c_char {
         &mut self.ptr
     }
 }
