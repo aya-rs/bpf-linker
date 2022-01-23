@@ -14,7 +14,7 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 ## Installation
 
-The linker requires LLVM 12. It can use the same LLVM used by the rust compiler,
+The linker requires LLVM 12 or later. It can use the same LLVM used by the rust compiler,
 or it can use an external LLVM installation.
 
 ### Using LLVM provided by rustc
@@ -34,10 +34,10 @@ from the official LLVM repo at https://apt.llvm.org.
 On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
 If your distro doesn't have them you can get them from Fedora Rawhide.
 
-Once you have installed LLVM 12 you can install the linker running:
+Once you have installed LLVM 12 or later you can install the linker running:
 
 ```sh
-cargo install --git https://github.com/aya-rs/bpf-linker  --tag v0.9.2 --no-default-features --features system-llvm -- bpf-linker
+cargo install --git https://github.com/aya-rs/bpf-linker  --tag v0.9.3 --no-default-features --features system-llvm -- bpf-linker
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
