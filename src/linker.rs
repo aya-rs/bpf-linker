@@ -201,6 +201,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    /// Remove debug symbols
+    pub strip_debug: bool,
 }
 
 /// BPF Linker
@@ -407,6 +409,7 @@ impl Linker {
                 self.options.optimize,
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
+                self.options.strip_debug,
             )
         };
 
