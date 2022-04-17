@@ -22,7 +22,7 @@ jobs:
           - "1.57"
           - "beta"
           - "nightly"
-        llvm: ["12", "13", "rustc"]
+        llvm: ["14", "rustc"]
     name: "rustc: ${{ matrix.rust }}, llvm: ${{ matrix.llvm }}"
 
     env:
