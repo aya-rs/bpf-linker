@@ -14,7 +14,7 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 ## Installation
 
-The linker requires LLVM 12. It can use the same LLVM used by the rust compiler,
+The linker requires LLVM 14. It can use the same LLVM used by the rust compiler,
 or it can use an external LLVM installation.
 
 ### Using LLVM provided by rustc
@@ -27,14 +27,14 @@ cargo install bpf-linker
 
 ### Using external LLVM
 
-On Debian based distributions you need to install the `llvm-12-dev` and
-`libclang-12-dev` packages. If your distro doesn't have them you can get them
+On Debian based distributions you need to install the `llvm-14-dev` and
+`libclang-14-dev` packages. If your distro doesn't have them you can get them
 from the official LLVM repo at https://apt.llvm.org.
 
 On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
 If your distro doesn't have them you can get them from Fedora Rawhide.
 
-Once you have installed LLVM 12 you can install the linker running:
+Once you have installed LLVM 14 you can install the linker running:
 
 ```sh
 cargo install --git https://github.com/aya-rs/bpf-linker  --tag v0.9.2 --no-default-features --features system-llvm -- bpf-linker
