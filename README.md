@@ -17,6 +17,9 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 The linker requires LLVM 14. It can use the same LLVM used by the rust compiler,
 or it can use an external LLVM installation.
 
+If your target is `aarch64-unknown-linux-gnu` (i.e. Linux on Apple Silicon) you 
+will have to use the *external LLVM* method.
+
 ### Using LLVM provided by rustc
 
 All you need to do is run:
