@@ -442,21 +442,21 @@ impl Linker {
     }
 
     fn llvm_init(&mut self) {
+        let mut args = vec!["bpf-linker".to_string()];
+        if self.options.unroll_loops {
+            // setting cmdline arguments is the only way to customize the unroll pass with the
+            // C API.
+            args.push("--unroll-runtime".to_string());
+            args.push("--unroll-runtime-multi-exit".to_string());
+            args.push(format!("--unroll-max-upperbound={}", std::u32::MAX));
+            args.push(format!("--unroll-threshold={}", std::u32::MAX));
+        }
+        if !self.options.disable_expand_memcpy_in_order {
+            args.push("--bpf-expand-memcpy-in-order".to_string());
+        }
+        args.extend_from_slice(&self.options.llvm_args);
+        info!("LLVM command line: {:?}", args);
         unsafe {
-            let mut args = vec!["bpf-linker".to_string()];
-            if self.options.unroll_loops {
-                // setting cmdline arguments is the only way to customize the unroll pass with the
-                // C API.
-                args.push("--unroll-runtime".to_string());
-                args.push("--unroll-runtime-multi-exit".to_string());
-                args.push(format!("--unroll-max-upperbound={}", std::u32::MAX));
-                args.push(format!("--unroll-threshold={}", std::u32::MAX));
-            }
-            if !self.options.disable_expand_memcpy_in_order {
-                args.push("--bpf-expand-memcpy-in-order".to_string());
-            }
-            args.extend_from_slice(&self.options.llvm_args);
-            info!("LLVM command line: {:?}", args);
             llvm::init(&args, "BPF linker");
 
             self.context = LLVMContextCreate();

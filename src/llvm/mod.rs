@@ -305,18 +305,18 @@ pub unsafe fn internalize(value: LLVMValueRef, name: &str, export_symbols: &Hash
 }
 
 pub extern "C" fn diagnostic_handler(info: LLVMDiagnosticInfoRef, _data: *mut c_void) {
-    unsafe {
-        let message = CStr::from_ptr(LLVMGetDiagInfoDescription(info));
+    
+        let message = unsafe { CStr::from_ptr(LLVMGetDiagInfoDescription(info)) };
         let message_s = message.to_str().unwrap();
 
         use llvm_sys::LLVMDiagnosticSeverity::*;
-        match LLVMGetDiagInfoSeverity(info) {
+        match unsafe { LLVMGetDiagInfoSeverity(info) }{
             LLVMDSError => error!("llvm: {}", message_s),
             LLVMDSWarning => warn!("llvm: {}", message_s),
             LLVMDSRemark => debug!("remark: {}", message_s),
             LLVMDSNote => debug!("note: {}", message_s),
         };
-    }
+    
 }
 
 pub extern "C" fn fatal_error(reason: *const c_char) {
