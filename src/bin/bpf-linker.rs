@@ -127,6 +127,9 @@ struct CommandLine {
     #[structopt(long)]
     disable_memory_builtins: bool,
 
+    #[structopt(long)]
+    keep_btf: bool,
+
     /// Input files. Can be object files or static libraries
     inputs: Vec<PathBuf>,
 
@@ -136,20 +139,28 @@ struct CommandLine {
     export: Vec<String>,
 
     #[structopt(short = "l", use_delimiter = true, multiple = true, hidden = true)]
+    #[allow(dead_code)]
     lib: Option<String>,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     debug: bool,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     rsp_quoting: Option<String>,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     flavor: Option<String>,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     no_entry: bool,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     gc_sections: bool,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     strip_debug: bool,
     #[structopt(long, hidden = true)]
+    #[allow(dead_code)]
     strip_all: bool,
 }
 
@@ -214,6 +225,7 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
+        keep_btf,
         mut export,
         ..
     } = cli;
@@ -247,6 +259,7 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
+        keep_btf,
     };
 
     if let Err(e) = Linker::new(options).link() {

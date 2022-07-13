@@ -201,6 +201,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    /// Don't call `LLVMStripModuleDebugInfo`
+    pub keep_btf: bool,
 }
 
 /// BPF Linker
@@ -401,6 +403,7 @@ impl Linker {
                 self.options.optimize,
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
+                self.options.keep_btf,
             )
         };
 
