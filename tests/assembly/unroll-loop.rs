@@ -1,7 +1,7 @@
+// ignore-test
 // assembly-output: bpf-linker
 // compile-flags: --crate-type cdylib -C link-arg=--unroll-loops -C link-arg=-O3
 #![no_std]
-
 // Recent kernels starting from 5.2 support some bounded loops. Older kernels need all loops to be
 // unrolled. The linker provides the --unroll-loops flag to aggressively try and unroll.
 
