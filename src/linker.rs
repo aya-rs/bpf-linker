@@ -273,7 +273,13 @@ impl Linker {
                 }
                 ty => {
                     info!("linking file {:?} type {}", path, ty);
-                    self.link_reader(&path, file, Some(ty))?;
+                    match self.link_reader(&path, file, Some(ty)) {
+                        Ok(_) => {}
+                        Err(LinkerError::MissingBitcodeSection(_)) => {
+                            warn!("ignoring file {:?}: no embedded bitcode", path);
+                        }
+                        err => return err,
+                    }
                 }
             }
         }
