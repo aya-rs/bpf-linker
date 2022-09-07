@@ -66,9 +66,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "aya-rustc-llvm-proxy"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99548f0ec5686941d0d73afa55124ead8a540a441b10ee1874c939223e178b9e"
+checksum = "5d58419a0d794d532083678fef4720ef2e10b84c7f8367af07a553f2d6d9cca5"
 dependencies = [
  "cargo_metadata",
  "failure",
@@ -336,9 +336,9 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "140.0.2"
+version = "150.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a4ad24a72823cb06764e04a008d4aedc1be56d2be87aa4212b12a3e9f77bb10"
+checksum = "d457b48805f7421b527d1539ada8d739adaec97ab9346a38446a31c7e48c5ee7"
 dependencies = [
  "cc",
  "lazy_static",
