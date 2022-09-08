@@ -62,7 +62,7 @@ jobs:
           rm -rf build
           echo -e 'profile = "user"\nchangelog-seen = 2\n\n[llvm]\ndownload-ci-llvm = true' > config.toml
           ./x.py clean
-          ./x.py build -i --stage 1 --host x86_64-unknown-linux-gnu --target bpfel-unknown-none --target x86_64-unknown-linux-gnu library/std src/tools/rustdoc
+          ./x.py build -i --stage 1 --host x86_64-unknown-linux-gnu --target bpfel-unknown-none --target x86_64-unknown-linux-gnu library src/tools/rustdoc
           rustup toolchain link stage1 build/x86_64-unknown-linux-gnu/stage1
           popd
           rustup override set stage1
