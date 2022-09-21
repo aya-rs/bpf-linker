@@ -135,7 +135,13 @@ struct CommandLine {
     #[clap(long, value_name = "symbols", use_delimiter = true, multiple = true)]
     export: Vec<String>,
 
-    #[clap(short = 'l', long = "lib", use_delimiter = true, multiple = true, hidden = true)]
+    #[clap(
+        short = 'l',
+        long = "lib",
+        use_delimiter = true,
+        multiple = true,
+        hidden = true
+    )]
     _lib: Option<String>,
     #[clap(long = "debug", hidden = true)]
     _debug: bool,

@@ -35,7 +35,7 @@ pub unsafe fn init<T: AsRef<str>>(args: &[T], overview: &str) {
     LLVMInitializeBPFAsmPrinter();
     LLVMInitializeBPFDisassembler();
 
-    parse_command_line_options(&args, overview);
+    parse_command_line_options(args, overview);
 }
 
 unsafe fn parse_command_line_options<T: AsRef<str>>(args: &[T], overview: &str) {
@@ -138,7 +138,7 @@ pub unsafe fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String>
 
 pub unsafe fn target_from_module(module: LLVMModuleRef) -> Result<LLVMTargetRef, String> {
     let triple = LLVMGetTarget(module);
-    target_from_triple(&CStr::from_ptr(triple))
+    target_from_triple(CStr::from_ptr(triple))
 }
 
 pub unsafe fn create_target_machine(
