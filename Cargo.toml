@@ -8,7 +8,7 @@ keywords = ["BPF", "eBPF", "linker", "llvm"]
 categories = ["development-tools", "command-line-utilities", "no-std", "os::linux-apis"]
 repository = "https://github.com/aya-rs/bpf-linker"
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 # cli deps
