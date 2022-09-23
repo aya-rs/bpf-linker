@@ -45,11 +45,11 @@ cargo install --git https://github.com/aya-rs/bpf-linker  --tag v0.9.5 --no-defa
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
 
-# Usage
+## Usage
 
-## Rust
+### Rust
 
-### Nightly
+#### Nightly
 
 To compile your eBPF crate just run:
 
@@ -68,8 +68,7 @@ target = "bpfel-unknown-none"
 build-std = ["core"]
 ```
 
-### Stable (not recommended)
-
+#### Stable (not recommended)
 
 If for whatever reason you can't use rust nightly to build your project, you can
 still compile your eBPF crate with:
@@ -86,7 +85,7 @@ $ file target/release/libbpf_log_clone.so
 target/release/libbpf_log_clone.so: ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
 ```
 
-# Clang
+## Clang
 
 For a simple example of how to use the linker with clang see [this
 gist](https://gist.github.com/alessandrod/ed6f11ba41bcd8a19d8655e57a00350b). In
@@ -98,7 +97,7 @@ The
 [Makefile](https://gist.github.com/alessandrod/ed6f11ba41bcd8a19d8655e57a00350b#file-makefile)
 shows how to compile the C code and then link it.
 
-# Usage
+### Usage
 
 ```
 bpf-linker
@@ -139,6 +138,49 @@ OPTIONS:
 
 ARGS:
     <inputs>...    Input files. Can be object files or static libraries
+```
+
+## Development
+
+### Debugging bpf-linker issues
+
+The process for debugging BPF linker issues is as follows:
+
+1. Find a case that reproduces using `bpf-linker`, which can be sometimes be obtained from the output of `cargo xtask build-ebpf`. With this method you may also need to create some of the directories used in the arguments.
+1. Build LLVM from source as described [here](https://llvm.org/docs/GettingStarted.html). You will need to use the following flags: `cmake -S llvm -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DLLVM_PARALLEL_LINK_JOBS=6 -DLLVM_BUILD_LLVM_DYLIB=true`. Link jobs can use around 16GB RAM per core so you should adjust that number for your environment.
+1. Install LLVM using `sudo cmake --build build --target install`
+1. In `bpf-linker`, `cargo clean -p llvm-sys` first to ensure that you'll link against your newly built LLVM
+1. `cargo build --no-default-features --features system-llvm -p bpf-linker`
+
+#### Attaching the debugger in vscode
+
+Assuming you have the CodeLLDB extension installed, you can add the following to `.vscode/launch.json`:
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug bpf-linker'",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/target/debug/bpf-linker",
+            "args": [
+                "--export-symbols",
+                "/tmp/rustcRb1DOx/symbols",
+                "/home/dave/dev/rh-next/target/bpfel-unknown-none/release/deps/rh_next-53bd6e44bb1b7225.rh_next.c2c50e3e-cgu.0.rcgu.o",
+                "-L", "/home/dave/dev/rh-next/target/bpfel-unknown-none/release/deps",
+                "-L", "/home/dave/dev/rh-next/target/release/deps",
+                "-L", "/home/dave/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/bpfel-unknown-none/lib",
+                "--cpu", "generic",  "--cpu-features",
+                "-L", "/home/dave/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/bpfel-unknown-none/lib",
+                "-o", "/home/dave/dev/rh-next/rh-next-ebpf/../target/bpfel-unknown-none/release/deps/rh_next-53bd6e44bb1b7225",
+                "-O3", "--debug"
+            ]
+        },
+    ]
+}
 ```
 
 ## License
