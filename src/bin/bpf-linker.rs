@@ -135,20 +135,28 @@ struct CommandLine {
     #[structopt(long, value_name = "symbols", use_delimiter = true, multiple = true)]
     export: Vec<String>,
 
+    #[allow(dead_code)]
     #[structopt(short = "l", use_delimiter = true, multiple = true, hidden = true)]
     lib: Option<String>,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     debug: bool,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     rsp_quoting: Option<String>,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     flavor: Option<String>,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     no_entry: bool,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     gc_sections: bool,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     strip_debug: bool,
+    #[allow(dead_code)]
     #[structopt(long, hidden = true)]
     strip_all: bool,
 }

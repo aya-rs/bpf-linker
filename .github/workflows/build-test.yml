@@ -37,6 +37,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
+          components: clippy
 
       - uses: Swatinem/rust-cache@v1
         if: matrix.rust != 'nightly'
@@ -77,6 +78,10 @@ jobs:
 
       - name: Build
         run: cargo build --verbose ${CARGO_ARGS}
+
+      - name: Lint
+        if: matrix.rust != 'nightly'
+        run: cargo clippy --verbose ${CARGO_ARGS} -- --deny warnings
 
       - name: Test (rustc target = HOST_TARGET, link target = BPF)
         env:
