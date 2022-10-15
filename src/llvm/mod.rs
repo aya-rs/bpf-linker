@@ -1,4 +1,7 @@
+mod di;
 mod iter;
+
+pub use di::DIFix;
 
 use std::{
     borrow::Cow,
