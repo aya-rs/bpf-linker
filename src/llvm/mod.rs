@@ -1,3 +1,4 @@
+mod di;
 mod iter;
 
 use std::{
@@ -8,6 +9,7 @@ use std::{
     ptr, slice,
 };
 
+pub use di::DIFix;
 use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 use libc::c_char as libc_char;
 use llvm_sys::{

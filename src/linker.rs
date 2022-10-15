@@ -447,7 +447,10 @@ impl Linker {
         );
         // run optimizations. Will optionally remove noinline attributes, intern all non exported
         // programs and maps and remove dead code.
+
         unsafe {
+            llvm::DIFix::new(self.context, self.module).run();
+
             llvm::optimize(
                 self.target_machine,
                 self.module,
