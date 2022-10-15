@@ -81,3 +81,36 @@ llvm_iterator! {
     LLVMGetLastFunction,
     LLVMGetNextFunction,
 }
+
+llvm_iterator!(
+    IterBasicBlocks,
+    BasicBlockIter,
+    LLVMValueRef,
+    basic_blocks_iter,
+    LLVMBasicBlockRef,
+    LLVMGetFirstBasicBlock,
+    LLVMGetLastBasicBlock,
+    LLVMGetNextBasicBlock
+);
+
+llvm_iterator!(
+    IterInstructions,
+    InstructionsIter,
+    LLVMBasicBlockRef,
+    instructions_iter,
+    LLVMValueRef,
+    LLVMGetFirstInstruction,
+    LLVMGetLastInstruction,
+    LLVMGetNextInstruction
+);
+
+llvm_iterator!(
+    IterModuleNamedMDNode,
+    NamedMDNodeIter,
+    LLVMModuleRef,
+    named_metadata_iter,
+    LLVMNamedMDNodeRef,
+    LLVMGetFirstNamedMetadata,
+    LLVMGetLastNamedMetadata,
+    LLVMGetNextNamedMetadata
+);
