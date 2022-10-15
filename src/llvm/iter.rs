@@ -2,11 +2,13 @@ use std::marker::PhantomData;
 
 use llvm_sys::{
     core::{
-        LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias, LLVMGetLastFunction,
-        LLVMGetLastGlobal, LLVMGetLastGlobalAlias, LLVMGetNextFunction, LLVMGetNextGlobal,
-        LLVMGetNextGlobalAlias,
+        LLVMGetFirstBasicBlock, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias,
+        LLVMGetFirstInstruction, LLVMGetFirstNamedMetadata, LLVMGetLastBasicBlock,
+        LLVMGetLastFunction, LLVMGetLastGlobal, LLVMGetLastGlobalAlias, LLVMGetLastInstruction,
+        LLVMGetLastNamedMetadata, LLVMGetNextBasicBlock, LLVMGetNextFunction, LLVMGetNextGlobal,
+        LLVMGetNextGlobalAlias, LLVMGetNextInstruction, LLVMGetNextNamedMetadata,
     },
-    prelude::{LLVMModuleRef, LLVMValueRef},
+    prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMNamedMDNodeRef, LLVMValueRef},
 };
 
 macro_rules! llvm_iterator {
@@ -88,3 +90,36 @@ llvm_iterator! {
     LLVMGetLastFunction,
     LLVMGetNextFunction,
 }
+
+llvm_iterator!(
+    IterBasicBlocks,
+    BasicBlockIter,
+    LLVMValueRef,
+    basic_blocks_iter,
+    LLVMBasicBlockRef,
+    LLVMGetFirstBasicBlock,
+    LLVMGetLastBasicBlock,
+    LLVMGetNextBasicBlock
+);
+
+llvm_iterator!(
+    IterInstructions,
+    InstructionsIter,
+    LLVMBasicBlockRef,
+    instructions_iter,
+    LLVMValueRef,
+    LLVMGetFirstInstruction,
+    LLVMGetLastInstruction,
+    LLVMGetNextInstruction
+);
+
+llvm_iterator!(
+    IterModuleNamedMDNode,
+    NamedMDNodeIter,
+    LLVMModuleRef,
+    named_metadata_iter,
+    LLVMNamedMDNodeRef,
+    LLVMGetFirstNamedMetadata,
+    LLVMGetLastNamedMetadata,
+    LLVMGetNextNamedMetadata
+);
