@@ -13,6 +13,7 @@ use std::{
     io,
     io::Read,
     io::Seek,
+    os::unix::ffi::OsStrExt as _,
     path::Path,
     path::PathBuf,
     ptr, str,
@@ -204,7 +205,7 @@ pub struct LinkerOptions {
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
     /// support function calls.
     pub ignore_inline_never: bool,
-    /// Write the linked module IR before generating code.
+    /// Write the linked module IR before and after optimization.
     pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<String>,
@@ -242,7 +243,22 @@ impl Linker {
         self.llvm_init();
         self.link_modules()?;
         self.create_target_machine()?;
+        if let Some(path) = &self.options.dump_module {
+            std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
+        }
+        if let Some(path) = &self.options.dump_module {
+            // dump IR before optimization
+            let path = path.join("pre-opt.ll");
+            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            self.write_ir(&path)?;
+        };
         self.optimize()?;
+        if let Some(path) = &self.options.dump_module {
+            // dump IR before optimization
+            let path = path.join("post-opt.ll");
+            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            self.write_ir(&path)?;
+        };
         self.codegen()?;
         Ok(())
     }
@@ -306,12 +322,6 @@ impl Linker {
                     }
                 }
             }
-        }
-
-        if let Some(path) = &self.options.dump_module {
-            // dump IR for the final linked module for debugging purposes
-            let path = CString::new(path.as_os_str().to_str().unwrap()).unwrap();
-            self.write_ir(&path)?;
         }
 
         Ok(())
@@ -447,7 +457,6 @@ impl Linker {
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
         let output = CString::new(self.options.output.as_os_str().to_str().unwrap()).unwrap();
-
         match self.options.output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
             OutputType::LlvmAssembly => self.write_ir(&output),
