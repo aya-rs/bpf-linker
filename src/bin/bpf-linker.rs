@@ -3,11 +3,11 @@
 #[cfg(feature = "llvm-proxy")]
 extern crate aya_rustc_llvm_proxy;
 
+use clap::Parser;
 use log::*;
 use simplelog::{Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger};
 use std::{collections::HashSet, env, fs::File, str::FromStr};
 use std::{fs, path::PathBuf};
-use structopt::StructOpt;
 use thiserror::Error;
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
@@ -57,74 +57,74 @@ impl FromStr for CliOutputType {
         }))
     }
 }
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct CommandLine {
     /// LLVM target triple. When not provided, the target is inferred from the inputs
-    #[structopt(long)]
+    #[clap(long)]
     target: Option<String>,
 
     /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`
-    #[structopt(long, default_value = "generic")]
+    #[clap(long, default_value = "generic")]
     cpu: Cpu,
 
     /// Enable or disable CPU features. The available features are: alu32, dummy, dwarfris. Use
     /// +feature to enable a feature, or -feature to disable it.  For example
     /// --cpu-features=+alu32,-dwarfris
-    #[structopt(long, value_name = "features", default_value = "")]
+    #[clap(long, value_name = "features", default_value = "")]
     cpu_features: String,
 
     /// Write output to <output>
-    #[structopt(short, long)]
+    #[clap(short, long)]
     output: PathBuf,
 
     /// Output type. Can be one of `llvm-bc`, `asm`, `llvm-ir`, `obj`
-    #[structopt(long, default_value = "obj")]
+    #[clap(long, default_value = "obj")]
     emit: CliOutputType,
 
     /// Add a directory to the library search path
-    #[structopt(short = "L", number_of_values = 1)]
+    #[clap(short = 'L', number_of_values = 1)]
     libs: Vec<PathBuf>,
 
     /// Optimization level. 0-3, s, or z
-    #[structopt(short = "O", default_value = "2", multiple = true)]
+    #[clap(short = 'O', default_value = "2", multiple = true)]
     optimize: Vec<CliOptLevel>,
 
     /// Export the symbols specified in the file `path`. The symbols must be separated by new lines
-    #[structopt(long, value_name = "path")]
+    #[clap(long, value_name = "path")]
     export_symbols: Option<PathBuf>,
 
     /// Output logs to the given `path`
-    #[structopt(long, value_name = "path")]
+    #[clap(long, value_name = "path")]
     log_file: Option<PathBuf>,
 
     /// Set the log level. Can be one of `off`, `info`, `warn`, `debug`, `trace`.
-    #[structopt(long, value_name = "level")]
+    #[clap(long, value_name = "level")]
     log_level: Option<LevelFilter>,
 
     /// Try hard to unroll loops. Useful when targeting kernels that don't support loops
-    #[structopt(long)]
+    #[clap(long)]
     unroll_loops: bool,
 
     /// Ignore `noinline`/`#[inline(never)]`. Useful when targeting kernels that don't support function calls
-    #[structopt(long)]
+    #[clap(long)]
     ignore_inline_never: bool,
 
     /// Dump the final IR module to the given `path` before generating the code
-    #[structopt(long, value_name = "path")]
+    #[clap(long, value_name = "path")]
     dump_module: Option<PathBuf>,
 
     /// Extra command line arguments to pass to LLVM
-    #[structopt(long, value_name = "args", use_delimiter = true, multiple = true)]
+    #[clap(long, value_name = "args", use_delimiter = true, multiple = true)]
     llvm_args: Vec<String>,
 
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
-    #[structopt(long)]
+    #[clap(long)]
     disable_expand_memcpy_in_order: bool,
 
     /// Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
-    #[structopt(long)]
+    #[clap(long)]
     disable_memory_builtins: bool,
 
     /// Input files. Can be object files or static libraries
@@ -132,25 +132,31 @@ struct CommandLine {
 
     // The options below are for wasm-ld compatibility
     /// Comma separated list of symbols to export. See also `--export-symbols`
-    #[structopt(long, value_name = "symbols", use_delimiter = true, multiple = true)]
+    #[clap(long, value_name = "symbols", use_delimiter = true, multiple = true)]
     export: Vec<String>,
 
-    #[structopt(short = "l", use_delimiter = true, multiple = true, hidden = true)]
-    lib: Option<String>,
-    #[structopt(long, hidden = true)]
-    debug: bool,
-    #[structopt(long, hidden = true)]
-    rsp_quoting: Option<String>,
-    #[structopt(long, hidden = true)]
-    flavor: Option<String>,
-    #[structopt(long, hidden = true)]
-    no_entry: bool,
-    #[structopt(long, hidden = true)]
-    gc_sections: bool,
-    #[structopt(long, hidden = true)]
-    strip_debug: bool,
-    #[structopt(long, hidden = true)]
-    strip_all: bool,
+    #[clap(
+        short = 'l',
+        long = "lib",
+        use_delimiter = true,
+        multiple = true,
+        hidden = true
+    )]
+    _lib: Option<String>,
+    #[clap(long = "debug", hidden = true)]
+    _debug: bool,
+    #[clap(long = "rsp-quoting", hidden = true)]
+    _rsp_quoting: Option<String>,
+    #[clap(long = "flavor", hidden = true)]
+    _flavor: Option<String>,
+    #[clap(long = "no-entry", hidden = true)]
+    _no_entry: bool,
+    #[clap(long = "gc-sections", hidden = true)]
+    _gc_sections: bool,
+    #[clap(long = "strip-debug", hidden = true)]
+    _strip_debug: bool,
+    #[clap(long = "strip-all", hidden = true)]
+    _strip_all: bool,
 }
 
 fn main() {
@@ -255,5 +261,5 @@ fn main() {
 }
 
 fn error(desc: &str, kind: clap::ErrorKind) -> ! {
-    clap::Error::with_description(desc, kind).exit();
+    clap::Error::with_description(desc.to_string(), kind).exit();
 }

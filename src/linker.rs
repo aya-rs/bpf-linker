@@ -437,7 +437,7 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, &output) }.map_err(LinkerError::WriteIRError)
+        unsafe { llvm::write_ir(self.module, output) }.map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {

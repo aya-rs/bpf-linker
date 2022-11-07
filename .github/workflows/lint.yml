@@ -1,0 +1,35 @@
+name: lint
+
+on:
+  push:
+    branches:
+      - main
+      - ci
+
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt, clippy, miri, rust-src
+          override: true
+
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
+      - name: Run clippy
+        run: |
+          cargo clippy --workspace -- --deny warnings
