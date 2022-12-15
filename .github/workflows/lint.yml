@@ -14,7 +14,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lint:
+  lint-stable:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: clippy, rust-src
+          override: true
+
+      - name: Run clippy
+        run: |
+          cargo clippy --workspace -- --deny warnings
+
+  lint-nightly:
     runs-on: ubuntu-20.04
 
     steps:
@@ -24,12 +41,9 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
-          components: rustfmt, clippy, miri, rust-src
+          components: rustfmt, rust-src
           override: true
 
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
-      - name: Run clippy
-        run: |
-          cargo clippy --workspace -- --deny warnings
