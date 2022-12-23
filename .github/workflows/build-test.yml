@@ -75,6 +75,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install llvm-${{ matrix.llvm }}-dev libclang-${{ matrix.llvm }}-dev
 
+      - name: Install LLVM tools
+        if: matrix.llvm == 'rustc'
+        shell: bash
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-15 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install llvm-15-tools
+
       - name: Build
         run: cargo build --verbose ${CARGO_ARGS}
 
