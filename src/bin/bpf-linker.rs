@@ -6,8 +6,13 @@ extern crate aya_rustc_llvm_proxy;
 use clap::Parser;
 use log::*;
 use simplelog::{Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger};
-use std::{collections::HashSet, env, fs::File, str::FromStr};
-use std::{fs, path::PathBuf};
+use std::{
+    collections::HashSet,
+    env,
+    fs::{self, File},
+    path::PathBuf,
+    str::FromStr,
+};
 use thiserror::Error;
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
@@ -86,7 +91,7 @@ struct CommandLine {
     libs: Vec<PathBuf>,
 
     /// Optimization level. 0-3, s, or z
-    #[clap(short = 'O', default_value = "2", multiple = true)]
+    #[clap(short = 'O', default_value = "2")]
     optimize: Vec<CliOptLevel>,
 
     /// Export the symbols specified in the file `path`. The symbols must be separated by new lines
@@ -114,7 +119,7 @@ struct CommandLine {
     dump_module: Option<PathBuf>,
 
     /// Extra command line arguments to pass to LLVM
-    #[clap(long, value_name = "args", use_delimiter = true, multiple = true)]
+    #[clap(long, value_name = "args", use_value_delimiter = true, action = clap::ArgAction::Append)]
     llvm_args: Vec<String>,
 
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
@@ -132,30 +137,30 @@ struct CommandLine {
 
     // The options below are for wasm-ld compatibility
     /// Comma separated list of symbols to export. See also `--export-symbols`
-    #[clap(long, value_name = "symbols", use_delimiter = true, multiple = true)]
+    #[clap(long, value_name = "symbols", use_value_delimiter = true, action = clap::ArgAction::Append)]
     export: Vec<String>,
 
     #[clap(
         short = 'l',
         long = "lib",
-        use_delimiter = true,
-        multiple = true,
-        hidden = true
+        use_value_delimiter = true,
+        action = clap::ArgAction::Append,
+        hide = true
     )]
     _lib: Option<String>,
-    #[clap(long = "debug", hidden = true)]
+    #[clap(long = "debug", hide = true)]
     _debug: bool,
-    #[clap(long = "rsp-quoting", hidden = true)]
+    #[clap(long = "rsp-quoting", hide = true)]
     _rsp_quoting: Option<String>,
-    #[clap(long = "flavor", hidden = true)]
+    #[clap(long = "flavor", hide = true)]
     _flavor: Option<String>,
-    #[clap(long = "no-entry", hidden = true)]
+    #[clap(long = "no-entry", hide = true)]
     _no_entry: bool,
-    #[clap(long = "gc-sections", hidden = true)]
+    #[clap(long = "gc-sections", hide = true)]
     _gc_sections: bool,
-    #[clap(long = "strip-debug", hidden = true)]
+    #[clap(long = "strip-debug", hide = true)]
     _strip_debug: bool,
-    #[clap(long = "strip-all", hidden = true)]
+    #[clap(long = "strip-all", hide = true)]
     _strip_all: bool,
 }
 
@@ -167,10 +172,10 @@ fn main() {
             arg
         }
     });
-    let cli = CommandLine::from_iter(args);
+    let cli = CommandLine::parse_from(args);
 
     if cli.inputs.is_empty() {
-        error("no input files", clap::ErrorKind::TooFewValues);
+        error("no input files", clap::error::ErrorKind::TooFewValues);
     }
 
     let env_log_level = match env::var("RUST_LOG") {
@@ -178,7 +183,7 @@ fn main() {
             Ok(l) => Some(l),
             Err(e) => error(
                 &format!("invalid RUST_LOG value: {}", e),
-                clap::ErrorKind::InvalidValue,
+                clap::error::ErrorKind::InvalidValue,
             ),
         },
         _ => None,
@@ -190,7 +195,7 @@ fn main() {
             Err(e) => {
                 error(
                     &format!("failed to open log file: {:?}", e),
-                    clap::ErrorKind::Io,
+                    clap::error::ErrorKind::Io,
                 );
             }
         };
@@ -231,7 +236,7 @@ fn main() {
                 .map(|s| s.to_string())
                 .collect::<HashSet<_>>(),
             Err(e) => {
-                error(&e.to_string(), clap::ErrorKind::Io);
+                error(&e.to_string(), clap::error::ErrorKind::Io);
             }
         })
         .unwrap_or_else(HashSet::new);
@@ -256,10 +261,84 @@ fn main() {
     };
 
     if let Err(e) = Linker::new(options).link() {
-        error(&e.to_string(), clap::ErrorKind::Io);
+        error(&e.to_string(), clap::error::ErrorKind::Io);
     }
 }
 
-fn error(desc: &str, kind: clap::ErrorKind) -> ! {
-    clap::Error::with_description(desc.to_string(), kind).exit();
+fn error(desc: &str, kind: clap::error::ErrorKind) -> ! {
+    clap::Error::raw(kind, desc.to_string()).exit();
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // Test made to reproduce the following bug:
+    // https://github.com/aya-rs/bpf-linker/issues/27
+    // where --export argument followed by positional arguments resulted in
+    // parsing the positional args as `export`, not as `inputs`.
+    // There can be multiple exports, but they always have to be preceded by
+    // `--export` flag.
+    #[test]
+    fn test_export_input_args() {
+        let args = vec![
+            "bpf-linker",
+            "--export",
+            "foo",
+            "--export",
+            "bar",
+            "symbols.o", // this should be parsed as `input`, not `export`
+            "rcgu.o",    // this should be parsed as `input`, not `export`
+            "-L",
+            "target/debug/deps",
+            "-L",
+            "target/debug",
+            "-L",
+            "/home/foo/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib",
+            "-o",
+            "/tmp/bin.s",
+            "--target=bpf",
+            "--emit=asm",
+        ];
+        let cli = CommandLine::parse_from(args);
+        assert_eq!(cli.export, vec!["foo", "bar"]);
+        assert_eq!(
+            cli.inputs,
+            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+        );
+    }
+
+    #[test]
+    fn test_export_delimiter() {
+        let args = vec![
+            "bpf-linker",
+            "--export",
+            "foo,bar",
+            "--export=ayy,lmao",
+            "symbols.o", // this should be parsed as `input`, not `export`
+            "--export=lol",
+            "--export",
+            "rotfl",
+            "rcgu.o", // this should be parsed as `input`, not `export`
+            "-L",
+            "target/debug/deps",
+            "-L",
+            "target/debug",
+            "-L",
+            "/home/foo/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib",
+            "-o",
+            "/tmp/bin.s",
+            "--target=bpf",
+            "--emit=asm",
+        ];
+        let cli = CommandLine::parse_from(args);
+        assert_eq!(
+            cli.export,
+            vec!["foo", "bar", "ayy", "lmao", "lol", "rotfl"]
+        );
+        assert_eq!(
+            cli.inputs,
+            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+        );
+    }
 }
