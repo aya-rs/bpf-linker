@@ -3,6 +3,7 @@ use super::Message;
 use crate::llvm::iter::*;
 use gimli::constants::DwTag;
 use gimli::DW_TAG_structure_type;
+use gimli::DW_TAG_variant_part;
 use llvm_sys::core::*;
 use llvm_sys::debuginfo::*;
 use llvm_sys::prelude::*;
@@ -15,6 +16,7 @@ pub struct DIFix {
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     cache: Cache,
+    node_stack: Vec<LLVMValueRef>,
 }
 
 impl DIFix {
@@ -24,6 +26,7 @@ impl DIFix {
             module,
             builder: LLVMCreateDIBuilder(module),
             cache: Cache::new(),
+            node_stack: Vec::new(),
         }
     }
 
@@ -40,11 +43,94 @@ impl DIFix {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match tag {
-                    DW_TAG_structure_type => LLVMReplaceMDNodeOperandWith(value, 2, empty),
+                    DW_TAG_structure_type => {
+                        // variadic enum not supported => emit warning and strip out the children array
+                        // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
+
+                        // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
+                        let elements = LLVMGetOperand(value, 4);
+                        let num_elements = LLVMGetNumOperands(elements);
+                        if num_elements > 0 {
+                            let element = LLVMGetOperand(elements, 0);
+                            if get_tag(LLVMValueAsMetadata(element)) == DW_TAG_variant_part {
+                                let link = "http://none-yet";
+
+                                let mut len = 0;
+                                let name = CStr::from_ptr(LLVMDITypeGetName(
+                                    LLVMValueAsMetadata(value),
+                                    &mut len,
+                                ))
+                                .to_str()
+                                .unwrap();
+
+                                // TODO: check: the following always returns <unknown>:0 - however its strange...
+                                let _line = LLVMDITypeGetLine(LLVMValueAsMetadata(value)); // always returns 0
+                                let scope = LLVMDIVariableGetScope(metadata);
+                                let file = LLVMDIScopeGetFile(scope);
+                                let mut len = 0;
+                                let _filename =
+                                    CStr::from_ptr(LLVMDIFileGetFilename(file, &mut len)); // still getting <undefined>
+
+                                // FIX: shadowing prev values with "correct" ones, found looking at parent nodes
+                                let (filename, line) = self
+                                    .node_stack
+                                    .iter()
+                                    .rev()
+                                    .find_map(|v: &LLVMValueRef| -> Option<(&str, u32)> {
+                                        let v = *v;
+                                        if !is_mdnode(v) {
+                                            return None;
+                                        }
+                                        let m = LLVMValueAsMetadata(v);
+                                        let metadata_kind = LLVMGetMetadataKind(m);
+                                        let file_operand_index = match metadata_kind {
+                                            LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind => {
+                                                Some(2)
+                                            }
+                                            LLVMMetadataKind::LLVMDICommonBlockMetadataKind => {
+                                                Some(3)
+                                            }
+                                            // TODO: add more cases based on asmwriter.cpp
+                                            _ => None,
+                                        }?;
+                                        let file = LLVMGetOperand(v, file_operand_index);
+                                        let mut len = 0;
+                                        let filename = CStr::from_ptr(LLVMDIFileGetFilename(
+                                            LLVMValueAsMetadata(file),
+                                            &mut len,
+                                        ))
+                                        .to_str()
+                                        .unwrap();
+                                        if filename == "<unknown>" {
+                                            return None;
+                                        }
+                                        // since this node has plausible filename, we also trust the corresponding line
+                                        let line = LLVMDITypeGetLine(m);
+                                        Some((filename, line))
+                                    })
+                                    .unwrap_or(("unknown", 0));
+
+                                // finally emit warning
+                                warn!(
+                                    "at {}:{}: enum {}: not emitting BTF for type - see {}",
+                                    filename, line, name, link
+                                );
+
+                                // strip out children
+                                let empty_node =
+                                    LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0);
+                                LLVMReplaceMDNodeOperandWith(value, 4, empty_node);
+
+                                // remove rust names
+                                LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                            }
+                        }
+                    }
                     _ => (),
                 }
             }
             LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind => {
+                // remove rust names
                 LLVMReplaceMDNodeOperandWith(value, 2, empty);
             }
             _ => (),
@@ -67,9 +153,11 @@ impl DIFix {
             value as u64
         };
         if self.cache.hit(key) {
-            trace!("{one:depth$}skipping node");
+            trace!("{one:depth$}skipping already visited node");
             return;
         }
+
+        self.node_stack.push(value);
 
         if is_mdnode(value) {
             let metadata = LLVMValueAsMetadata(value);
@@ -133,6 +221,8 @@ impl DIFix {
                 self.discover(operand, depth + 1)
             }
         }
+
+        assert_eq!(self.node_stack.pop(), Some(value));
     }
 
     pub unsafe fn run(&mut self) {
@@ -223,6 +313,14 @@ unsafe fn is_user(v: LLVMValueRef) -> bool {
 
 unsafe fn is_globalobject(v: LLVMValueRef) -> bool {
     !LLVMIsAGlobalObject(v).is_null()
+}
+
+unsafe fn _is_globalvariable(v: LLVMValueRef) -> bool {
+    !LLVMIsAGlobalVariable(v).is_null()
+}
+
+unsafe fn _is_function(v: LLVMValueRef) -> bool {
+    !LLVMIsAFunction(v).is_null()
 }
 
 unsafe fn can_get_all_metadata(v: LLVMValueRef) -> bool {
