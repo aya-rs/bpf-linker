@@ -19,7 +19,7 @@ fn run_mode(mode: &'static str) {
     config.target_rustcflags = Some(rustc_flags);
     if let Ok(filecheck) = which("FileCheck") {
         config.llvm_filecheck = Some(filecheck)
-    } else if let Ok(filecheck) = which("FileCheck-12") {
+    } else if let Ok(filecheck) = which("FileCheck-15") {
         config.llvm_filecheck = Some(filecheck)
     } else {
         panic!("no FileCheck binary found");

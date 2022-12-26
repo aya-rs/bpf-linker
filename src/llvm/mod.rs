@@ -66,7 +66,7 @@ pub unsafe fn find_embedded_bitcode(
     let buffer_name = CString::new("mem_buffer").unwrap();
     let buffer = LLVMCreateMemoryBufferWithMemoryRange(
         data.as_ptr() as *const libc_char,
-        data.len() as usize,
+        data.len(),
         buffer_name.as_ptr(),
         0,
     );
@@ -109,7 +109,7 @@ pub unsafe fn link_bitcode_buffer(
     let buffer_name = CString::new("mem_buffer").unwrap();
     let buffer = LLVMCreateMemoryBufferWithMemoryRange(
         buffer.as_ptr() as *const libc_char,
-        buffer.len() as usize,
+        buffer.len(),
         buffer_name.as_ptr(),
         0,
     );
