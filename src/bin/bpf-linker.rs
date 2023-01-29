@@ -182,7 +182,7 @@ fn main() {
         Ok(s) if !s.is_empty() => match s.parse::<LevelFilter>() {
             Ok(l) => Some(l),
             Err(e) => error(
-                &format!("invalid RUST_LOG value: {}", e),
+                &format!("invalid RUST_LOG value: {e}"),
                 clap::error::ErrorKind::InvalidValue,
             ),
         },
@@ -194,7 +194,7 @@ fn main() {
             Ok(f) => f,
             Err(e) => {
                 error(
-                    &format!("failed to open log file: {:?}", e),
+                    &format!("failed to open log file: {e:?}"),
                     clap::error::ErrorKind::Io,
                 );
             }

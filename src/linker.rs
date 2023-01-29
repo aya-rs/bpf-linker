@@ -12,7 +12,6 @@ use std::{
     io,
     io::Read,
     io::Seek,
-    io::SeekFrom,
     path::Path,
     path::PathBuf,
     ptr, str,
@@ -241,7 +240,7 @@ impl Linker {
             // or an invalid file
             file.read(&mut buf)
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-            file.seek(SeekFrom::Start(0))
+            file.rewind()
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
             let in_type = detect_input_type(&buf)
                 .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;

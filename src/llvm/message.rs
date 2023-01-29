@@ -42,7 +42,7 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.is_empty() {
             let contents = unsafe { CStr::from_ptr(self.ptr).to_str().unwrap() };
-            write!(f, "{}", contents)
+            write!(f, "{contents}")
         } else {
             write!(f, "(empty)")
         }
