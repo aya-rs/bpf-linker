@@ -21,7 +21,7 @@ jobs:
           - "stable"
           - "beta"
           - "nightly"
-        llvm: ["15", "rustc"]
+        llvm: ["16", "rustc"]
     name: "rustc: ${{ matrix.rust }}, llvm: ${{ matrix.llvm }}"
 
     env:
@@ -80,9 +80,9 @@ jobs:
         shell: bash
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-15 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-16 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install llvm-15-tools
+          sudo apt-get install llvm-16-tools
 
       - name: Build
         run: cargo build --verbose ${CARGO_ARGS}
