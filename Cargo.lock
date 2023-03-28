@@ -66,7 +66,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "libloading",
- "llvm-sys",
+ "llvm-sys 150.0.0",
  "quote 0.6.13",
  "syn 0.15.44",
 ]
@@ -101,7 +101,7 @@ dependencies = [
  "clap",
  "compiletest_rs",
  "libc",
- "llvm-sys",
+ "llvm-sys 160.0.2",
  "log",
  "simplelog",
  "thiserror",
@@ -348,6 +348,19 @@ name = "llvm-sys"
 version = "150.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d457b48805f7421b527d1539ada8d739adaec97ab9346a38446a31c7e48c5ee7"
+dependencies = [
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex",
+ "semver 1.0.9",
+]
+
+[[package]]
+name = "llvm-sys"
+version = "160.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8f28688b1e9d6fa3a00b6dbec62aae91e7dae15abf1f171391691bae4a767dd"
 dependencies = [
  "cc",
  "lazy_static",
