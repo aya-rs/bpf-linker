@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ffi::CStr};
 
-use gimli::{constants::DwTag, DW_TAG_structure_type, DW_TAG_variant_part};
+use gimli::{constants::DwTag, DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use log::*;
 
@@ -40,6 +40,21 @@ impl DIFix {
                 #[allow(non_upper_case_globals)]
                 match tag {
                     DW_TAG_structure_type => {
+                        let mut len = 0;
+                        let name = CStr::from_ptr(LLVMDITypeGetName(metadata, &mut len))
+                            .to_str()
+                            .unwrap();
+
+                        if name.starts_with("HashMap<") {
+                            // Remove name from BTF map structs.
+                            LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                        } else {
+                            // Clear the name from generics.
+                            let name = name.split('<').next().unwrap();
+                            let name = to_mdstring(self.context, name);
+                            LLVMReplaceMDNodeOperandWith(value, 2, name);
+                        }
+
                         // variadic enum not supported => emit warning and strip out the children array
                         // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
 
@@ -126,8 +141,17 @@ impl DIFix {
                 }
             }
             LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind => {
-                // remove rust names
-                LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                let tag = get_tag(metadata);
+
+                #[allow(clippy::single_match)]
+                #[allow(non_upper_case_globals)]
+                match tag {
+                    DW_TAG_pointer_type => {
+                        // remove rust names
+                        LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                    }
+                    _ => (),
+                }
             }
             _ => (),
         }
