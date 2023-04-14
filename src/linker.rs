@@ -132,6 +132,8 @@ enum InputType {
     Bitcode,
     /// ELF object file.
     Elf,
+    /// Mach-O object file.
+    MachO,
     /// Archive file. (.a)
     Archive,
 }
@@ -145,6 +147,7 @@ impl std::fmt::Display for InputType {
             match self {
                 Bitcode => "bitcode",
                 Elf => "elf",
+                MachO => "Mach-O",
                 Archive => "archive",
             }
         )
@@ -259,7 +262,7 @@ impl Linker {
                         match self.link_reader(&name, item, None) {
                             Ok(_) => continue,
                             Err(LinkerError::InvalidInputType(_)) => {
-                                info!("ignoring archive item {:?}: unknown file type", name);
+                                info!("ignoring archive item {:?}: invalid type", name);
                                 continue;
                             }
                             Err(LinkerError::MissingBitcodeSection(_)) => {
@@ -274,6 +277,10 @@ impl Linker {
                     info!("linking file {:?} type {}", path, ty);
                     match self.link_reader(&path, file, Some(ty)) {
                         Ok(_) => {}
+                        Err(LinkerError::InvalidInputType(_)) => {
+                            info!("ignoring file {:?}: invalid type", path);
+                            continue;
+                        }
                         Err(LinkerError::MissingBitcodeSection(_)) => {
                             warn!("ignoring file {:?}: no embedded bitcode", path);
                         }
@@ -316,6 +323,10 @@ impl Linker {
                 Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
                 Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
             },
+            // we need to handle this here since archive files could contain
+            // mach-o files, eg somecrate.rlib containing lib.rmeta which is
+            // mach-o on macos
+            InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
             // this can't really happen
             Archive => panic!("nested archives not supported duh"),
         };
@@ -506,6 +517,7 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
     match &data[..4] {
         b"\x42\x43\xC0\xDE" => Some(Bitcode),
         b"\x7FELF" => Some(Elf),
+        b"\xcf\xfa\xed\xfe" => Some(MachO),
         _ => {
             if &data[..8] == b"!<arch>\x0A" {
                 Some(Archive)
