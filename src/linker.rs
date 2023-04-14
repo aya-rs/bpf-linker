@@ -515,7 +515,7 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
 
     use InputType::*;
     match &data[..4] {
-        b"\x42\x43\xC0\xDE" => Some(Bitcode),
+        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(Bitcode),
         b"\x7FELF" => Some(Elf),
         b"\xcf\xfa\xed\xfe" => Some(MachO),
         _ => {
