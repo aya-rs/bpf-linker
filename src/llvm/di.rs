@@ -15,6 +15,12 @@ pub struct DIFix {
     node_stack: Vec<LLVMValueRef>,
 }
 
+fn strip_generics(name: &str) -> String {
+    name.replace(['<', '>'], "_l_")
+        .replace("::", "_")
+        .replace([',', ' '], "_")
+}
+
 impl DIFix {
     pub unsafe fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DIFix {
         DIFix {
@@ -50,8 +56,8 @@ impl DIFix {
                             LLVMReplaceMDNodeOperandWith(value, 2, empty);
                         } else {
                             // Clear the name from generics.
-                            let name = name.split('<').next().unwrap();
-                            let name = to_mdstring(self.context, name);
+                            let name = strip_generics(name);
+                            let name = to_mdstring(self.context, &name);
                             LLVMReplaceMDNodeOperandWith(value, 2, name);
                         }
 
@@ -368,5 +374,28 @@ impl Cache {
 
     pub fn hit(&mut self, key: u64) -> bool {
         !self.keys.insert(key)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_strip_generics() {
+        let name = "MyStruct<u64>";
+        assert_eq!(strip_generics(name), "MyStruct_l_u64_l_");
+
+        let name = "MyStruct<u64, u64>";
+        assert_eq!(strip_generics(name), "MyStruct_l_u64__u64_l_");
+
+        let name = "my_function<aya_bpf::BpfContext>";
+        assert_eq!(strip_generics(name), "my_function_l_aya_bpf_BpfContext_l_");
+
+        let name = "my_function<aya_bpf::BpfContext, aya_log_ebpf::WriteToBuf>";
+        assert_eq!(
+            strip_generics(name),
+            "my_function_l_aya_bpf_BpfContext__aya_log_ebpf_WriteToBuf_l_"
+        );
     }
 }
