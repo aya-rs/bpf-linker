@@ -85,7 +85,7 @@ struct CommandLine {
 
     /// Output type. Can be one of `llvm-bc`, `asm`, `llvm-ir`, `obj`
     #[clap(long, default_value = "obj")]
-    emit: CliOutputType,
+    emit: Vec<CliOutputType>,
 
     /// Add a directory to the library search path
     #[clap(short = 'L', number_of_values = 1)]
@@ -239,15 +239,24 @@ fn main() {
         .map(Into::into)
         .collect();
 
+    let output_type = match *emit.as_slice() {
+        [] => unreachable!("emit has a default value"),
+        [CliOutputType(output_type), ..] => output_type,
+    };
+    let optimize = match *optimize.as_slice() {
+        [] => unreachable!("emit has a default value"),
+        [.., CliOptLevel(optimize)] => optimize,
+    };
+
     let mut linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
         inputs,
         output,
-        output_type: emit.0,
+        output_type,
         libs,
-        optimize: optimize.last().unwrap().0,
+        optimize,
         export_symbols,
         unroll_loops,
         ignore_inline_never,
