@@ -23,5 +23,5 @@ struct Bar<T> {
 #[link_section = "maps"]
 static mut BAR: Bar<Foo<u32>> = Bar { x: Foo { x: 0 } };
 
-// CHECK: name: "Foo_l_u32_l_"
-// CHECK: name: "Bar_l_di_generics_Foo_l_u32_l__l_"
+// CHECK: name: "Foo_3C_u32_3E_"
+// CHECK: name: "Bar_3C_di_5F_generics_3A__3A_Foo_3C_u32_3E__3E_"
