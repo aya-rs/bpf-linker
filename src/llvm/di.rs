@@ -20,10 +20,16 @@ pub struct DIFix {
     node_stack: Vec<LLVMValueRef>,
 }
 
-fn strip_generics(name: &str) -> String {
-    name.replace(['<', '>'], "_l_")
-        .replace("::", "_")
-        .replace([',', ' '], "_")
+fn sanitize_type_name(name: &str) -> String {
+    name.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_string()
+            } else {
+                format!("_{:X}_", ch as u32)
+            }
+        })
+        .collect()
 }
 
 impl DIFix {
@@ -61,7 +67,7 @@ impl DIFix {
                             LLVMReplaceMDNodeOperandWith(value, 2, empty);
                         } else {
                             // Clear the name from generics.
-                            let name = strip_generics(name);
+                            let name = sanitize_type_name(name);
                             let name = to_mdstring(self.context, &name);
                             LLVMReplaceMDNodeOperandWith(value, 2, name);
                         }
@@ -389,18 +395,27 @@ mod test {
     #[test]
     fn test_strip_generics() {
         let name = "MyStruct<u64>";
-        assert_eq!(strip_generics(name), "MyStruct_l_u64_l_");
+        assert_eq!(sanitize_type_name(name), "MyStruct_3C_u64_3E_");
 
         let name = "MyStruct<u64, u64>";
-        assert_eq!(strip_generics(name), "MyStruct_l_u64__u64_l_");
+        assert_eq!(sanitize_type_name(name), "MyStruct_3C_u64_2C__20_u64_3E_");
 
         let name = "my_function<aya_bpf::BpfContext>";
-        assert_eq!(strip_generics(name), "my_function_l_aya_bpf_BpfContext_l_");
+        assert_eq!(
+            sanitize_type_name(name),
+            "my_5F_function_3C_aya_5F_bpf_3A__3A_BpfContext_3E_"
+        );
 
         let name = "my_function<aya_bpf::BpfContext, aya_log_ebpf::WriteToBuf>";
         assert_eq!(
-            strip_generics(name),
-            "my_function_l_aya_bpf_BpfContext__aya_log_ebpf_WriteToBuf_l_"
+            sanitize_type_name(name),
+            "my_5F_function_3C_aya_5F_bpf_3A__3A_BpfContext_2C__20_aya_5F_log_5F_ebpf_3A__3A_WriteToBuf_3E_"
         );
+
+        let name = "PerfEventArray<[u8; 32]>";
+        assert_eq!(
+            sanitize_type_name(name),
+            "PerfEventArray_3C__5B_u8_3B__20_32_5D__3E_"
+        )
     }
 }
