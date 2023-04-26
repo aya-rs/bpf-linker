@@ -5,7 +5,9 @@ extern crate aya_rustc_llvm_proxy;
 
 use clap::Parser;
 use log::*;
-use simplelog::{Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{
+    ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
+};
 use std::{
     collections::HashSet,
     env,
@@ -200,7 +202,14 @@ fn main() {
             }
         };
         WriteLogger::init(log_level, Config::default(), log_file).unwrap();
-    } else if TermLogger::init(log_level, Config::default(), TerminalMode::Mixed).is_err() {
+    } else if TermLogger::init(
+        log_level,
+        Config::default(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    )
+    .is_err()
+    {
         SimpleLogger::init(log_level, Config::default()).unwrap();
     }
 
