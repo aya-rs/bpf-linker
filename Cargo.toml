@@ -29,7 +29,7 @@ log = { version = "0.4.0" }
 thiserror = { version = "1.0.0" }
 
 [dev-dependencies]
-compiletest_rs = { version = "0.5.0", path = "third-party/compiletest-rs" }
+compiletest_rs = { version = "0.10.1" }
 rustc-build-sysroot = { version = "0.4.2" }
 which = { version = "4.2.0" }
 
