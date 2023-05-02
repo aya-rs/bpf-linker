@@ -1,6 +1,6 @@
 #![deny(clippy::all)]
 
-#[cfg(feature = "llvm-proxy")]
+#[cfg(feature = "rust-llvm")]
 extern crate aya_rustc_llvm_proxy;
 
 use clap::Parser;

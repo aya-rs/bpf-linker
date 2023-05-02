@@ -12,15 +12,15 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-clap = { version = "4.0", optional = true, features = ["derive"] }
-simplelog = {version = "0.7.6", optional = true}
+clap = { version = "4.0", features = ["derive"] }
+simplelog = { version = "0.7.6" }
 
 # lib deps
 libc = "0.2"
-thiserror = { version = "1.0", optional = true }
-ar = { version = "0.8", optional = true }
-log = { version = "0.4", optional = true }
-llvm-sys = { version = "160", optional = true }
+thiserror = { version = "1.0" }
+ar = { version = "0.8" }
+log = { version = "0.4" }
+llvm-sys = { version = "160" }
 aya-rustc-llvm-proxy = { version = "0.5.0", optional = true }
 
 [dev-dependencies]
@@ -31,13 +31,10 @@ which = "4.2"
 name = "bpf-linker"
 
 [features]
-llvm-proxy = [
+system-llvm = []
+rust-llvm = [
     "aya-rustc-llvm-proxy",
     "llvm-sys/no-llvm-linking",
     "llvm-sys/disable-alltargets-init"
 ]
-lib = ["thiserror", "ar", "log"]
-cli = ["clap", "simplelog"]
-system-llvm = ["cli", "lib", "llvm-sys"]
-rust-llvm = ["cli", "lib", "llvm-proxy"]
 default = ["rust-llvm"]
