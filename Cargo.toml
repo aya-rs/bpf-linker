@@ -31,7 +31,6 @@ which = "4.2"
 name = "bpf-linker"
 
 [features]
-system-llvm = []
 rust-llvm = [
     "aya-rustc-llvm-proxy",
     "llvm-sys/no-llvm-linking",
