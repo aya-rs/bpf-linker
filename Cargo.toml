@@ -1,6 +1,6 @@
 [package]
 name = "bpf-linker"
-version = "0.9.6"
+version = "0.9.7"
 authors = ["Alessandro Decina <alessandro.d@gmail.com>"]
 description = "BPF static linker"
 license = "MIT OR Apache-2.0"
