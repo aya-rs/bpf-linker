@@ -2,6 +2,7 @@ use super::symbol_name;
 use super::Message;
 use crate::llvm::iter::*;
 use gimli::constants::DwTag;
+use gimli::DW_TAG_member;
 use gimli::DW_TAG_pointer_type;
 use gimli::DW_TAG_structure_type;
 use gimli::DW_TAG_variant_part;
@@ -77,10 +78,12 @@ impl DIFix {
 
                         // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
                         let elements = LLVMGetOperand(value, 4);
-                        let num_elements = LLVMGetNumOperands(elements);
-                        if num_elements > 0 {
-                            let element = LLVMGetOperand(elements, 0);
-                            if get_tag(LLVMValueAsMetadata(element)) == DW_TAG_variant_part {
+                        let operands = LLVMGetNumOperands(elements).try_into().unwrap();
+                        let mut members = Vec::new();
+                        for i in 0..operands {
+                            let element = LLVMGetOperand(elements, i);
+                            let tag = get_tag(LLVMValueAsMetadata(element));
+                            if i == 0 && tag == DW_TAG_variant_part {
                                 let link = "http://none-yet";
 
                                 let mut len = 0;
@@ -151,7 +154,24 @@ impl DIFix {
 
                                 // remove rust names
                                 LLVMReplaceMDNodeOperandWith(value, 2, empty);
+
+                                break;
                             }
+
+                            if tag == DW_TAG_member {
+                                members.push(LLVMValueAsMetadata(element));
+                            }
+                        }
+                        if !members.is_empty() && members.len() == operands.try_into().unwrap() {
+                            members.sort_by_cached_key(|metadata| {
+                                LLVMDITypeGetOffsetInBits(*metadata)
+                            });
+                            let md = LLVMMDNodeInContext2(
+                                self.context,
+                                members.as_mut_ptr(),
+                                members.len(),
+                            );
+                            LLVMReplaceMDNodeOperandWith(value, 4, md);
                         }
                     }
                     _ => (),
