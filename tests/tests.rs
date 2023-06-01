@@ -7,10 +7,8 @@ fn run_mode(mode: &'static str) {
     let mut config = compiletest::Config::default();
 
     let mut rustc_flags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
-    let host_target = env::var("TESTS_HOST_TARGET")
-        .ok()
-        .unwrap_or_else(|| "0".to_string())
-        == "1";
+    // Default to the host target backdoor so that tests can run locally without building rustc from source.
+    let host_target = env::var_os("TESTS_HOST_TARGET").map_or(true, |v| v == "1");
     if host_target {
         rustc_flags += " -C linker-plugin-lto -C linker-flavor=wasm-ld -C panic=abort -C link-arg=--target=bpf";
     } else {
