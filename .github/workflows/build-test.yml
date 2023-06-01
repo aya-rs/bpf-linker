@@ -21,6 +21,7 @@ jobs:
           - stable
           - beta
           - nightly
+          - nightly-from-source
         llvm:
           - 16
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
@@ -32,24 +33,25 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust != 'nightly-from-source'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
 
       - uses: Swatinem/rust-cache@v1
-        if: matrix.rust != 'nightly'
+        if: matrix.rust != 'nightly-from-source'
 
       - name: Checkout Rust Source
         uses: actions/checkout@v3
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly-from-source'
         with:
           repository: rust-lang/rust
           path: rust
           submodules: recursive
 
       # Ideally we'd use Cargo's `-Z build-std=core` but compiletest-rs uses rustc directly.
-      - name: Install Rust ${{ matrix.rust }} From Source
-        if: matrix.rust == 'nightly'
+      - name: Install Rust From Source
+        if: matrix.rust == 'nightly-from-source'
         run: |
           pushd rust
           echo -e 'changelog-seen = 2'                                          >> config.toml
@@ -90,12 +92,13 @@ jobs:
         run: cargo hack build --feature-powerset
 
       - name: Test (rustc target = HOST_TARGET, link target = BPF)
+        if: matrix.rust == 'nightly'
         env:
           TESTS_HOST_TARGET: 1
         run: cargo hack test --feature-powerset
 
       - name: Tests (rustc target = BPF, link target = BPF)
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly-from-source'
         env:
           TESTS_HOST_TARGET: 0
         run: cargo hack test --feature-powerset
