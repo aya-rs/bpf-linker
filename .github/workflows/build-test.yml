@@ -49,6 +49,13 @@ jobs:
           path: rust
           submodules: recursive
 
+      - name: Cache Rust Build Cache
+        uses: actions/cache@v3
+        if: matrix.rust == 'nightly-from-source'
+        with:
+          path: rust/build
+          key: rust-build
+
       # Ideally we'd use Cargo's `-Z build-std=core` but compiletest-rs uses rustc directly.
       - name: Install Rust From Source
         if: matrix.rust == 'nightly-from-source'
