@@ -13,9 +13,11 @@ fn run_mode(mode: &'static str) {
         rustc_flags = [
             rustc_flags.as_str(),
             "-C link-arg=--target=bpf",
-            "-C linker-flavor=wasm-ld",
+            "-C linker-flavor=bpf-linker",
             "-C linker-plugin-lto",
             "-C panic=abort",
+            "-C target-cpu=generic",
+            "-Z unstable-options",
         ]
         .join(" ");
     } else {
