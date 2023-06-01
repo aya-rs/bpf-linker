@@ -10,7 +10,14 @@ fn run_mode(mode: &'static str) {
     // Default to the host target backdoor so that tests can run locally without building rustc from source.
     let host_target = env::var_os("TESTS_HOST_TARGET").map_or(true, |v| v == "1");
     if host_target {
-        rustc_flags += " -C linker-plugin-lto -C linker-flavor=wasm-ld -C panic=abort -C link-arg=--target=bpf";
+        rustc_flags = [
+            rustc_flags.as_str(),
+            "-C link-arg=--target=bpf",
+            "-C linker-flavor=wasm-ld",
+            "-C linker-plugin-lto",
+            "-C panic=abort",
+        ]
+        .join(" ");
     } else {
         config.target = "bpfel-unknown-none".to_string();
     }
