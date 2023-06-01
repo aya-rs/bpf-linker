@@ -79,16 +79,22 @@ pub enum Cpu {
     V3,
 }
 
-impl std::fmt::Display for Cpu {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Cpu {
+    fn to_str(self) -> &'static str {
         use Cpu::*;
-        f.pad(match self {
+        match self {
             Generic => "generic",
             Probe => "probe",
             V1 => "v1",
             V2 => "v2",
             V3 => "v3",
-        })
+        }
+    }
+}
+
+impl std::fmt::Display for Cpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.to_str())
     }
 }
 
@@ -339,59 +345,64 @@ impl Linker {
     }
 
     fn create_target_machine(&mut self) -> Result<(), LinkerError> {
-        unsafe {
-            // Here's how the output target is selected:
-            //
-            // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
-            //      the input modules are already configured for the correct output target
-            //
-            // 2) rustc with no BPF support: cargo rustc -- -C linker-flavor=wasm-ld -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
-            //      the input modules are configured for the *host* target, and the output target
-            //      is configured with the `--target` linker argument
-            //
-            // 3) rustc with no BPF support: cargo rustc -- -C linker-flavor=wasm-ld -C linker=bpf-linker
-            //      the input modules are configured for the *host* target, the output target isn't
-            //      set via `--target`, so default to `bpf` (bpfel or bpfeb depending on the host
-            //      endianness)
-            let (triple, target) = match self.options.target.clone() {
-                // case 1
-                Some(triple) => (
-                    triple.clone(),
-                    llvm::target_from_triple(&CString::new(triple).unwrap()),
-                ),
-                None => {
-                    let c_triple = LLVMGetTarget(self.module);
-                    let triple = CStr::from_ptr(c_triple).to_string_lossy().to_string();
-                    if triple.starts_with("bpf") {
-                        // case 2
-                        (triple, llvm::target_from_module(self.module))
-                    } else {
-                        // case 3.
-                        info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
-                        (
-                            "bpf".to_string(),
-                            llvm::target_from_triple(&CString::new("bpf").unwrap()),
-                        )
-                    }
+        let Self {
+            options:
+                LinkerOptions {
+                    target,
+                    cpu,
+                    cpu_features,
+                    ..
+                },
+            module,
+            target_machine,
+            ..
+        } = self;
+        // Here's how the output target is selected:
+        //
+        // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
+        //      the input modules are already configured for the correct output target
+        //
+        // 2) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
+        //      the input modules are configured for the *host* target, and the output target
+        //      is configured with the `--target` linker argument
+        //
+        // 3) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker
+        //      the input modules are configured for the *host* target, the output target isn't
+        //      set via `--target`, so default to `bpf` (bpfel or bpfeb depending on the host
+        //      endianness)
+        let (triple, target) = match target {
+            // case 1
+            Some(triple) => {
+                let c_triple = CString::new(triple.as_str()).unwrap();
+                (triple.as_str(), unsafe {
+                    llvm::target_from_triple(&c_triple)
+                })
+            }
+            None => {
+                let c_triple = unsafe { LLVMGetTarget(*module) };
+                let triple = unsafe { CStr::from_ptr(c_triple) }.to_str().unwrap();
+                if triple.starts_with("bpf") {
+                    // case 2
+                    (triple, unsafe { llvm::target_from_module(*module) })
+                } else {
+                    // case 3.
+                    info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
+                    let triple = "bpf";
+                    let c_triple = CString::new(triple).unwrap();
+                    (triple, unsafe { llvm::target_from_triple(&c_triple) })
                 }
-            };
-            let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.clone()))?;
+            }
+        };
+        let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.to_owned()))?;
 
-            debug!(
-                "creating target machine: triple: {} cpu: {} features: {}",
-                triple,
-                self.options.cpu.to_string(),
-                self.options.cpu_features
-            );
+        debug!(
+            "creating target machine: triple: {} cpu: {} features: {}",
+            triple, cpu, cpu_features,
+        );
 
-            self.target_machine = llvm::create_target_machine(
-                target,
-                &triple,
-                &self.options.cpu.to_string(),
-                &self.options.cpu_features,
-            )
-            .ok_or(LinkerError::InvalidTarget(triple))?;
-        }
+        *target_machine =
+            unsafe { llvm::create_target_machine(target, triple, cpu.to_str(), cpu_features) }
+                .ok_or_else(|| LinkerError::InvalidTarget(triple.to_owned()))?;
 
         Ok(())
     }

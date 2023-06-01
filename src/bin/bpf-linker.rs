@@ -137,33 +137,13 @@ struct CommandLine {
     /// Input files. Can be object files or static libraries
     inputs: Vec<PathBuf>,
 
-    // The options below are for wasm-ld compatibility
     /// Comma separated list of symbols to export. See also `--export-symbols`
     #[clap(long, value_name = "symbols", use_value_delimiter = true, action = clap::ArgAction::Append)]
     export: Vec<String>,
 
-    #[clap(
-        short = 'l',
-        long = "lib",
-        use_value_delimiter = true,
-        action = clap::ArgAction::Append,
-        hide = true
-    )]
-    _lib: Option<String>,
+    // The options below are for wasm-ld compatibility
     #[clap(long = "debug", hide = true)]
     _debug: bool,
-    #[clap(long = "rsp-quoting", hide = true)]
-    _rsp_quoting: Option<String>,
-    #[clap(long = "flavor", hide = true)]
-    _flavor: Option<String>,
-    #[clap(long = "no-entry", hide = true)]
-    _no_entry: bool,
-    #[clap(long = "gc-sections", hide = true)]
-    _gc_sections: bool,
-    #[clap(long = "strip-debug", hide = true)]
-    _strip_debug: bool,
-    #[clap(long = "strip-all", hide = true)]
-    _strip_all: bool,
 }
 
 fn main() {

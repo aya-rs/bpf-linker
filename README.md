@@ -68,24 +68,6 @@ target = "bpfel-unknown-none"
 build-std = ["core"]
 ```
 
-### Stable (not recommended)
-
-
-If for whatever reason you can't use rust nightly to build your project, you can
-still compile your eBPF crate with:
-
-```sh
-$ cargo rustc --release -- \
-        -C linker-plugin-lto \
-        -C linker-flavor=wasm-ld -C linker=bpf-linker \
-        -C link-arg=--target=bpf
-   Compiling bpf-log-clone v0.1.0 (/home/alessandro/bpf-log-clone)
-   Finished release [optimized] target(s) in 0.86s
-
-$ file target/release/libbpf_log_clone.so
-target/release/libbpf_log_clone.so: ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
-```
-
 # Clang
 
 For a simple example of how to use the linker with clang see [this
