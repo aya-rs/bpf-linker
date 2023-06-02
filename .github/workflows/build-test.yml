@@ -91,14 +91,6 @@ jobs:
       - name: Build
         run: cargo hack build --feature-powerset
 
-      - name: Test (rustc target = HOST_TARGET, link target = BPF)
-        if: matrix.rust == 'nightly'
-        env:
-          TESTS_HOST_TARGET: 1
-        run: cargo hack test --feature-powerset
-
-      - name: Tests (rustc target = BPF, link target = BPF)
+      - name: Test
         if: matrix.rust == 'nightly-from-source'
-        env:
-          TESTS_HOST_TARGET: 0
         run: cargo hack test --feature-powerset
