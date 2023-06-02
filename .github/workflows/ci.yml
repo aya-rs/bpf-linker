@@ -57,7 +57,8 @@ jobs:
           - beta
           - nightly
         llvm:
-          - 17
+          # TODO: restore this when https://reviews.llvm.org/D156446 is included in an LLVM release.
+          # - 17
           - source
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
     needs: llvm
@@ -86,9 +87,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check (default features, no system LLVM)
+        # TODO: remove this when https://reviews.llvm.org/D156446 is included in rustc's LLVM.
+        if: ${{ false }}
         run: cargo check
 
       - name: Build (default features, no system LLVM)
+        # TODO: remove this when https://reviews.llvm.org/D156446 is included in rustc's LLVM.
+        if: ${{ false }}
         run: cargo build
 
       - name: Install dependencies

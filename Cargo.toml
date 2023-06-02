@@ -38,13 +38,14 @@ which = { version = "4.2.0", default-features = false, features = ["regex"] }
 [[bin]]
 name = "bpf-linker"
 
-[features]
-rust-llvm = [
-    "aya-rustc-llvm-proxy",
-    "llvm-sys/no-llvm-linking",
-    "llvm-sys/disable-alltargets-init",
-]
-default = ["rust-llvm"]
+# TODO: restore this when https://reviews.llvm.org/D156446 is included in rustc's LLVM.
+# [features]
+# rust-llvm = [
+#     "aya-rustc-llvm-proxy",
+#     "llvm-sys/no-llvm-linking",
+#     "llvm-sys/disable-alltargets-init",
+# ]
+# default = ["rust-llvm"]
 
 [profile.release]
 debug = true
