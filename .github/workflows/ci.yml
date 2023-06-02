@@ -14,6 +14,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  llvm:
+    uses: ./.github/workflows/llvm.yml
+
   lint-stable:
     runs-on: ubuntu-20.04
 
@@ -53,7 +56,9 @@ jobs:
           - nightly
         llvm:
           - 16
+          - source
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+    needs: llvm
 
     env:
       RUST_BACKTRACE: full
@@ -82,29 +87,61 @@ jobs:
       - name: Build (default features, no system LLVM)
         run: cargo build
 
-      - name: Install LLVM
-        shell: bash
+      - name: Install dependencies
+        if: matrix.rust == 'nightly'
+        # ubuntu-20.04 comes with clang prior to
+        # https://github.com/llvm/llvm-project/commit/6d6750696400 which does not implement
+        # __builtin_preserve_enum_value, used by relocation tests in aya.
+        #
+        # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
         run: |
+          set -euo pipefail
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e deb http://apt.llvm.org/focal/ llvm-toolchain-focal main | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get -y install clang gcc-multilib
+
+      - name: Install LLVM
+        if: matrix.llvm != 'source'
+        run: |
+          set -euo pipefail
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           echo -e deb http://apt.llvm.org/focal/ llvm-toolchain-focal-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get -y install \
-            llvm-${{ matrix.llvm }}-dev \
-            llvm-${{ matrix.llvm }}-tools \
-            libclang-${{ matrix.llvm }}-dev \
-            libpolly-${{ matrix.llvm }}-dev
+          sudo apt-get -y install llvm-${{ matrix.llvm }}-dev
+
+      - name: Add LLVM to PATH
+        if: matrix.llvm != 'source'
+        run: echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+
+      - name: Restore LLVM
+        if: matrix.llvm == 'source'
+        uses: actions/cache/restore@v3
+        with:
+          path: llvm-install
+          key: ${{ needs.llvm.outputs.cache-key }}
+          fail-on-cache-miss: true
+
+      - name: Add LLVM to PATH && LD_LIBRARY_PATH
+        if: matrix.llvm == 'source'
+        run: |
+          set -euo pipefail
+          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
+          # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
+          # doesn't affect behavior, but greatly reduces disk usage.
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
 
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
-        run: cargo hack check --feature-powerset
+        run: cargo hack check --feature-powerset --features llvm-sys/force-dynamic
 
       - name: Build
-        run: cargo hack build --feature-powerset
+        run: cargo hack build --feature-powerset --features llvm-sys/force-dynamic
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset
+        run: cargo hack test --feature-powerset --features llvm-sys/force-dynamic
 
       - uses: actions/checkout@v3
         if: matrix.rust == 'nightly'
@@ -113,22 +150,9 @@ jobs:
           path: aya
           submodules: recursive
 
-      - name: Install dependencies
-        if: matrix.rust == 'nightly'
-        # ubuntu-20.04 comes with clang prior to
-        # https://github.com/llvm/llvm-project/commit/6d6750696400 which does not implement
-        # __builtin_preserve_enum_value, used by relocation tests in aya.
-        #
-        # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
-        run: sudo apt-get -y install clang-${{ matrix.llvm }} gcc-multilib
-
-      - name: Add clang-${{ matrix.llvm }} to PATH
-        if: matrix.rust == 'nightly'
-        run: echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
-
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features
+        run: cargo install --path . --no-default-features --features llvm-sys/force-dynamic
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
