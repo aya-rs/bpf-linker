@@ -49,9 +49,16 @@ jobs:
           path: rust
           submodules: recursive
 
+      - name: Run sccache-cache
+        if: matrix.rust == 'nightly-from-source'
+        uses: mozilla-actions/sccache-action@v0.0.3
+
       # Ideally we'd use Cargo's `-Z build-std=core` but compiletest-rs uses rustc directly.
       - name: Install Rust From Source
         if: matrix.rust == 'nightly-from-source'
+        env:
+          SCCACHE_GHA_ENABLED: true
+          RUSTC_WRAPPER: sccache
         run: |
           pushd rust
           echo -e 'changelog-seen = 2'                                          >> config.toml
