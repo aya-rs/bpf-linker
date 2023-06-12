@@ -133,7 +133,7 @@ dependencies = [
  "clap",
  "compiletest_rs",
  "libc",
- "llvm-sys 160.1.0",
+ "llvm-sys 160.1.2",
  "log",
  "simplelog",
  "thiserror",
@@ -435,9 +435,9 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "160.1.0"
+version = "160.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f0f91af3fe5727f40c3bab7c3f7604d91db6c094a0be796e9700952e5f1017f"
+checksum = "c23bd4905c97f88d0dfec97095829f4ac7eff8ce28fec74a8f8eb8e64830a86e"
 dependencies = [
  "cc",
  "lazy_static",
