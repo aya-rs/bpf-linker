@@ -33,6 +33,7 @@ pub unsafe fn init<T: AsRef<str>>(args: &[T], overview: &str) {
     LLVMInitializeBPFTargetMC();
     LLVMInitializeBPFTargetInfo();
     LLVMInitializeBPFAsmPrinter();
+    LLVMInitializeBPFAsmParser();
     LLVMInitializeBPFDisassembler();
 
     parse_command_line_options(args, overview);
