@@ -89,16 +89,16 @@ checksum = "d67af77d68a931ecd5cbd8a3b5987d63a1d1d1278f7f6a60ae33db485cdebb69"
 
 [[package]]
 name = "aya-rustc-llvm-proxy"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d58419a0d794d532083678fef4720ef2e10b84c7f8367af07a553f2d6d9cca5"
+checksum = "e23ad0b7748159dcdd7c50ef983ce2fb0e276a485a55b7f9f3b2bf1f9cc86359"
 dependencies = [
  "cargo_metadata",
  "failure",
  "lazy_static",
  "libc",
  "libloading",
- "llvm-sys 150.0.5",
+ "llvm-sys",
  "quote 0.6.13",
  "syn 0.15.44",
 ]
@@ -133,7 +133,7 @@ dependencies = [
  "clap",
  "compiletest_rs",
  "libc",
- "llvm-sys 160.1.2",
+ "llvm-sys",
  "log",
  "simplelog",
  "thiserror",
@@ -406,11 +406,11 @@ checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 
 [[package]]
 name = "libloading"
-version = "0.5.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b111a074963af1d37a139918ac6d49ad1d0d5e47f72fd55388619691a7d753"
+checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
- "cc",
+ "cfg-if 1.0.0",
  "winapi",
 ]
 
@@ -419,19 +419,6 @@ name = "linux-raw-sys"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b64f40e5e03e0d54f03845c8197d0291253cdbedfb1cb46b13c2c117554a9f4c"
-
-[[package]]
-name = "llvm-sys"
-version = "150.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64be8a29d08e3165e4ed989b80cbc6b52104c543f16e272b83e2dedb749e81e6"
-dependencies = [
- "cc",
- "lazy_static",
- "libc",
- "regex",
- "semver 1.0.17",
-]
 
 [[package]]
 name = "llvm-sys"
