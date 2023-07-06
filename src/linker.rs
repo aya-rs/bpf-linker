@@ -247,7 +247,7 @@ impl Linker {
 
             // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
             // or an invalid file
-            file.read(&mut buf)
+            file.read_exact(&mut buf)
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
             file.rewind()
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
@@ -313,7 +313,7 @@ impl Linker {
         in_type: Option<InputType>,
     ) -> Result<(), LinkerError> {
         let mut data = Vec::new();
-        reader
+        let _: usize = reader
             .read_to_end(&mut data)
             .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
         // in_type is unknown when we're linking an item from an archive file
