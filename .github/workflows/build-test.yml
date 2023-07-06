@@ -21,7 +21,6 @@ jobs:
           - stable
           - beta
           - nightly
-          - nightly-from-source
         llvm:
           - 16
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
@@ -33,44 +32,19 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install Rust ${{ matrix.rust }}
-        if: matrix.rust != 'nightly-from-source'
+        if: matrix.rust != 'nightly'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
 
-      - uses: Swatinem/rust-cache@v2
-        if: matrix.rust != 'nightly-from-source'
-
-      - name: Checkout Rust Source
-        uses: actions/checkout@v3
-        if: matrix.rust == 'nightly-from-source'
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust == 'nightly'
+        uses: dtolnay/rust-toolchain@master
         with:
-          repository: rust-lang/rust
-          path: rust
-          submodules: recursive
+          toolchain: ${{ matrix.rust }}
+          components: rust-src
 
-      - name: Run sccache-cache
-        if: matrix.rust == 'nightly-from-source'
-        uses: mozilla-actions/sccache-action@v0.0.3
-
-      # Ideally we'd use Cargo's `-Z build-std=core` but compiletest-rs uses rustc directly.
-      - name: Install Rust From Source
-        if: matrix.rust == 'nightly-from-source'
-        env:
-          SCCACHE_GHA_ENABLED: true
-          RUSTC_WRAPPER: sccache
-        run: |
-          pushd rust
-          echo -e 'changelog-seen = 2'                                          >> config.toml
-          echo -e '[llvm]'                                                      >> config.toml
-          echo -e 'download-ci-llvm = true'                                     >> config.toml
-          echo -e '[build]'                                                     >> config.toml
-          echo -e 'host = ["x86_64-unknown-linux-gnu"]'                         >> config.toml
-          echo -e 'target = ["x86_64-unknown-linux-gnu", "bpfel-unknown-none"]' >> config.toml
-          ./x.py build --stage 1 library src/tools/rustdoc
-          rustup toolchain link stage1 build/x86_64-unknown-linux-gnu/stage1
-          popd
-          rustup override set stage1
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check (default features, no system LLVM)
         run: cargo check
@@ -99,5 +73,5 @@ jobs:
         run: cargo hack build --feature-powerset
 
       - name: Test
-        if: matrix.rust == 'nightly-from-source'
+        if: matrix.rust == 'nightly'
         run: cargo hack test --feature-powerset
