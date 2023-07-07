@@ -75,3 +75,24 @@ jobs:
       - name: Test
         if: matrix.rust == 'nightly'
         run: cargo hack test --feature-powerset
+
+      - uses: actions/checkout@v3
+        if: matrix.rust == 'nightly'
+        with:
+          repository: aya-rs/aya
+          path: aya
+
+      - uses: actions/checkout@v3
+        if: matrix.rust == 'nightly'
+        with:
+          repository: libbpf/libbpf
+          path: libbpf
+
+      - name: Install
+        if: matrix.rust == 'nightly'
+        run: cargo install --path . --no-default-features
+
+      - name: Run aya integration tests
+        if: matrix.rust == 'nightly'
+        working-directory: aya
+        run: cargo xtask integration-test --libbpf-dir ../libbpf
