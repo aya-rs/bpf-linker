@@ -81,12 +81,7 @@ jobs:
         with:
           repository: aya-rs/aya
           path: aya
-
-      - uses: actions/checkout@v3
-        if: matrix.rust == 'nightly'
-        with:
-          repository: libbpf/libbpf
-          path: libbpf
+          submodules: recursive
 
       - name: Install dependencies
         if: matrix.rust == 'nightly'
@@ -108,4 +103,4 @@ jobs:
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
         working-directory: aya
-        run: cargo xtask integration-test --libbpf-dir ../libbpf --runner "sudo PATH=$PATH"
+        run: cargo xtask integration-test --runner "sudo PATH=$PATH"
