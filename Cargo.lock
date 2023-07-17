@@ -446,9 +446,9 @@ checksum = "b64f40e5e03e0d54f03845c8197d0291253cdbedfb1cb46b13c2c117554a9f4c"
 
 [[package]]
 name = "llvm-sys"
-version = "160.1.2"
+version = "160.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c23bd4905c97f88d0dfec97095829f4ac7eff8ce28fec74a8f8eb8e64830a86e"
+checksum = "0bf51981ac0622b10fe4790763e3de1f3d68a0ee4222e03accaaab6731bd508d"
 dependencies = [
  "cc",
  "lazy_static",
