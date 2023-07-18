@@ -154,9 +154,29 @@ fn main() {
             arg
         }
     });
-    let cli = CommandLine::parse_from(args);
+    let CommandLine {
+        target,
+        cpu,
+        cpu_features,
+        output,
+        emit,
+        libs,
+        optimize,
+        export_symbols,
+        log_file,
+        log_level,
+        unroll_loops,
+        ignore_inline_never,
+        dump_module,
+        llvm_args,
+        disable_expand_memcpy_in_order,
+        disable_memory_builtins,
+        inputs,
+        export,
+        _debug,
+    } = Parser::parse_from(args);
 
-    if cli.inputs.is_empty() {
+    if inputs.is_empty() {
         error("no input files", clap::error::ErrorKind::TooFewValues);
     }
 
@@ -170,8 +190,8 @@ fn main() {
         },
         _ => None,
     };
-    let log_level = cli.log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
-    if let Some(path) = cli.log_file.clone() {
+    let log_level = log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
+    if let Some(path) = log_file {
         let log_file = match File::create(path) {
             Ok(f) => f,
             Err(e) => {
@@ -198,26 +218,6 @@ fn main() {
         env::args().collect::<Vec<_>>().join(" ")
     );
 
-    let CommandLine {
-        target,
-        cpu,
-        cpu_features,
-        inputs,
-        output,
-        emit,
-        libs,
-        optimize,
-        export_symbols,
-        unroll_loops,
-        ignore_inline_never,
-        dump_module,
-        llvm_args,
-        disable_expand_memcpy_in_order,
-        disable_memory_builtins,
-        mut export,
-        ..
-    } = cli;
-
     let mut export_symbols = export_symbols
         .map(|path| match fs::read_to_string(path) {
             Ok(symbols) => symbols
@@ -229,7 +229,7 @@ fn main() {
             }
         })
         .unwrap_or_else(HashSet::new);
-    export_symbols.extend(export.drain(..));
+    export_symbols.extend(export);
 
     let options = LinkerOptions {
         target,
@@ -289,10 +289,10 @@ mod test {
             "--target=bpf",
             "--emit=asm",
         ];
-        let cli = CommandLine::parse_from(args);
-        assert_eq!(cli.export, vec!["foo", "bar"]);
+        let CommandLine { inputs, export, .. } = Parser::parse_from(args);
+        assert_eq!(export, vec!["foo", "bar"]);
         assert_eq!(
-            cli.inputs,
+            inputs,
             vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
@@ -320,13 +320,10 @@ mod test {
             "--target=bpf",
             "--emit=asm",
         ];
-        let cli = CommandLine::parse_from(args);
+        let CommandLine { inputs, export, .. } = Parser::parse_from(args);
+        assert_eq!(export, vec!["foo", "bar", "ayy", "lmao", "lol", "rotfl"]);
         assert_eq!(
-            cli.export,
-            vec!["foo", "bar", "ayy", "lmao", "lol", "rotfl"]
-        );
-        assert_eq!(
-            cli.inputs,
+            inputs,
             vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
