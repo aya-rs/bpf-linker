@@ -10,7 +10,7 @@ use simplelog::{
 };
 use std::{
     env,
-    fs::{self, File},
+    fs::{self, OpenOptions},
     path::PathBuf,
     str::FromStr,
 };
@@ -190,8 +190,8 @@ fn main() {
         _ => None,
     };
     let log_level = log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
-    if let Some(path) = log_file {
-        let log_file = match File::create(path) {
+    if let Some(log_file) = log_file {
+        let log_file = match OpenOptions::new().create(true).append(true).open(log_file) {
             Ok(f) => f,
             Err(e) => {
                 error(
