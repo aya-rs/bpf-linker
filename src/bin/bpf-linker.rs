@@ -9,7 +9,6 @@ use simplelog::{
     ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
 };
 use std::{
-    collections::HashSet,
     env,
     fs::{self, File},
     path::PathBuf,
@@ -218,18 +217,22 @@ fn main() {
         env::args().collect::<Vec<_>>().join(" ")
     );
 
-    let mut export_symbols = export_symbols
-        .map(|path| match fs::read_to_string(path) {
-            Ok(symbols) => symbols
-                .lines()
-                .map(|s| s.to_string())
-                .collect::<HashSet<_>>(),
-            Err(e) => {
-                error(&e.to_string(), clap::error::ErrorKind::Io);
-            }
-        })
-        .unwrap_or_else(HashSet::new);
-    export_symbols.extend(export);
+    let export_symbols = export_symbols
+        .map(fs::read_to_string)
+        .transpose()
+        .unwrap_or_else(|e| {
+            error(&e.to_string(), clap::error::ErrorKind::Io);
+        });
+
+    // TODO: the data is owned by this call frame; we could make this zero-alloc.
+    let export_symbols = export_symbols
+        .as_deref()
+        .into_iter()
+        .flat_map(str::lines)
+        .map(str::to_owned)
+        .chain(export)
+        .map(Into::into)
+        .collect();
 
     let options = LinkerOptions {
         target,
@@ -270,7 +273,7 @@ mod test {
     // `--export` flag.
     #[test]
     fn test_export_input_args() {
-        let args = vec![
+        let args = [
             "bpf-linker",
             "--export",
             "foo",
@@ -290,16 +293,16 @@ mod test {
             "--emit=asm",
         ];
         let CommandLine { inputs, export, .. } = Parser::parse_from(args);
-        assert_eq!(export, vec!["foo", "bar"]);
+        assert_eq!(export, ["foo", "bar"]);
         assert_eq!(
             inputs,
-            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+            [PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
 
     #[test]
     fn test_export_delimiter() {
-        let args = vec![
+        let args = [
             "bpf-linker",
             "--export",
             "foo,bar",
@@ -321,10 +324,10 @@ mod test {
             "--emit=asm",
         ];
         let CommandLine { inputs, export, .. } = Parser::parse_from(args);
-        assert_eq!(export, vec!["foo", "bar", "ayy", "lmao", "lol", "rotfl"]);
+        assert_eq!(export, ["foo", "bar", "ayy", "lmao", "lol", "rotfl"]);
         assert_eq!(
             inputs,
-            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+            [PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
 }

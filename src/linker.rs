@@ -6,6 +6,7 @@ use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use log::*;
 use std::{
+    borrow::Cow,
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
@@ -193,7 +194,7 @@ pub struct LinkerOptions {
     /// Optimization level.
     pub optimize: OptLevel,
     /// Set of symbol names to export.
-    pub export_symbols: HashSet<String>,
+    pub export_symbols: HashSet<Cow<'static, str>>,
     /// Whether to aggressively unroll loops. Useful for older kernels that don't support loops.
     pub unroll_loops: bool,
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
@@ -411,8 +412,8 @@ impl Linker {
         if !self.options.disable_memory_builtins {
             self.options.export_symbols.extend(
                 ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
-                    .iter()
-                    .map(|&s| s.to_owned()),
+                    .into_iter()
+                    .map(Into::into),
             );
         };
         debug!(
@@ -469,19 +470,22 @@ impl Linker {
     }
 
     fn llvm_init(&mut self) {
-        let mut args = vec!["bpf-linker".to_string()];
+        let mut args = Vec::<Cow<str>>::new();
+        args.push("bpf-linker".into());
         if self.options.unroll_loops {
             // setting cmdline arguments is the only way to customize the unroll pass with the
             // C API.
-            args.push("--unroll-runtime".to_string());
-            args.push("--unroll-runtime-multi-exit".to_string());
-            args.push(format!("--unroll-max-upperbound={}", std::u32::MAX));
-            args.push(format!("--unroll-threshold={}", std::u32::MAX));
+            args.extend([
+                "--unroll-runtime".into(),
+                "--unroll-runtime-multi-exit".into(),
+                format!("--unroll-max-upperbound={}", std::u32::MAX).into(),
+                format!("--unroll-threshold={}", std::u32::MAX).into(),
+            ]);
         }
         if !self.options.disable_expand_memcpy_in_order {
-            args.push("--bpf-expand-memcpy-in-order".to_string());
+            args.push("--bpf-expand-memcpy-in-order".into());
         }
-        args.extend_from_slice(&self.options.llvm_args);
+        args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);
         unsafe {
             llvm::init(&args, "BPF linker");
