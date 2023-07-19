@@ -2,6 +2,7 @@ mod iter;
 mod message;
 
 use std::{
+    borrow::Cow,
     collections::HashSet,
     ffi::{c_void, CStr, CString},
     os::raw::c_char,
@@ -172,7 +173,7 @@ pub unsafe fn optimize(
     module: LLVMModuleRef,
     opt_level: OptLevel,
     ignore_inline_never: bool,
-    export_symbols: &HashSet<String>,
+    export_symbols: &HashSet<Cow<'static, str>>,
 ) {
     if module_asm_is_probestack(module) {
         LLVMSetModuleInlineAsm2(module, ptr::null_mut(), 0);
@@ -213,10 +214,10 @@ pub unsafe fn optimize(
     LLVMPassManagerBuilderPopulateModulePassManager(pmb, mpm);
 
     for sym in module.globals_iter() {
-        internalize(sym, &symbol_name(sym), export_symbols);
+        internalize(sym, symbol_name(sym), export_symbols);
     }
     for sym in module.global_aliases_iter() {
-        internalize(sym, &symbol_name(sym), export_symbols);
+        internalize(sym, symbol_name(sym), export_symbols);
     }
 
     debug!("running function passes");
@@ -227,7 +228,7 @@ pub unsafe fn optimize(
             if ignore_inline_never {
                 remove_attribute(function, "noinline");
             }
-            internalize(function, &name, export_symbols);
+            internalize(function, name, export_symbols);
             if LLVMIsDeclaration(function) == 0 {
                 LLVMRunFunctionPassManager(fpm, function);
             }
@@ -254,11 +255,10 @@ unsafe fn module_asm_is_probestack(module: LLVMModuleRef) -> bool {
     asm.contains("__rust_probestack")
 }
 
-fn symbol_name(value: *mut llvm_sys::LLVMValue) -> String {
+fn symbol_name<'a>(value: *mut llvm_sys::LLVMValue) -> &'a str {
     let mut name_len = 0;
-    unsafe { CStr::from_ptr(LLVMGetValueName2(value, &mut name_len)) }
-        .to_string_lossy()
-        .to_string()
+    let ptr = unsafe { LLVMGetValueName2(value, &mut name_len) };
+    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap()
 }
 
 unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
@@ -298,7 +298,11 @@ pub unsafe fn codegen(
     Ok(())
 }
 
-pub unsafe fn internalize(value: LLVMValueRef, name: &str, export_symbols: &HashSet<String>) {
+pub unsafe fn internalize(
+    value: LLVMValueRef,
+    name: &str,
+    export_symbols: &HashSet<Cow<'static, str>>,
+) {
     if !name.starts_with("llvm.") && !export_symbols.contains(name) {
         LLVMSetLinkage(value, LLVMLinkage::LLVMInternalLinkage);
         LLVMSetVisibility(value, LLVMVisibility::LLVMDefaultVisibility);

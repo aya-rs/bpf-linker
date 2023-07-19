@@ -9,9 +9,8 @@ use simplelog::{
     ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
 };
 use std::{
-    collections::HashSet,
     env,
-    fs::{self, File},
+    fs::{self, OpenOptions},
     path::PathBuf,
     str::FromStr,
 };
@@ -154,9 +153,29 @@ fn main() {
             arg
         }
     });
-    let cli = CommandLine::parse_from(args);
+    let CommandLine {
+        target,
+        cpu,
+        cpu_features,
+        output,
+        emit,
+        libs,
+        optimize,
+        export_symbols,
+        log_file,
+        log_level,
+        unroll_loops,
+        ignore_inline_never,
+        dump_module,
+        llvm_args,
+        disable_expand_memcpy_in_order,
+        disable_memory_builtins,
+        inputs,
+        export,
+        _debug,
+    } = Parser::parse_from(args);
 
-    if cli.inputs.is_empty() {
+    if inputs.is_empty() {
         error("no input files", clap::error::ErrorKind::TooFewValues);
     }
 
@@ -170,9 +189,9 @@ fn main() {
         },
         _ => None,
     };
-    let log_level = cli.log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
-    if let Some(path) = cli.log_file.clone() {
-        let log_file = match File::create(path) {
+    let log_level = log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
+    if let Some(log_file) = log_file {
+        let log_file = match OpenOptions::new().create(true).append(true).open(log_file) {
             Ok(f) => f,
             Err(e) => {
                 error(
@@ -198,38 +217,22 @@ fn main() {
         env::args().collect::<Vec<_>>().join(" ")
     );
 
-    let CommandLine {
-        target,
-        cpu,
-        cpu_features,
-        inputs,
-        output,
-        emit,
-        libs,
-        optimize,
-        export_symbols,
-        unroll_loops,
-        ignore_inline_never,
-        dump_module,
-        llvm_args,
-        disable_expand_memcpy_in_order,
-        disable_memory_builtins,
-        mut export,
-        ..
-    } = cli;
+    let export_symbols = export_symbols
+        .map(fs::read_to_string)
+        .transpose()
+        .unwrap_or_else(|e| {
+            error(&e.to_string(), clap::error::ErrorKind::Io);
+        });
 
-    let mut export_symbols = export_symbols
-        .map(|path| match fs::read_to_string(path) {
-            Ok(symbols) => symbols
-                .lines()
-                .map(|s| s.to_string())
-                .collect::<HashSet<_>>(),
-            Err(e) => {
-                error(&e.to_string(), clap::error::ErrorKind::Io);
-            }
-        })
-        .unwrap_or_else(HashSet::new);
-    export_symbols.extend(export.drain(..));
+    // TODO: the data is owned by this call frame; we could make this zero-alloc.
+    let export_symbols = export_symbols
+        .as_deref()
+        .into_iter()
+        .flat_map(str::lines)
+        .map(str::to_owned)
+        .chain(export)
+        .map(Into::into)
+        .collect();
 
     let options = LinkerOptions {
         target,
@@ -270,7 +273,7 @@ mod test {
     // `--export` flag.
     #[test]
     fn test_export_input_args() {
-        let args = vec![
+        let args = [
             "bpf-linker",
             "--export",
             "foo",
@@ -289,17 +292,17 @@ mod test {
             "--target=bpf",
             "--emit=asm",
         ];
-        let cli = CommandLine::parse_from(args);
-        assert_eq!(cli.export, vec!["foo", "bar"]);
+        let CommandLine { inputs, export, .. } = Parser::parse_from(args);
+        assert_eq!(export, ["foo", "bar"]);
         assert_eq!(
-            cli.inputs,
-            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+            inputs,
+            [PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
 
     #[test]
     fn test_export_delimiter() {
-        let args = vec![
+        let args = [
             "bpf-linker",
             "--export",
             "foo,bar",
@@ -320,14 +323,11 @@ mod test {
             "--target=bpf",
             "--emit=asm",
         ];
-        let cli = CommandLine::parse_from(args);
+        let CommandLine { inputs, export, .. } = Parser::parse_from(args);
+        assert_eq!(export, ["foo", "bar", "ayy", "lmao", "lol", "rotfl"]);
         assert_eq!(
-            cli.export,
-            vec!["foo", "bar", "ayy", "lmao", "lol", "rotfl"]
-        );
-        assert_eq!(
-            cli.inputs,
-            vec![PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
+            inputs,
+            [PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
     }
 }
