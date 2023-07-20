@@ -82,3 +82,25 @@ llvm_iterator! {
     LLVMGetLastFunction,
     LLVMGetNextFunction,
 }
+
+llvm_iterator! {
+    IterFunctionBasicBlocks,
+    BasicBlockIter,
+    LLVMValueRef,
+    basic_blocks_iter,
+    LLVMBasicBlockRef,
+    LLVMGetFirstBasicBlock,
+    LLVMGetLastBasicBlock,
+    LLVMGetNextBasicBlock,
+}
+
+llvm_iterator! {
+    IterBasicBlockInstructions,
+    InstructionsIter,
+    LLVMBasicBlockRef,
+    instructions_iter,
+    LLVMValueRef,
+    LLVMGetFirstInstruction,
+    LLVMGetLastInstruction,
+    LLVMGetNextInstruction,
+}
