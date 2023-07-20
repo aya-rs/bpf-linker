@@ -38,3 +38,6 @@ rust-llvm = [
     "llvm-sys/disable-alltargets-init"
 ]
 default = ["rust-llvm"]
+
+[profile.release]
+debug = true
