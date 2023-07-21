@@ -141,7 +141,7 @@ struct CommandLine {
     export: Vec<String>,
 
     /// Whether to treat LLVM errors as fatal.
-    #[clap(long, action = clap::ArgAction::Set, default_value_t = false)]
+    #[clap(long, action = clap::ArgAction::Set, default_value_t = true)]
     fatal_errors: bool,
 
     // The options below are for wasm-ld compatibility
