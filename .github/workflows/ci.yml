@@ -156,4 +156,7 @@ jobs:
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
         working-directory: aya
+        env:
+          CARGO_TARGET_bpfeb-unknown-none_RUSTFLAGS: -Clink-arg=--fatal-errors=true
+          CARGO_TARGET_bpfel-unknown-none_RUSTFLAGS: -Clink-arg=--fatal-errors=true
         run: cargo xtask integration-test --runner "sudo PATH=$PATH"

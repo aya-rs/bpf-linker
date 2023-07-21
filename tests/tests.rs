@@ -6,7 +6,8 @@ use std::{
 use which::which;
 
 fn run_mode(target: &str, mode: &str, sysroot: Option<&Path>) {
-    let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
+    let linker = env!("CARGO_BIN_EXE_bpf-linker");
+    let mut target_rustcflags = format!("-C linker={linker} -C link-arg=--fatal-errors=true");
     if let Some(sysroot) = sysroot {
         let sysroot = sysroot.to_str().unwrap();
         target_rustcflags += &format!(" --sysroot {sysroot}");
