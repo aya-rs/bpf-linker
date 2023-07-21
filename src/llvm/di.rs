@@ -80,7 +80,19 @@ impl DIFix {
 
                         // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
                         let elements = LLVMGetOperand(value, 4);
-                        let operands = LLVMGetNumOperands(elements).try_into().unwrap();
+
+                        // elements is NULL only for DI with flags: DIFlagFwdDecl
+                        // declarations with DIFlagFwdDecl always get declared elsewhere without this flag
+                        // conservative bug-fix: we just set operands to 0 so just the loop is skipped
+                        let flags = LLVMDITypeGetFlags(metadata);
+                        let operands = {
+                            if flags == LLVMDIFlagFwdDecl {
+                                0
+                            } else {
+                                LLVMGetNumOperands(elements).try_into().unwrap()
+                            }
+                        };
+
                         let mut members = Vec::new();
                         for i in 0..operands {
                             let element = LLVMGetOperand(elements, i);
