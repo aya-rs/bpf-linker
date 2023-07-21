@@ -15,6 +15,10 @@ impl Message {
         }
     }
 
+    pub fn from_ptr(ptr: *mut c_char) -> Self {
+        Self { ptr }
+    }
+
     pub fn as_c_str(&self) -> Option<&CStr> {
         let Self { ptr } = self;
         if !ptr.is_null() {
