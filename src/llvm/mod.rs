@@ -74,9 +74,9 @@ pub unsafe fn find_embedded_bitcode(
     );
 
     let mut message = Message::new();
-    let bin = LLVMCreateBinary(buffer, ptr::null_mut(), message.as_mut_ptr());
+    let bin = LLVMCreateBinary(buffer, ptr::null_mut(), &mut *message);
     if bin.is_null() {
-        return Err(message.to_string());
+        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
 
     let mut ret = None;
@@ -131,8 +131,8 @@ pub unsafe fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String>
     let mut target = ptr::null_mut();
     let mut message = Message::new();
 
-    if LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, message.as_mut_ptr()) == 1 {
-        return Err(message.to_string());
+    if LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, &mut *message) == 1 {
+        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
 
     Ok(target)
@@ -269,8 +269,8 @@ unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
 
 pub unsafe fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), String> {
     let mut message = Message::new();
-    if LLVMPrintModuleToFile(module, output.as_ptr(), message.as_mut_ptr()) == 1 {
-        return Err(message.to_string());
+    if LLVMPrintModuleToFile(module, output.as_ptr(), &mut *message) == 1 {
+        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
 
     Ok(())
@@ -289,10 +289,10 @@ pub unsafe fn codegen(
         module,
         output.as_ptr() as *mut _,
         output_type,
-        message.as_mut_ptr(),
+        &mut *message,
     ) == 1
     {
-        return Err(message.to_string());
+        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
 
     Ok(())

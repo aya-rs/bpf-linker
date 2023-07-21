@@ -1,50 +1,53 @@
-use std::ffi::CStr;
-use std::fmt;
-use std::ptr;
+use std::{ffi::CStr, ptr};
 
 use libc::c_char;
 use llvm_sys::core::LLVMDisposeMessage;
 
-/// Convinient LLVM Message pointer wrapper.
-/// Does not own the ptr, so we have to call `LLVMDisposeMessage` to free message memory.
-#[repr(C)]
+/// Convenient LLVM Message pointer wrapper.
 pub struct Message {
-    pub ptr: *mut c_char,
+    ptr: *mut c_char,
 }
 
 impl Message {
     pub fn new() -> Self {
-        Message {
+        Self {
             ptr: ptr::null_mut(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.ptr.is_null()
+    pub fn as_c_str(&self) -> Option<&CStr> {
+        let Self { ptr } = self;
+        if !ptr.is_null() {
+            unsafe { Some(CStr::from_ptr(*ptr)) }
+        } else {
+            None
+        }
     }
+}
 
-    pub fn as_mut_ptr(&mut self) -> *mut *mut c_char {
-        &mut self.ptr
+impl std::ops::Deref for Message {
+    type Target = *mut c_char;
+
+    fn deref(&self) -> &Self::Target {
+        let Self { ptr } = self;
+        ptr
+    }
+}
+
+impl std::ops::DerefMut for Message {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let Self { ptr } = self;
+        ptr
     }
 }
 
 impl Drop for Message {
     fn drop(&mut self) {
-        if !self.is_empty() {
+        let Self { ptr } = self;
+        if !ptr.is_null() {
             unsafe {
-                LLVMDisposeMessage(self.ptr);
+                LLVMDisposeMessage(*ptr);
             }
-        }
-    }
-}
-
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_empty() {
-            let contents = unsafe { CStr::from_ptr(self.ptr).to_str().unwrap() };
-            write!(f, "{contents}")
-        } else {
-            write!(f, "(empty)")
         }
     }
 }
