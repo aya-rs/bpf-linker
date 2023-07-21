@@ -206,7 +206,7 @@ pub struct LinkerOptions {
     pub llvm_args: Vec<String>,
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
     pub disable_expand_memcpy_in_order: bool,
-    /// Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
+    /// Disable exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
@@ -218,6 +218,7 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
+    has_errors: bool,
 }
 
 impl Linker {
@@ -228,16 +229,22 @@ impl Linker {
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
+            has_errors: false,
         }
     }
 
     /// Link and generate the output code.
-    pub fn link(mut self) -> Result<(), LinkerError> {
+    pub fn link(&mut self) -> Result<(), LinkerError> {
         self.llvm_init();
         self.link_modules()?;
         self.create_target_machine()?;
         self.optimize()?;
-        self.codegen()
+        self.codegen()?;
+        Ok(())
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.has_errors
     }
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
@@ -259,7 +266,7 @@ impl Linker {
                 InputType::Archive => {
                     info!("linking archive {:?}", path);
 
-                    // uncompress the archive and call link_reader() for each item
+                    // Extract the archive and call link_reader() for each item.
                     let mut archive = Archive::new(file);
                     while let Some(Ok(item)) = archive.next_entry() {
                         let name =
@@ -493,8 +500,8 @@ impl Linker {
             self.context = LLVMContextCreate();
             LLVMContextSetDiagnosticHandler(
                 self.context,
-                Some(llvm::diagnostic_handler),
-                ptr::null_mut(),
+                Some(llvm::diagnostic_handler::<Self>),
+                self as *mut _ as _,
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
@@ -503,6 +510,21 @@ impl Linker {
                 self.context,
             )
             .unwrap();
+        }
+    }
+}
+
+impl llvm::LLVMDiagnosticHandler for Linker {
+    fn handle_diagnostic(&mut self, severity: llvm_sys::LLVMDiagnosticSeverity, message: &str) {
+        match severity {
+            llvm_sys::LLVMDiagnosticSeverity::LLVMDSError => {
+                self.has_errors = true;
+
+                error!("llvm: {}", message)
+            }
+            llvm_sys::LLVMDiagnosticSeverity::LLVMDSWarning => warn!("llvm: {}", message),
+            llvm_sys::LLVMDiagnosticSeverity::LLVMDSRemark => debug!("remark: {}", message),
+            llvm_sys::LLVMDiagnosticSeverity::LLVMDSNote => debug!("note: {}", message),
         }
     }
 }

@@ -309,17 +309,19 @@ pub unsafe fn internalize(
     }
 }
 
-pub extern "C" fn diagnostic_handler(info: LLVMDiagnosticInfoRef, _data: *mut c_void) {
-    let message = unsafe { CStr::from_ptr(LLVMGetDiagInfoDescription(info)) };
-    let message_s = message.to_str().unwrap();
+pub trait LLVMDiagnosticHandler {
+    fn handle_diagnostic(&mut self, severity: llvm_sys::LLVMDiagnosticSeverity, message: &str);
+}
 
-    use llvm_sys::LLVMDiagnosticSeverity::*;
-    match unsafe { LLVMGetDiagInfoSeverity(info) } {
-        LLVMDSError => error!("llvm: {}", message_s),
-        LLVMDSWarning => warn!("llvm: {}", message_s),
-        LLVMDSRemark => debug!("remark: {}", message_s),
-        LLVMDSNote => debug!("note: {}", message_s),
-    };
+pub extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
+    info: LLVMDiagnosticInfoRef,
+    handler: *mut c_void,
+) {
+    let severity = unsafe { LLVMGetDiagInfoSeverity(info) };
+    let message = Message::from_ptr(unsafe { LLVMGetDiagInfoDescription(info) });
+    let handler = handler as *mut T;
+    unsafe { &mut *handler }
+        .handle_diagnostic(severity, message.as_c_str().unwrap().to_str().unwrap());
 }
 
 pub extern "C" fn fatal_error(reason: *const c_char) {
