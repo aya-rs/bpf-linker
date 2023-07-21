@@ -492,6 +492,20 @@ impl Linker {
         if !self.options.disable_expand_memcpy_in_order {
             args.push("--bpf-expand-memcpy-in-order".into());
         }
+        args.push(
+            format!(
+                "--inline-threshold={}",
+                match self.options.optimize {
+                    OptLevel::No => 0,
+                    OptLevel::Less => 25,
+                    OptLevel::Default => 225,
+                    OptLevel::Aggressive => 275,
+                    OptLevel::Size => 25,
+                    OptLevel::SizeMin => 0,
+                }
+            )
+            .into(),
+        );
         args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);
         unsafe {
