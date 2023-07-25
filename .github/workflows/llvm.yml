@@ -1,4 +1,4 @@
-name: llvm_workflow
+name: LLVM
 
 on:
   workflow_call:
