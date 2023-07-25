@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: 00 4 * * *
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  llvm:
+    uses: ./.github/workflows/llvm.yml
+
+  lint-stable:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy, rust-src
+
+      - name: Run clippy
+        run: cargo clippy --features llvm-sys/no-llvm-linking --all-targets --workspace -- --deny warnings
+
+  lint-nightly:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt, rust-src
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  build:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+        llvm:
+          - 16
+          - source
+    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+    needs: llvm
+
+    env:
+      RUST_BACKTRACE: full
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust != 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust == 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check (default features, no system LLVM)
+        run: cargo check
+
+      - name: Build (default features, no system LLVM)
+        run: cargo build
+
+      - name: Install dependencies
+        if: matrix.rust == 'nightly'
+        # ubuntu-20.04 comes with clang prior to
+        # https://github.com/llvm/llvm-project/commit/6d6750696400 which does not implement
+        # __builtin_preserve_enum_value, used by relocation tests in aya.
+        #
+        # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
+        run: |
+          set -euxo pipefail
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e deb http://apt.llvm.org/focal/ llvm-toolchain-focal-16 main | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get -y install clang-16 gcc-multilib
+          echo /usr/lib/llvm-16/bin >> $GITHUB_PATH
+
+      - name: Install LLVM
+        if: matrix.llvm != 'source'
+        run: |
+          set -euxo pipefail
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e deb http://apt.llvm.org/focal/ llvm-toolchain-focal-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
+
+          sudo apt-get update
+          sudo apt-get -y install llvm-${{ matrix.llvm }}-dev
+          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+
+      - name: Restore LLVM
+        if: matrix.llvm == 'source'
+        uses: actions/cache/restore@v3
+        with:
+          path: llvm-install
+          key: ${{ needs.llvm.outputs.cache-key }}
+          fail-on-cache-miss: true
+
+      - name: Add LLVM to PATH && LD_LIBRARY_PATH
+        if: matrix.llvm == 'source'
+        run: |
+          set -euxo pipefail
+          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
+          # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
+          # doesn't affect behavior, but greatly reduces disk usage.
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
+
+      - uses: taiki-e/install-action@cargo-hack
+
+      - name: Check
+        run: cargo hack check --feature-powerset --features llvm-sys/force-dynamic
+
+      - name: Build
+        run: cargo hack build --feature-powerset --features llvm-sys/force-dynamic
+
+      - name: Test
+        if: matrix.rust == 'nightly'
+        run: cargo hack test --feature-powerset --features llvm-sys/force-dynamic
+
+      - uses: actions/checkout@v3
+        if: matrix.rust == 'nightly'
+        with:
+          repository: aya-rs/aya
+          path: aya
+          submodules: recursive
+
+      - name: Install
+        if: matrix.rust == 'nightly'
+        run: cargo install --path . --no-default-features --features llvm-sys/force-dynamic
+
+      - name: Run aya integration tests
+        if: matrix.rust == 'nightly'
+        working-directory: aya
+        run: cargo xtask integration-test --runner "sudo PATH=$PATH"
