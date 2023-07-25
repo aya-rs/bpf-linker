@@ -127,7 +127,7 @@ struct CommandLine {
     #[clap(long)]
     disable_expand_memcpy_in_order: bool,
 
-    /// Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
+    /// Disable exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     #[clap(long)]
@@ -139,6 +139,10 @@ struct CommandLine {
     /// Comma separated list of symbols to export. See also `--export-symbols`
     #[clap(long, value_name = "symbols", use_value_delimiter = true, action = clap::ArgAction::Append)]
     export: Vec<String>,
+
+    /// Whether to treat LLVM errors as fatal.
+    #[clap(long, action = clap::ArgAction::Set, default_value_t = false)]
+    fatal_errors: bool,
 
     // The options below are for wasm-ld compatibility
     #[clap(long = "debug", hide = true)]
@@ -172,6 +176,7 @@ fn main() {
         disable_memory_builtins,
         inputs,
         export,
+        fatal_errors,
         _debug,
     } = Parser::parse_from(args);
 
@@ -234,7 +239,7 @@ fn main() {
         .map(Into::into)
         .collect();
 
-    let options = LinkerOptions {
+    let mut linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
@@ -250,10 +255,17 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
-    };
+    });
 
-    if let Err(e) = Linker::new(options).link() {
+    if let Err(e) = linker.link() {
         error(&e.to_string(), clap::error::ErrorKind::Io);
+    }
+
+    if fatal_errors && linker.has_errors() {
+        error(
+            "LLVM issued diagnostic with error severity",
+            clap::error::ErrorKind::Io,
+        );
     }
 }
 
