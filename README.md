@@ -30,9 +30,9 @@ cargo install bpf-linker
 
 ### Using external LLVM
 
-On Debian based distributions you need to install the `llvm-16-dev` and
-`libclang-16-dev` packages. If your distro doesn't have them you can get them
-from the official LLVM repo at https://apt.llvm.org. You need to install libpolly-16-dev too if you use this repo.
+On Debian based distributions you need to install the `llvm-16-dev`, `libclang-16-dev`
+and `libpolly-16-dev` packages. If your distro doesn't have them you can get them
+from the official LLVM repo at https://apt.llvm.org.
 
 On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
 If your distro doesn't have them you can get them from Fedora Rawhide.
