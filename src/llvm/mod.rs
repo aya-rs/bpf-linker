@@ -1,5 +1,4 @@
 mod iter;
-mod message;
 
 use std::{
     borrow::Cow,
@@ -25,7 +24,6 @@ use llvm_sys::LLVMAttributeFunctionIndex;
 use llvm_sys::{LLVMLinkage, LLVMVisibility};
 use log::*;
 
-use self::message::Message;
 use crate::OptLevel;
 use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 
@@ -62,7 +60,7 @@ pub unsafe fn create_module(name: &str, context: LLVMContextRef) -> Option<LLVMM
 }
 
 pub unsafe fn find_embedded_bitcode(
-    _context: LLVMContextRef,
+    context: LLVMContextRef,
     data: &[u8],
 ) -> Result<Option<Vec<u8>>, String> {
     let buffer_name = CString::new("mem_buffer").unwrap();
@@ -73,8 +71,7 @@ pub unsafe fn find_embedded_bitcode(
         0,
     );
 
-    let mut message = Message::new();
-    let bin = LLVMCreateBinary(buffer, ptr::null_mut(), &mut *message);
+    let (bin, message) = Message::with(|message| LLVMCreateBinary(buffer, context, message));
     if bin.is_null() {
         return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
@@ -129,13 +126,13 @@ pub unsafe fn link_bitcode_buffer(
 
 pub unsafe fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String> {
     let mut target = ptr::null_mut();
-    let mut message = Message::new();
-
-    if LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, &mut *message) == 1 {
-        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
+    let (ret, message) =
+        Message::with(|message| LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, message));
+    if ret == 0 {
+        Ok(target)
+    } else {
+        Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
     }
-
-    Ok(target)
 }
 
 pub unsafe fn target_from_module(module: LLVMModuleRef) -> Result<LLVMTargetRef, String> {
@@ -268,12 +265,13 @@ unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
 }
 
 pub unsafe fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), String> {
-    let mut message = Message::new();
-    if LLVMPrintModuleToFile(module, output.as_ptr(), &mut *message) == 1 {
-        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
+    let (ret, message) =
+        Message::with(|message| LLVMPrintModuleToFile(module, output.as_ptr(), message));
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
     }
-
-    Ok(())
 }
 
 pub unsafe fn codegen(
@@ -282,20 +280,14 @@ pub unsafe fn codegen(
     output: &CStr,
     output_type: LLVMCodeGenFileType,
 ) -> Result<(), String> {
-    let mut message = Message::new();
-
-    if LLVMTargetMachineEmitToFile(
-        tm,
-        module,
-        output.as_ptr() as *mut _,
-        output_type,
-        &mut *message,
-    ) == 1
-    {
-        return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
+    let (ret, message) = Message::with(|message| {
+        LLVMTargetMachineEmitToFile(tm, module, output.as_ptr() as *mut _, output_type, message)
+    });
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
     }
-
-    Ok(())
 }
 
 pub unsafe fn internalize(
@@ -318,7 +310,9 @@ pub extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
     handler: *mut c_void,
 ) {
     let severity = unsafe { LLVMGetDiagInfoSeverity(info) };
-    let message = Message::from_ptr(unsafe { LLVMGetDiagInfoDescription(info) });
+    let message = Message {
+        ptr: unsafe { LLVMGetDiagInfoDescription(info) },
+    };
     let handler = handler as *mut T;
     unsafe { &mut *handler }
         .handle_diagnostic(severity, message.as_c_str().unwrap().to_str().unwrap());
@@ -326,4 +320,34 @@ pub extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
 
 pub extern "C" fn fatal_error(reason: *const c_char) {
     error!("fatal error: {:?}", unsafe { CStr::from_ptr(reason) })
+}
+
+struct Message {
+    ptr: *mut c_char,
+}
+
+impl Message {
+    fn with<T, F: FnOnce(*mut *mut c_char) -> T>(f: F) -> (T, Self) {
+        let mut ptr = ptr::null_mut();
+        let t = f(&mut ptr);
+        (t, Self { ptr })
+    }
+
+    fn as_c_str(&self) -> Option<&CStr> {
+        let Self { ptr } = self;
+        let ptr = *ptr;
+        (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) })
+    }
+}
+
+impl Drop for Message {
+    fn drop(&mut self) {
+        let Self { ptr } = self;
+        let ptr = *ptr;
+        if !ptr.is_null() {
+            unsafe {
+                LLVMDisposeMessage(ptr);
+            }
+        }
+    }
 }
