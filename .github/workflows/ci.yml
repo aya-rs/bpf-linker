@@ -130,6 +130,11 @@ jobs:
           # doesn't affect behavior, but greatly reduces disk usage.
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
 
+      # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
+      # flags may be incorrect when the cache is reused across LLVM versions.
+      - name: Bust llvm-sys cache
+        run: cargo clean -p llvm-sys
+
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
