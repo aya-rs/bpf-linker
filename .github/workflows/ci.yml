@@ -211,4 +211,4 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt install -y locate qemu-system-{arm,x86}
-          find test/.tmp -name 'vmlinuz-*' | xargs -t cargo xtask integration-test vm
+          find test/.tmp -name 'vmlinuz-*' | RUSTFLAGS=-Cdebuginfo=line-directives-only xargs -t cargo xtask integration-test vm
