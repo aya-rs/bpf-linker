@@ -2,9 +2,15 @@ use std::{
     env,
     ffi::OsString,
     path::{Path, PathBuf},
+    process::Command,
 };
 
-fn run_mode(target: &str, mode: &str, sysroot: Option<&Path>) {
+fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
+    target: &str,
+    mode: &str,
+    sysroot: Option<&Path>,
+    cfg: Option<F>,
+) {
     let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
     if let Some(sysroot) = sysroot {
         let sysroot = sysroot.to_str().unwrap();
@@ -31,7 +37,27 @@ fn run_mode(target: &str, mode: &str, sysroot: Option<&Path>) {
     };
     config.link_deps();
 
+    if let Some(cfg) = cfg {
+        cfg(&mut config);
+    }
+
     compiletest_rs::run_tests(&config);
+}
+
+fn btf_dump(src: &Path, dst: &Path) {
+    let dst = std::fs::File::create(dst)
+        .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
+    let mut bpftool = Command::new("bpftool");
+    bpftool
+        .arg("btf")
+        .arg("dump")
+        .arg("file")
+        .arg(src)
+        .stdout(dst);
+    let status = bpftool
+        .status()
+        .unwrap_or_else(|err| panic!("could not run {bpftool:?}: {err}",));
+    assert_eq!(status.code(), Some(0), "{bpftool:?} failed");
 }
 
 #[test]
@@ -49,5 +75,19 @@ fn compile_test() {
         .build_from_source(&rustc_src)
         .expect("failed to build sysroot");
 
-    run_mode(target, "assembly", Some(&directory));
+    run_mode(
+        target,
+        "assembly",
+        Some(&directory),
+        None::<fn(&mut compiletest_rs::Config)>,
+    );
+    run_mode(
+        target,
+        "assembly",
+        Some(&directory),
+        Some(|cfg: &mut compiletest_rs::Config| {
+            cfg.src_base = PathBuf::from("tests/btf");
+            cfg.llvm_filecheck_preprocess = Some(btf_dump);
+        }),
+    );
 }
