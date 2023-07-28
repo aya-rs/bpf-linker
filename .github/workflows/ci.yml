@@ -170,4 +170,4 @@ jobs:
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
         working-directory: aya
-        run: cargo xtask integration-test --runner "sudo PATH=$PATH"
+        run: RUSTFLAGS=-Cdebuginfo=line-directives-only cargo xtask integration-test --runner "sudo PATH=$PATH"
