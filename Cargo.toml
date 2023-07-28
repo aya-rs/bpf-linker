@@ -53,3 +53,4 @@ debug = true
 
 [patch.crates-io]
 llvm-sys = { git = "https://github.com/aya-rs/llvm-sys.rs.git", branch = "add-replace-md-operand" }
+compiletest_rs = { git = "https://github.com/Manishearth/compiletest-rs.git" }
