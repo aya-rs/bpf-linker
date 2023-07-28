@@ -1,11 +1,13 @@
 name: Release
 
 on:
-  workflow_dispatch
+  release:
+    types: [published]
 
 jobs:
   llvm:
     uses: ./.github/workflows/llvm.yml
+
   upload-bins:
     # TODO: Build for macos someday.
     runs-on: ubuntu-20.04
