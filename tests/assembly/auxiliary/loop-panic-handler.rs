@@ -6,4 +6,3 @@
 fn panic_impl(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
-

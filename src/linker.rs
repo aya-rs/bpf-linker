@@ -516,8 +516,24 @@ impl Linker {
 
 impl llvm::LLVMDiagnosticHandler for Linker {
     fn handle_diagnostic(&mut self, severity: llvm_sys::LLVMDiagnosticSeverity, message: &str) {
+        // TODO(https://reviews.llvm.org/D155894): Remove this when LLVM no longer emits these
+        // errors.
+        //
+        // See https://github.com/rust-lang/compiler-builtins/blob/a61823f/src/mem/mod.rs#L22-L68.
+        const MATCHERS: &[&str] = &[
+            "A call to built-in function 'memcpy' is not supported.\n",
+            "A call to built-in function 'memmove' is not supported.\n",
+            "A call to built-in function 'memset' is not supported.\n",
+            "A call to built-in function 'memcmp' is not supported.\n",
+            "A call to built-in function 'bcmp' is not supported.\n",
+            "A call to built-in function 'strlen' is not supported.\n",
+        ];
+
         match severity {
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSError => {
+                if MATCHERS.iter().any(|matcher| message.ends_with(matcher)) {
+                    return;
+                }
                 self.has_errors = true;
 
                 error!("llvm: {}", message)
