@@ -47,3 +47,6 @@ default = ["rust-llvm"]
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+compiletest_rs = { git = "https://github.com/Manishearth/compiletest-rs.git" }
