@@ -49,6 +49,10 @@ pub enum LinkerError {
     #[error("failure linking module {1} from {0}")]
     LinkArchiveModuleError(PathBuf, PathBuf),
 
+    /// Optimizing the BPF code failed.
+    #[error("LLVMRunPasses failed: {0}")]
+    OptimizeError(String),
+
     /// Generating the BPF code failed.
     #[error("LLVMTargetMachineEmitToFile failed: {0}")]
     EmitCodeError(String),
@@ -255,7 +259,7 @@ impl Linker {
 
             // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
             // or an invalid file
-            file.read(&mut buf)
+            file.read_exact(&mut buf)
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
             file.rewind()
                 .map_err(|e| LinkerError::IoError(path.clone(), e))?;
@@ -321,7 +325,7 @@ impl Linker {
         in_type: Option<InputType>,
     ) -> Result<(), LinkerError> {
         let mut data = Vec::new();
-        reader
+        let _: usize = reader
             .read_to_end(&mut data)
             .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
         // in_type is unknown when we're linking an item from an archive file
@@ -437,9 +441,8 @@ impl Linker {
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
             )
-        };
-
-        Ok(())
+        }
+        .map_err(LinkerError::OptimizeError)
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
