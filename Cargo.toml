@@ -29,9 +29,10 @@ log = { version = "0.4.0" }
 thiserror = { version = "1.0.0" }
 
 [dev-dependencies]
-compiletest_rs = { version = "0.5.0", path = "third-party/compiletest-rs" }
-rustc-build-sysroot = { version = "0.4.2" }
-which = { version = "4.2.0" }
+compiletest_rs = { version = "0.10.1" }
+regex = { version = "1.9.1", default-features = false }
+rustc-build-sysroot = { version = "0.4.2", default-features = false }
+which = { version = "4.2.0", default-features = false, features = ["regex"] }
 
 [[bin]]
 name = "bpf-linker"

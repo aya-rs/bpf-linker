@@ -3,7 +3,6 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
-use which::which;
 
 fn run_mode(target: &str, mode: &str, sysroot: Option<&Path>) {
     let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
@@ -11,13 +10,16 @@ fn run_mode(target: &str, mode: &str, sysroot: Option<&Path>) {
         let sysroot = sysroot.to_str().unwrap();
         target_rustcflags += &format!(" --sysroot {sysroot}");
     }
-    let llvm_filecheck = if let Ok(filecheck) = which("FileCheck") {
-        Some(filecheck)
-    } else if let Ok(filecheck) = which("FileCheck-16") {
-        Some(filecheck)
-    } else {
-        panic!("no FileCheck binary found");
-    };
+
+    let llvm_filecheck_re_str = r"^FileCheck(-\d+)?$";
+    let llvm_filecheck_re = regex::Regex::new(llvm_filecheck_re_str).unwrap();
+    let mut llvm_filecheck = which::which_re(llvm_filecheck_re).expect(llvm_filecheck_re_str);
+    let llvm_filecheck = llvm_filecheck.next();
+    assert_ne!(
+        llvm_filecheck, None,
+        "Could not find {llvm_filecheck_re_str}"
+    );
+
     let mode = mode.parse().expect("Invalid mode");
     let mut config = compiletest_rs::Config {
         target: target.to_owned(),
