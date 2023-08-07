@@ -1,6 +1,6 @@
 // assembly-output: bpf-linker
 // no-prefer-dynamic
-// compile-flags: --crate-type bin -C link-arg=--emit=obj -C debuginfo=2 -C lto=true
+// compile-flags: --crate-type bin -C link-arg=--emit=obj -C debuginfo=2
 
 #![no_std]
 #![no_main]

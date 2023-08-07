@@ -81,6 +81,27 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+}
+
+// Due to a bug in LLVM, all the code needs to be built with DI, including the sysroot.
+// For the moment building current assembly tests (non BTF) with DI crashes the linker.
+// So we have to create a new test function until that is fixed.
+#[test]
+fn btf_test() {
+    let target = "bpfel-unknown-none";
+    let rustc =
+        std::process::Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
+    let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc)
+        .expect("could not determine sysroot source directory");
+    let mut directory = env::current_dir().expect("could not determine current directory");
+    directory.push("target/sysroot-di");
+    let () = rustc_build_sysroot::SysrootBuilder::new(&directory, target)
+        .build_mode(rustc_build_sysroot::BuildMode::Build)
+        .sysroot_config(rustc_build_sysroot::SysrootConfig::NoStd)
+        .rustflag("-Cdebuginfo=2")
+        .build_from_source(&rustc_src)
+        .expect("failed to build sysroot");
+
     run_mode(
         target,
         "assembly",
