@@ -72,6 +72,7 @@ fn compile_test() {
     let () = rustc_build_sysroot::SysrootBuilder::new(&directory, target)
         .build_mode(rustc_build_sysroot::BuildMode::Build)
         .sysroot_config(rustc_build_sysroot::SysrootConfig::NoStd)
+        .rustflag("-Cdebuginfo=2")
         .build_from_source(&rustc_src)
         .expect("failed to build sysroot");
 
