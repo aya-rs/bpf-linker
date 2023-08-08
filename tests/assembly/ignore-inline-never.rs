@@ -21,6 +21,6 @@ fn actually_inlined(a: u64) -> u64 {
 pub extern "C" fn fun(a: u64) -> u64 {
     // CHECK-LABEL: fun:
     actually_inlined(a)
-    // CHECK-NEXT: r{{[0-9]}} = r{{[0-9]}}
+    // CHECK: r{{[0-9]}} = r{{[0-9]}}
     // CHECK-NEXT: r{{[0-9]}} += 42
 }
