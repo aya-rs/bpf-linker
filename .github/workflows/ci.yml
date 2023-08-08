@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - 'feature/**'
   pull_request:
     branches:
       - main
+      - 'feature/**'
   schedule:
     - cron: 00 4 * * *
 
