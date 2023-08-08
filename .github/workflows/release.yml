@@ -10,7 +10,7 @@ jobs:
 
   upload-bins:
     # TODO: Build for macos someday.
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: llvm
     steps:
       - name: Restore LLVM

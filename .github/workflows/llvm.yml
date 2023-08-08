@@ -8,7 +8,7 @@ on:
 
 jobs:
   llvm:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: llvm
     outputs:
       cache-key: ${{ steps.cache-key.outputs.cache-key }}
@@ -16,7 +16,7 @@ jobs:
       - id: ls-remote
         run: |
           set -euxo pipefail
-          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/16.0-2023-06-05 | cut -f1)
+          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/17.0-2023-07-29 | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
       - id: cache-key
