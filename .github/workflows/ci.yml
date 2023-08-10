@@ -107,8 +107,8 @@ jobs:
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get -y install clang gcc-multilib
+          sudo apt update
+          sudo apt -y install clang gcc-multilib
 
       - name: Install LLVM
         if: matrix.llvm != 'source'
