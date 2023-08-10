@@ -141,7 +141,10 @@ jobs:
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
       - name: Bust llvm-sys cache
-        run: cargo clean -p llvm-sys
+        run: |
+          set -euxo pipefail
+          cargo clean -p llvm-sys
+          cargo clean -p llvm-sys --release
 
       - uses: taiki-e/install-action@cargo-hack
 
