@@ -27,7 +27,7 @@ libc = { version = "0.2.0" }
 # 170.0.0 is available, but there's not yet a brew formula for llvm-17.
 llvm-sys = { version = "160.0.0" }
 log = { version = "0.4.20" }
-thiserror = { version = "1.0.47" }
+thiserror = { version = "1.0.48" }
 
 [dev-dependencies]
 compiletest_rs = { version = "0.10.1" }
