@@ -78,10 +78,20 @@ impl DIFix {
                         // variadic enum not supported => emit warning and strip out the children array
                         // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
 
+                        let flags = LLVMDITypeGetFlags(metadata);
+
+                        // This is a forward declaration. We don't need to do
+                        // anything on the declaration, we're going to process
+                        // the actual definition.
+                        if flags == LLVMDIFlagFwdDecl {
+                            return;
+                        }
+
                         // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
                         let elements = LLVMGetOperand(value, 4);
                         let operands = LLVMGetNumOperands(elements).try_into().unwrap();
                         let mut members = Vec::new();
+
                         for i in 0..operands {
                             let element = LLVMGetOperand(elements, i);
                             let tag = get_tag(LLVMValueAsMetadata(element));
