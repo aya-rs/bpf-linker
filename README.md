@@ -3,7 +3,10 @@
 bpf-linker aims to simplify building modern BPF programs while still supporting
 older, more restrictive kernels.
 
-[![Build](https://github.com/aya-rs/bpf-linker/workflows/Build/badge.svg)](https://github.com/aya-rs/bpf-linker/actions?query=workflow%3ABuild)
+[![Build status][build-badge]][build-url]
+
+[build-badge]: https://img.shields.io/github/actions/workflow/status/aya-rs/bpf-linker/ci.yml
+[build-url]: https://github.com/aya-rs/bpf-linker/actions/workflows/ci.yml
 
 ## Overview
 
