@@ -50,7 +50,7 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
         let hash = format!("{:x}", hasher.finish());
         // leave space for underscore
         let trim = MAX_KSYM_NAME_LEN - hash.len() - 1;
-        return format!("{}_{hash}", n[..trim].to_string());
+        return format!("{}_{hash}", &n[..trim]);
     }
 
     n
