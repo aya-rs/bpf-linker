@@ -1,4 +1,8 @@
-use std::{collections::HashSet, ffi::CStr};
+use std::{
+    collections::{hash_map::DefaultHasher, HashSet},
+    ffi::CStr,
+    hash::Hasher,
+};
 
 use gimli::{
     constants::DwTag, DW_TAG_member, DW_TAG_pointer_type, DW_TAG_structure_type,
@@ -10,6 +14,11 @@ use log::*;
 use super::{symbol_name, Message};
 use crate::llvm::iter::*;
 
+// KSYM_NAME_LEN from linux kernel intentionally set
+// to lower value found accross kernel versions to ensure
+// backward compatibility
+const MAX_KSYM_NAME_LEN: usize = 128;
+
 pub struct DIFix {
     context: LLVMContextRef,
     module: LLVMModuleRef,
@@ -19,8 +28,10 @@ pub struct DIFix {
 }
 
 // Sanitize Rust type names to be valid C type names.
-fn sanitize_type_name(name: &str) -> String {
-    name.chars()
+fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
+    let n: String = name
+        .as_ref()
+        .chars()
         .map(|ch| {
             // Characters which are valid in C type names (alphanumeric and `_`).
             if matches!(ch, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
@@ -29,7 +40,19 @@ fn sanitize_type_name(name: &str) -> String {
                 format!("_{:X}_", ch as u32)
             }
         })
-        .collect()
+        .collect();
+
+    // we trim type name if it is too long
+    if n.len() > MAX_KSYM_NAME_LEN {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(n.as_bytes());
+        let hash = format!("{:x}", hasher.finish());
+        // leave space for underscore
+        let trim = MAX_KSYM_NAME_LEN - hash.len() - 1;
+        return format!("{}_{hash}", &n[..trim]);
+    }
+
+    n
 }
 
 impl DIFix {
@@ -457,6 +480,15 @@ mod test {
         assert_eq!(
             sanitize_type_name(name),
             "PerfEventArray_3C__5B_u8_3B__20_32_5D__3E_"
-        )
+        );
+
+        let name = "my_function<aya_bpf::this::is::a::very::long::namespace::BpfContext, aya_log_ebpf::this::is::a::very::long::namespace::WriteToBuf>";
+        let san = sanitize_type_name(name);
+
+        assert_eq!(san.len(), 128);
+        assert_eq!(
+            san,
+            "my_function_3C_aya_bpf_3A__3A_this_3A__3A_is_3A__3A_a_3A__3A_very_3A__3A_long_3A__3A_namespace_3A__3A_BpfContex_94e4085604b3142f"
+        );
     }
 }
