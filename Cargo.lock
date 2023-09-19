@@ -73,16 +73,16 @@ checksum = "d67af77d68a931ecd5cbd8a3b5987d63a1d1d1278f7f6a60ae33db485cdebb69"
 
 [[package]]
 name = "aya-rustc-llvm-proxy"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daba7e8ecef5359fec8717fa5cee4ef5224019e963e63f4b5fe303c682d621a8"
+checksum = "423e4e05b90542aacbd1c64fdba582f6a31d6dba64593cac880335e2dc3f1f57"
 dependencies = [
  "anyhow",
  "cargo_metadata",
- "lazy_static",
  "libc",
  "libloading",
- "llvm-sys",
+ "llvm-sys 170.0.0",
+ "once_cell",
  "prettyplease",
  "quote",
  "syn",
@@ -109,7 +109,7 @@ dependencies = [
  "clap",
  "compiletest_rs",
  "libc",
- "llvm-sys",
+ "llvm-sys 160.1.3",
  "log",
  "regex",
  "rustc-build-sysroot",
@@ -138,9 +138,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7daec1a2a2129eeba1644b220b4647ec537b0b5d4bfd6876fcc5a540056b592"
+checksum = "fb9ac64500cc83ce4b9f8dafa78186aa008c8dea77a09b94cd307fd0cd5022a8"
 dependencies = [
  "camino",
  "cargo-platform",
@@ -383,6 +383,20 @@ version = "160.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf51981ac0622b10fe4790763e3de1f3d68a0ee4222e03accaaab6731bd508d"
 dependencies = [
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex",
+ "semver",
+]
+
+[[package]]
+name = "llvm-sys"
+version = "170.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46e01f7c4a977a4880a4366f3d2d5889cd83400f7af306fb2d0a2298fb3185b2"
+dependencies = [
+ "anyhow",
  "cc",
  "lazy_static",
  "libc",
