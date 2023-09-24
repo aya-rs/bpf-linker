@@ -20,6 +20,29 @@ use std::hash::Hasher;
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
+pub struct DIType {
+    metadata: LLVMMetadataRef,
+}
+
+impl DIType {
+    pub fn new(metadata: LLVMMetadataRef) -> Self {
+        Self { metadata }
+    }
+
+    pub fn name(&self) -> Option<&CStr> {
+        let mut len = 0;
+        // `LLVMDITypeGetName` doesn't allocate any memory, it just returns
+        // an existing pointer:
+        // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/lib/IR/DebugInfo.cpp#L1489-L1493
+        //
+        // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
+        // gets freed when calling `LLVMDisposeDIBuilder`. Example:
+        // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
+        let ptr = unsafe { LLVMDITypeGetName(self.metadata, &mut len) };
+        (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) })
+    }
+}
+
 pub struct DIFix {
     context: LLVMContextRef,
     module: LLVMModuleRef,
@@ -69,6 +92,7 @@ impl DIFix {
 
     unsafe fn mdnode(&mut self, value: LLVMValueRef) {
         let metadata = LLVMValueAsMetadata(value);
+        let di_type = DIType::new(metadata);
         let metadata_kind = LLVMGetMetadataKind(metadata);
 
         let empty = to_mdstring(self.context, "");
@@ -81,19 +105,17 @@ impl DIFix {
                 #[allow(non_upper_case_globals)]
                 match tag {
                     DW_TAG_structure_type => {
-                        let mut len = 0;
-                        let name = CStr::from_ptr(LLVMDITypeGetName(metadata, &mut len))
-                            .to_str()
-                            .unwrap();
-
-                        if name.starts_with("HashMap<") {
-                            // Remove name from BTF map structs.
-                            LLVMReplaceMDNodeOperandWith(value, 2, empty);
-                        } else {
-                            // Clear the name from generics.
-                            let name = sanitize_type_name(name);
-                            let name = to_mdstring(self.context, &name);
-                            LLVMReplaceMDNodeOperandWith(value, 2, name);
+                        if let Some(name) = di_type.name() {
+                            let name = name.to_string_lossy();
+                            if name.starts_with("HashMap<") {
+                                // Remove name from BTF map structs.
+                                LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                            } else {
+                                // Clear the name from generics.
+                                let name = sanitize_type_name(name);
+                                let name = to_mdstring(self.context, &name);
+                                LLVMReplaceMDNodeOperandWith(value, 2, name);
+                            }
                         }
 
                         // variadic enum not supported => emit warning and strip out the children array
@@ -117,16 +139,6 @@ impl DIFix {
                             let element = LLVMGetOperand(elements, i);
                             let tag = get_tag(LLVMValueAsMetadata(element));
                             if i == 0 && tag == DW_TAG_variant_part {
-                                let link = "http://none-yet";
-
-                                let mut len = 0;
-                                let name = CStr::from_ptr(LLVMDITypeGetName(
-                                    LLVMValueAsMetadata(value),
-                                    &mut len,
-                                ))
-                                .to_str()
-                                .unwrap();
-
                                 // TODO: check: the following always returns <unknown>:0 - however its strange...
                                 let _line = LLVMDITypeGetLine(LLVMValueAsMetadata(value)); // always returns 0
                                 let scope = LLVMDIVariableGetScope(metadata);
@@ -175,10 +187,20 @@ impl DIFix {
                                     .unwrap_or(("unknown", 0));
 
                                 // finally emit warning
-                                warn!(
-                                    "at {}:{}: enum {}: not emitting BTF for type - see {}",
-                                    filename, line, name, link
-                                );
+                                match di_type.name() {
+                                    Some(name) => warn!(
+                                        "not emitting BTF for type {} at {}:{}",
+                                        name.to_string_lossy(),
+                                        filename,
+                                        line
+                                    ),
+                                    None => {
+                                        warn!(
+                                            "not emitting BTF for anonymous type at {}:{}",
+                                            filename, line
+                                        )
+                                    }
+                                }
 
                                 // strip out children
                                 let empty_node =
@@ -225,15 +247,12 @@ impl DIFix {
             }
             // Sanitize function (subprogram) names.
             LLVMMetadataKind::LLVMDISubprogramMetadataKind => {
-                let mut len = 0;
-                let name = CStr::from_ptr(LLVMDITypeGetName(metadata, &mut len))
-                    .to_str()
-                    .unwrap();
-
-                // Clear the name from generics.
-                let name = sanitize_type_name(name);
-                let name = to_mdstring(self.context, &name);
-                LLVMReplaceMDNodeOperandWith(value, 2, name);
+                if let Some(name) = di_type.name() {
+                    // Clear the name from generics.
+                    let name = sanitize_type_name(name.to_string_lossy());
+                    let name = to_mdstring(self.context, &name);
+                    LLVMReplaceMDNodeOperandWith(value, 2, name);
+                }
             }
             _ => (),
         }
