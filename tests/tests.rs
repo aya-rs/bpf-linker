@@ -1,9 +1,18 @@
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
+
+fn find_binary(binary_re_str: &str) -> PathBuf {
+    let binary_re = regex::Regex::new(binary_re_str).unwrap();
+    let mut binary = which::which_re(binary_re).expect(binary_re_str);
+    binary
+        .next()
+        .unwrap_or_else(|| panic!("could not find {binary_re_str}"))
+}
 
 fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
     target: &str,
@@ -17,14 +26,7 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
         target_rustcflags += &format!(" --sysroot {sysroot}");
     }
 
-    let llvm_filecheck_re_str = r"^FileCheck(-\d+)?$";
-    let llvm_filecheck_re = regex::Regex::new(llvm_filecheck_re_str).unwrap();
-    let mut llvm_filecheck = which::which_re(llvm_filecheck_re).expect(llvm_filecheck_re_str);
-    let llvm_filecheck = llvm_filecheck.next();
-    assert_ne!(
-        llvm_filecheck, None,
-        "Could not find {llvm_filecheck_re_str}"
-    );
+    let llvm_filecheck = Some(find_binary(r"^FileCheck(-\d+)?$"));
 
     let mode = mode.parse().expect("Invalid mode");
     let mut config = compiletest_rs::Config {
@@ -42,6 +44,53 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
     }
 
     compiletest_rs::run_tests(&config);
+}
+
+/// Builds LLVM bitcode files from LLVM IR files located in a specified directory.
+fn build_bitcode<P>(src_dir: P, dst_dir: P)
+where
+    P: AsRef<Path>,
+{
+    fs::create_dir_all(dst_dir.as_ref()).expect("failed to create a build directory for bitcode");
+    for entry in fs::read_dir(src_dir.as_ref()).expect("failed to read the directory") {
+        let entry = entry.expect("failed to read the entry");
+        let path = entry.path();
+
+        if path.is_file() && path.extension() == Some(OsStr::new("c")) {
+            let bc_dst = dst_dir
+                .as_ref()
+                .join(path.with_extension("bc").file_name().unwrap());
+            clang_build(path, bc_dst);
+        }
+    }
+}
+
+/// Compiles C code into an LLVM bitcode file.
+fn clang_build<P>(src: P, dst: P)
+where
+    P: AsRef<Path>,
+{
+    let clang = find_binary(r"^clang(-\d+)?$");
+    let output = Command::new(clang)
+        .arg("-target")
+        .arg("bpf")
+        .arg("-g")
+        .arg("-c")
+        .arg("-emit-llvm")
+        .arg("-o")
+        .arg(dst.as_ref())
+        .arg(src.as_ref())
+        .output()
+        .expect("failed to execute clang");
+
+    if !output.status.success() {
+        panic!(
+            "clang failed with code {:?}\nstdout: {}\nstderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 fn btf_dump(src: &Path, dst: &Path) {
@@ -67,8 +116,10 @@ fn compile_test() {
         std::process::Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
     let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc)
         .expect("could not determine sysroot source directory");
-    let mut directory = env::current_dir().expect("could not determine current directory");
-    directory.push("target/sysroot");
+    let top_dir = env::var_os("CARGO_MANIFEST_DIR")
+        .expect("could not determine the top directory of the project");
+    let current_dir = Path::new(&top_dir);
+    let directory = current_dir.join("target/sysroot");
     let () = rustc_build_sysroot::SysrootBuilder::new(&directory, target)
         .build_mode(rustc_build_sysroot::BuildMode::Build)
         .sysroot_config(rustc_build_sysroot::SysrootConfig::NoStd)
@@ -77,6 +128,11 @@ fn compile_test() {
         .rustflag("-Cdebuginfo=2")
         .build_from_source(&rustc_src)
         .expect("failed to build sysroot");
+
+    build_bitcode(
+        current_dir.join("tests/c"),
+        current_dir.join("target/bitcode"),
+    );
 
     run_mode(
         target,
