@@ -482,6 +482,13 @@ impl Linker {
     fn llvm_init(&mut self) {
         let mut args = Vec::<Cow<str>>::new();
         args.push("bpf-linker".into());
+        // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
+        // where the layout is larger than 64 bits, but the LLVM BPF target only supports
+        // up to 64 bits return values. Since the accessors are tiny in terms of code, we
+        // avoid the issue by annotating them with #[inline(always)]. If they are classified
+        // as cold though - and they often are starting from LLVM17 - #[inline(always)]
+        // is ignored and the BPF target fails codegen.
+        args.push("--cold-callsite-rel-freq=0".into());
         if self.options.unroll_loops {
             // setting cmdline arguments is the only way to customize the unroll pass with the
             // C API.
