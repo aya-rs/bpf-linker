@@ -4,6 +4,7 @@
 extern crate aya_rustc_llvm_proxy;
 
 use clap::Parser;
+use libc::dup2;
 use log::*;
 use simplelog::{
     ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
@@ -11,6 +12,7 @@ use simplelog::{
 use std::{
     env,
     fs::{self, OpenOptions},
+    os::fd::AsRawFd,
     path::PathBuf,
     str::FromStr,
 };
@@ -197,7 +199,21 @@ fn main() {
     let log_level = log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
     if let Some(log_file) = log_file {
         let log_file = match OpenOptions::new().create(true).append(true).open(log_file) {
-            Ok(f) => f,
+            Ok(f) => {
+                // Use dup2 to duplicate stderr fd to the log file fd
+                let result = unsafe { dup2(f.as_raw_fd(), std::io::stderr().as_raw_fd()) };
+
+                if result == -1 {
+                    error(
+                        &format!(
+                            "failed to duplicate stderr: {}",
+                            std::io::Error::last_os_error()
+                        ),
+                        clap::error::ErrorKind::Io,
+                    )
+                }
+                f
+            }
             Err(e) => {
                 error(
                     &format!("failed to open log file: {e:?}"),
