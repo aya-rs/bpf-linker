@@ -86,15 +86,10 @@ impl DIFix {
                             .to_str()
                             .unwrap();
 
-                        if name.starts_with("HashMap<") {
-                            // Remove name from BTF map structs.
-                            LLVMReplaceMDNodeOperandWith(value, 2, empty);
-                        } else {
-                            // Clear the name from generics.
-                            let name = sanitize_type_name(name);
-                            let name = to_mdstring(self.context, &name);
-                            LLVMReplaceMDNodeOperandWith(value, 2, name);
-                        }
+                        // Clear the name from generics.
+                        let name = sanitize_type_name(name);
+                        let name = to_mdstring(self.context, &name);
+                        LLVMReplaceMDNodeOperandWith(value, 2, name);
 
                         // variadic enum not supported => emit warning and strip out the children array
                         // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
@@ -192,10 +187,25 @@ impl DIFix {
                             }
 
                             if tag == DW_TAG_member {
-                                members.push(LLVMValueAsMetadata(element));
+                                let member = LLVMValueAsMetadata(element);
+
+                                // TODO(vadorovsky): Use the helper from
+                                // https://github.com/aya-rs/bpf-linker/pull/120
+                                let mut len = 0;
+                                let name = CStr::from_ptr(LLVMDITypeGetName(member, &mut len))
+                                    .to_str()
+                                    .unwrap();
+                                // This field indicates that the struct should be anonymized.
+                                if name == "_anon" {
+                                    // Remove the name from the struct.
+                                    LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                                    // And don't include the `_anon` field.
+                                } else {
+                                    members.push(member);
+                                }
                             }
                         }
-                        if !members.is_empty() && members.len() == operands.try_into().unwrap() {
+                        if !members.is_empty() {
                             members.sort_by_cached_key(|metadata| {
                                 LLVMDITypeGetOffsetInBits(*metadata)
                             });
