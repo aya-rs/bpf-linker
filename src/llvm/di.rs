@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
-    ffi::CStr,
+    ffi::{CStr, CString, NulError},
     hash::Hasher,
     ptr::NonNull,
 };
@@ -20,13 +20,31 @@ use crate::llvm::iter::*;
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
+#[repr(u32)]
+enum DITypeOperand {
+    /// Name of the type.
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L743)
+    /// (`DIComppsiteType` inherits the `getName()` method from `DIType`).
+    Name = 2,
+}
+
 pub struct DIType {
     metadata: LLVMMetadataRef,
+    value: LLVMValueRef,
 }
 
 impl DIType {
-    pub fn new(metadata: LLVMMetadataRef) -> Self {
-        Self { metadata }
+    /// Constructs a new [`DIType`] from the given `value`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the given `value` corresponds to a valid
+    /// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub unsafe fn new(value: LLVMValueRef) -> Self {
+        let metadata = LLVMValueAsMetadata(value);
+        Self { metadata, value }
     }
 
     pub fn name(&self) -> Option<&CStr> {
@@ -40,6 +58,96 @@ impl DIType {
         // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
         let ptr = unsafe { LLVMDITypeGetName(self.metadata, &mut len) };
         NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
+    }
+
+    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+        unsafe {
+            let name = LLVMMDStringInContext2(context, CString::new(name)?.as_ptr(), name.len());
+            LLVMReplaceMDNodeOperandWith(self.value, DITypeOperand::Name as u32, name)
+        }
+        Ok(())
+    }
+}
+
+#[repr(u32)]
+enum DIDerivedTypeOperand {
+    /// [`DIType`] representing a base type of the given derived type.
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1032).
+    BaseType = 3,
+}
+
+pub struct DIDerivedType {
+    di_type: DIType,
+}
+
+impl DIDerivedType {
+    /// Constructs a new [`DIDerivedType`] from the given `value`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value` corresponds to a valid
+    /// instance of [`DIDerivedType`](https://llvm.org/doxygen/classllvm_1_1DIDerivedType.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub unsafe fn new(value: LLVMValueRef) -> Self {
+        let di_type = DIType::new(value);
+        Self { di_type }
+    }
+
+    pub fn base_type(&self) -> LLVMValueRef {
+        unsafe { LLVMGetOperand(self.di_type.value, DIDerivedTypeOperand::BaseType as u32) }
+    }
+}
+
+#[repr(u32)]
+enum DICompositeTypeOperand {
+    /// Elements of the composite type.
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1230).
+    Elements = 4,
+}
+
+pub struct DICompositeType {
+    di_type: DIType,
+}
+
+impl DICompositeType {
+    /// Constructs a new [`DICompositeType`] from the given `value`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value` corresponds to a valid
+    /// instance of [LLVM `DICompositeType`](https://llvm.org/doxygen/classllvm_1_1DICompositeType.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub unsafe fn new(value: LLVMValueRef) -> Self {
+        let di_type = DIType::new(value);
+        Self { di_type }
+    }
+
+    pub fn name(&self) -> Option<&CStr> {
+        self.di_type.name()
+    }
+
+    pub fn elements(&self) -> impl Iterator<Item = LLVMValueRef> {
+        let elements =
+            unsafe { LLVMGetOperand(self.di_type.value, DICompositeTypeOperand::Elements as u32) };
+        let operands = unsafe { LLVMGetNumOperands(elements) };
+
+        (0..operands).map(move |i| unsafe { LLVMGetOperand(elements, i as u32) })
+    }
+
+    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+        self.di_type.replace_name(context, name)
+    }
+
+    pub fn replace_elements(&mut self, metadata: LLVMMetadataRef) {
+        unsafe {
+            LLVMReplaceMDNodeOperandWith(
+                self.di_type.value,
+                DICompositeTypeOperand::Elements as u32,
+                metadata,
+            )
+        }
     }
 }
 
@@ -92,30 +200,27 @@ impl DIFix {
 
     unsafe fn mdnode(&mut self, value: LLVMValueRef) {
         let metadata = LLVMValueAsMetadata(value);
-        let di_type = DIType::new(metadata);
+        let di_type = DIType::new(value);
         let metadata_kind = LLVMGetMetadataKind(metadata);
 
         let empty = to_mdstring(self.context, "");
 
         match metadata_kind {
             LLVMMetadataKind::LLVMDICompositeTypeMetadataKind => {
+                let mut di_composite_type = DICompositeType::new(value);
                 let tag = get_tag(metadata);
 
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match tag {
                     DW_TAG_structure_type => {
-                        if let Some(name) = di_type.name() {
+                        if let Some(name) = di_composite_type.name() {
                             let name = name.to_string_lossy();
-                            if name.starts_with("HashMap<") {
-                                // Remove name from BTF map structs.
-                                LLVMReplaceMDNodeOperandWith(value, 2, empty);
-                            } else {
-                                // Clear the name from generics.
-                                let name = sanitize_type_name(name);
-                                let name = to_mdstring(self.context, &name);
-                                LLVMReplaceMDNodeOperandWith(value, 2, name);
-                            }
+                            // Clear the name from generics.
+                            let name = sanitize_type_name(name);
+                            di_composite_type
+                                .replace_name(self.context, name.as_str())
+                                .unwrap();
                         }
 
                         // variadic enum not supported => emit warning and strip out the children array
@@ -131,12 +236,9 @@ impl DIFix {
                         }
 
                         // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
-                        let elements = LLVMGetOperand(value, 4);
-                        let operands = LLVMGetNumOperands(elements).try_into().unwrap();
                         let mut members = Vec::new();
 
-                        for i in 0..operands {
-                            let element = LLVMGetOperand(elements, i);
+                        for (i, element) in di_composite_type.elements().enumerate() {
                             let tag = get_tag(LLVMValueAsMetadata(element));
                             if i == 0 && tag == DW_TAG_variant_part {
                                 // TODO: check: the following always returns <unknown>:0 - however its strange...
@@ -187,7 +289,7 @@ impl DIFix {
                                     .unwrap_or(("unknown", 0));
 
                                 // finally emit warning
-                                match di_type.name() {
+                                match di_composite_type.name() {
                                     Some(name) => warn!(
                                         "not emitting BTF for type {} at {}:{}",
                                         name.to_string_lossy(),
@@ -205,19 +307,52 @@ impl DIFix {
                                 // strip out children
                                 let empty_node =
                                     LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0);
-                                LLVMReplaceMDNodeOperandWith(value, 4, empty_node);
+                                di_composite_type.replace_elements(empty_node);
 
                                 // remove rust names
-                                LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                                di_composite_type.replace_name(self.context, "").unwrap();
 
                                 break;
                             }
 
                             if tag == DW_TAG_member {
-                                members.push(LLVMValueAsMetadata(element));
+                                let member = LLVMValueAsMetadata(element);
+                                let di_derived_type = DIDerivedType::new(element);
+                                let base_type = di_derived_type.base_type();
+                                let base_type_metadata = LLVMValueAsMetadata(base_type);
+                                let base_type_metadata_kind =
+                                    LLVMGetMetadataKind(base_type_metadata);
+
+                                match base_type_metadata_kind {
+                                    LLVMMetadataKind::LLVMDICompositeTypeMetadataKind => {
+                                        let base_type_di_composite_type =
+                                            DICompositeType::new(base_type);
+                                        let base_type_name = base_type_di_composite_type.name();
+                                        if let Some(base_type_name) = base_type_name {
+                                            let base_type_name = base_type_name.to_string_lossy();
+                                            // `AyaBtfMapMarker` is a type which is used in fields of BTF map
+                                            // structs. We need to make such structs anonymous in order to get
+                                            // BTF maps accepted by the Linux kernel.
+                                            if base_type_name == "AyaBtfMapMarker" {
+                                                // Remove the name from the struct.
+                                                di_composite_type
+                                                    .replace_name(self.context, "")
+                                                    .unwrap();
+                                                // And don't include the field in the sanitized DI.
+                                            } else {
+                                                members.push(member);
+                                            }
+                                        } else {
+                                            members.push(member);
+                                        }
+                                    }
+                                    _ => {
+                                        members.push(member);
+                                    }
+                                }
                             }
                         }
-                        if !members.is_empty() && members.len() == operands.try_into().unwrap() {
+                        if !members.is_empty() {
                             members.sort_by_cached_key(|metadata| {
                                 LLVMDITypeGetOffsetInBits(*metadata)
                             });
