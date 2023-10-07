@@ -20,6 +20,23 @@ use std::hash::Hasher;
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
+#[repr(u32)]
+enum DICompositeTypeOperand {
+    Name = 2,
+    Type = 3,
+    Elements = 4,
+}
+
+impl From<DICompositeTypeOperand> for u32 {
+    fn from(value: DICompositeTypeOperand) -> Self {
+        match value {
+            DICompositeTypeOperand::Name => 2,
+            DICompositeTypeOperand::Type => 3,
+            DICompositeTypeOperand::Elements => 4,
+        }
+    }
+}
+
 pub struct DIFix {
     context: LLVMContextRef,
     module: LLVMModuleRef,
@@ -86,15 +103,14 @@ impl DIFix {
                             .to_str()
                             .unwrap();
 
-                        if name.starts_with("HashMap<") {
-                            // Remove name from BTF map structs.
-                            LLVMReplaceMDNodeOperandWith(value, 2, empty);
-                        } else {
-                            // Clear the name from generics.
-                            let name = sanitize_type_name(name);
-                            let name = to_mdstring(self.context, &name);
-                            LLVMReplaceMDNodeOperandWith(value, 2, name);
-                        }
+                        // Clear the name from generics.
+                        let name = sanitize_type_name(name);
+                        let name = to_mdstring(self.context, &name);
+                        LLVMReplaceMDNodeOperandWith(
+                            value,
+                            DICompositeTypeOperand::Name.into(),
+                            name,
+                        );
 
                         // variadic enum not supported => emit warning and strip out the children array
                         // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
@@ -109,7 +125,8 @@ impl DIFix {
                         }
 
                         // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
-                        let elements = LLVMGetOperand(value, 4);
+                        let elements =
+                            LLVMGetOperand(value, DICompositeTypeOperand::Elements.into());
                         let operands = LLVMGetNumOperands(elements).try_into().unwrap();
                         let mut members = Vec::new();
 
@@ -183,19 +200,67 @@ impl DIFix {
                                 // strip out children
                                 let empty_node =
                                     LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0);
-                                LLVMReplaceMDNodeOperandWith(value, 4, empty_node);
+                                LLVMReplaceMDNodeOperandWith(
+                                    value,
+                                    DICompositeTypeOperand::Elements.into(),
+                                    empty_node,
+                                );
 
                                 // remove rust names
-                                LLVMReplaceMDNodeOperandWith(value, 2, empty);
+                                LLVMReplaceMDNodeOperandWith(
+                                    value,
+                                    DICompositeTypeOperand::Name.into(),
+                                    empty,
+                                );
 
                                 break;
                             }
 
                             if tag == DW_TAG_member {
-                                members.push(LLVMValueAsMetadata(element));
+                                let member = LLVMValueAsMetadata(element);
+
+                                let base_type =
+                                    LLVMGetOperand(element, DICompositeTypeOperand::Type.into());
+                                let base_type_metadata = LLVMValueAsMetadata(base_type);
+                                let base_type_metadata_kind =
+                                    LLVMGetMetadataKind(base_type_metadata);
+
+                                match base_type_metadata_kind {
+                                    LLVMMetadataKind::LLVMDICompositeTypeMetadataKind => {
+                                        // TODO(vadorovsky): Use the helper from
+                                        // https://github.com/aya-rs/bpf-linker/pull/120
+                                        // This field indicates that the struct should be anonymized.
+                                        let mut len = 0;
+                                        let base_type_name =
+                                            LLVMDITypeGetName(base_type_metadata, &mut len);
+                                        if !base_type_name.is_null() {
+                                            let base_type_name =
+                                                CStr::from_ptr(base_type_name).to_str().unwrap();
+                                            // `AyaBtfMapMarker` is a type which is used in fields of BTF map
+                                            // structs. We need to make such structs anonymous in order to get
+                                            // BTF maps accepted by the Linux kernel.
+                                            if base_type_name == "AyaBtfMapMarker" {
+                                                // Remove the name from the struct.
+                                                LLVMReplaceMDNodeOperandWith(
+                                                    value,
+                                                    DICompositeTypeOperand::Name.into(),
+                                                    empty,
+                                                );
+                                                // And don't include the field in the sanitized DI.
+                                            } else {
+                                                members.push(member);
+                                            }
+                                        } else {
+                                            members.push(member);
+                                        }
+                                    }
+                                    _ => {
+                                        members.push(member);
+                                    }
+                                }
                             }
                         }
-                        if !members.is_empty() && members.len() == operands.try_into().unwrap() {
+                        if !members.is_empty() {
                             members.sort_by_cached_key(|metadata| {
                                 LLVMDITypeGetOffsetInBits(*metadata)
                             });
