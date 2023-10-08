@@ -442,7 +442,7 @@ impl Linker {
         // programs and maps and remove dead code.
 
         unsafe {
-            llvm::DIFix::new(self.context, self.module).run();
+            llvm::DISanitizer::new(self.context, self.module).run();
 
             llvm::optimize(
                 self.target_machine,
