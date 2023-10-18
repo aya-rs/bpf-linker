@@ -8,24 +8,17 @@ use std::{
     ptr, slice,
 };
 
+use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 use libc::c_char as libc_char;
-use llvm_sys::bit_reader::*;
-use llvm_sys::core::*;
-use llvm_sys::debuginfo::LLVMStripModuleDebugInfo;
-use llvm_sys::error::*;
-use llvm_sys::linker::LLVMLinkModules2;
-use llvm_sys::object::*;
-use llvm_sys::prelude::*;
-use llvm_sys::support::LLVMParseCommandLineOptions;
-use llvm_sys::target::*;
-use llvm_sys::target_machine::*;
-use llvm_sys::transforms::pass_builder::*;
-use llvm_sys::LLVMAttributeFunctionIndex;
-use llvm_sys::{LLVMLinkage, LLVMVisibility};
+use llvm_sys::{
+    bit_reader::*, core::*, debuginfo::LLVMStripModuleDebugInfo, error::*,
+    linker::LLVMLinkModules2, object::*, prelude::*, support::LLVMParseCommandLineOptions,
+    target::*, target_machine::*, transforms::pass_builder::*, LLVMAttributeFunctionIndex,
+    LLVMLinkage, LLVMVisibility,
+};
 use log::*;
 
 use crate::OptLevel;
-use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 
 pub unsafe fn init<T: AsRef<str>>(args: &[T], overview: &str) {
     LLVMInitializeBPFTarget();
