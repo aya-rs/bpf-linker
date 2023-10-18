@@ -1,23 +1,20 @@
-use ar::Archive;
-use llvm_sys::bit_writer::LLVMWriteBitcodeToFile;
-use llvm_sys::core::*;
-use llvm_sys::error_handling::*;
-use llvm_sys::prelude::*;
-use llvm_sys::target_machine::*;
-use log::*;
 use std::{
     borrow::Cow,
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
     io,
-    io::Read,
-    io::Seek,
-    path::Path,
-    path::PathBuf,
+    io::{Read, Seek},
+    path::{Path, PathBuf},
     ptr, str,
     str::FromStr,
 };
+
+use ar::Archive;
+use llvm_sys::{
+    bit_writer::LLVMWriteBitcodeToFile, core::*, error_handling::*, prelude::*, target_machine::*,
+};
+use log::*;
 use thiserror::Error;
 
 use crate::llvm;

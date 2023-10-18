@@ -3,12 +3,6 @@
 #[cfg(feature = "rust-llvm")]
 extern crate aya_rustc_llvm_proxy;
 
-use clap::Parser;
-use libc::dup2;
-use log::*;
-use simplelog::{
-    ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
-};
 use std::{
     env,
     fs::{self, OpenOptions},
@@ -16,9 +10,15 @@ use std::{
     path::PathBuf,
     str::FromStr,
 };
-use thiserror::Error;
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+use clap::Parser;
+use libc::dup2;
+use log::*;
+use simplelog::{
+    ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
+};
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 enum CliError {
