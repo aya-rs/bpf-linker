@@ -1,6 +1,13 @@
 use std::marker::PhantomData;
 
-use llvm_sys::{core::*, prelude::*};
+use llvm_sys::{
+    core::{
+        LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias, LLVMGetLastFunction,
+        LLVMGetLastGlobal, LLVMGetLastGlobalAlias, LLVMGetNextFunction, LLVMGetNextGlobal,
+        LLVMGetNextGlobalAlias,
+    },
+    prelude::{LLVMModuleRef, LLVMValueRef},
+};
 
 macro_rules! llvm_iterator {
     ($trait_name:ident, $iterator_name:ident, $iterable:ty, $method_name:ident, $item_ty:ty, $first:expr, $last:expr, $next:expr $(,)?) => {
