@@ -11,12 +11,41 @@ use std::{
 use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 use libc::c_char as libc_char;
 use llvm_sys::{
-    bit_reader::*, core::*, debuginfo::LLVMStripModuleDebugInfo, error::*,
-    linker::LLVMLinkModules2, object::*, prelude::*, support::LLVMParseCommandLineOptions,
-    target::*, target_machine::*, transforms::pass_builder::*, LLVMAttributeFunctionIndex,
-    LLVMLinkage, LLVMVisibility,
+    bit_reader::LLVMParseBitcodeInContext2,
+    core::{
+        LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
+        LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity, LLVMGetEnumAttributeKindForName,
+        LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2,
+        LLVMModuleCreateWithNameInContext, LLVMPrintModuleToFile, LLVMRemoveEnumAttributeAtIndex,
+        LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
+    },
+    debuginfo::LLVMStripModuleDebugInfo,
+    error::{
+        LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
+    },
+    linker::LLVMLinkModules2,
+    object::{
+        LLVMCreateBinary, LLVMDisposeBinary, LLVMDisposeSectionIterator, LLVMGetSectionContents,
+        LLVMGetSectionName, LLVMGetSectionSize, LLVMMoveToNextSection,
+        LLVMObjectFileCopySectionIterator, LLVMObjectFileIsSectionIteratorAtEnd,
+    },
+    prelude::{LLVMContextRef, LLVMDiagnosticInfoRef, LLVMModuleRef, LLVMValueRef},
+    support::LLVMParseCommandLineOptions,
+    target::{
+        LLVMInitializeBPFAsmParser, LLVMInitializeBPFAsmPrinter, LLVMInitializeBPFDisassembler,
+        LLVMInitializeBPFTarget, LLVMInitializeBPFTargetInfo, LLVMInitializeBPFTargetMC,
+    },
+    target_machine::{
+        LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
+        LLVMGetTargetFromTriple, LLVMRelocMode, LLVMTargetMachineEmitToFile, LLVMTargetMachineRef,
+        LLVMTargetRef,
+    },
+    transforms::pass_builder::{
+        LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
+    },
+    LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
-use log::*;
+use log::{debug, error};
 
 use crate::OptLevel;
 

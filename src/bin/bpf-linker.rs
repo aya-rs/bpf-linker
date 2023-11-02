@@ -14,7 +14,7 @@ use std::{
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::Parser;
 use libc::dup2;
-use log::*;
+use log::info;
 use simplelog::{
     ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
 };

@@ -12,9 +12,16 @@ use std::{
 
 use ar::Archive;
 use llvm_sys::{
-    bit_writer::LLVMWriteBitcodeToFile, core::*, error_handling::*, prelude::*, target_machine::*,
+    bit_writer::LLVMWriteBitcodeToFile,
+    core::{
+        LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler, LLVMDisposeModule,
+        LLVMGetTarget,
+    },
+    error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
+    prelude::{LLVMContextRef, LLVMModuleRef},
+    target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
 };
-use log::*;
+use log::{debug, error, info, warn};
 use thiserror::Error;
 
 use crate::llvm;
