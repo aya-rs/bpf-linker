@@ -1,6 +1,8 @@
 use std::{
-    collections::{hash_map::DefaultHasher, HashSet},
+    borrow::Cow,
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     hash::Hasher,
+    ptr,
 };
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
@@ -9,9 +11,9 @@ use log::{trace, warn};
 
 use super::types::{
     di::DIType,
-    ir::{MDNode, Metadata, Value},
+    ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::iter::*;
+use crate::llvm::{iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found accross kernel versions to ensure
@@ -24,6 +26,7 @@ pub struct DISanitizer {
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     item_stack: Vec<Item>,
+    replace_operands: HashMap<u64, LLVMMetadataRef>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -62,6 +65,7 @@ impl DISanitizer {
             builder: unsafe { LLVMCreateDIBuilder(module) },
             visited_nodes: HashSet::new(),
             item_stack: Vec::new(),
+            replace_operands: HashMap::new(),
         }
     }
 
@@ -199,7 +203,7 @@ impl DISanitizer {
     }
 
     // navigate the tree of LLVMValueRefs (DFS-pre-order)
-    fn visit_item(&mut self, item: Item, depth: usize) {
+    fn visit_item(&mut self, mut item: Item, depth: usize) {
         let value_ref = item.value_ref();
         let value_id = item.value_id();
 
@@ -218,6 +222,15 @@ impl DISanitizer {
             // All other items should have values
             (_, item) => panic!("{item:?} has no value"),
         };
+
+        if let Item::Operand(operand) = &mut item {
+            // When we have an operand to replace, we must do so regardless of whether we've already
+            // seen its value or not, since the same value can appear as an operand in multiple
+            // nodes in the tree.
+            if let Some(new_metadata) = self.replace_operands.get(&value_id) {
+                operand.replace(unsafe { LLVMMetadataAsValue(self.context, *new_metadata) })
+            }
+        }
 
         let first_visit = self.visited_nodes.insert(value_id);
         if !first_visit {
@@ -268,8 +281,10 @@ impl DISanitizer {
         let _ = self.item_stack.pop().unwrap();
     }
 
-    pub fn run(mut self) {
+    pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
         let module = self.module;
+
+        self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
 
         for value in module.globals_iter() {
             self.visit_item(Item::GlobalVariable(value), 0);
@@ -283,6 +298,103 @@ impl DISanitizer {
         }
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
+    }
+
+    // Make it so that only exported symbols (programs marked as #[no_mangle]) get BTF
+    // linkage=global. For all other functions we want linkage=static. This avoid issues like:
+    //
+    //     Global function write() doesn't return scalar. Only those are supported.
+    //     verification time 18 usec
+    //     stack depth 0+0
+    //     ...
+    //
+    // This is an error we used to get compiling aya-log. Global functions are verified
+    // independently from their callers, so the verifier has less context and as a result globals
+    // are harder to verify successfully.
+    //
+    // See tests/btf/assembly/exported-symbols.rs .
+    fn fix_subprogram_linkage(
+        &mut self,
+        export_symbols: &HashSet<Cow<'static, str>>,
+    ) -> HashMap<u64, LLVMMetadataRef> {
+        let mut replace = HashMap::new();
+
+        for mut function in self
+            .module
+            .functions_iter()
+            .map(|value| unsafe { Function::from_value_ref(value) })
+        {
+            if export_symbols.contains(function.name()) {
+                continue;
+            }
+
+            // Skip functions that don't have subprograms.
+            let Some(mut sub_program) = function.sub_program(self.context) else {
+                continue;
+            };
+
+            let name = sub_program.name().unwrap();
+            let linkage_name = sub_program.linkage_name();
+            let ty = sub_program.ty();
+
+            // Create a new subprogram that has DISPFlagLocalToUnit set, so the BTF backend emits it
+            // with linkage=static
+            let mut new_program = unsafe {
+                let new_program = LLVMDIBuilderCreateFunction(
+                    self.builder,
+                    sub_program.scope().unwrap(),
+                    name.as_ptr(),
+                    name.len(),
+                    linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()),
+                    linkage_name.unwrap_or("").len(),
+                    sub_program.file(),
+                    sub_program.line(),
+                    ty,
+                    1,
+                    1,
+                    sub_program.line(),
+                    sub_program.type_flags(),
+                    1,
+                );
+                // Technically this must be called as part of the builder API, but effectively does
+                // nothing because we don't add any variables through the builder API, instead we
+                // replace retained nodes manually below.
+                LLVMDIBuilderFinalizeSubprogram(self.builder, new_program);
+
+                DISubprogram::from_value_ref(LLVMMetadataAsValue(self.context, new_program))
+            };
+
+            // Point the function to the new subprogram.
+            function.set_subprogram(&new_program);
+
+            // There's no way to set the unit with LLVMDIBuilderCreateFunction
+            // so we set it after creation.
+            if let Some(unit) = sub_program.unit() {
+                new_program.set_unit(unit);
+            }
+
+            // Add retained nodes from the old program. This is needed to preserve local debug
+            // variables, including function arguments which otherwise become "anon". See
+            // LLVMDIBuilderFinalizeSubprogram and
+            // DISubprogram::replaceRetainedNodes.
+            if let Some(retained_nodes) = sub_program.retained_nodes() {
+                new_program.set_retained_nodes(retained_nodes);
+            }
+
+            // Remove retained nodes from the old program or we'll hit a debug assertion since
+            // its debug variables no longer point to the program. See the
+            // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
+            let empty_node =
+                unsafe { LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0) };
+            sub_program.set_retained_nodes(empty_node);
+
+            let ret = replace.insert(sub_program.value_ref as u64, unsafe {
+                LLVMValueAsMetadata(new_program.value_ref)
+            });
+            assert!(ret.is_none());
+        }
+
+        replace
     }
 }
 
@@ -302,6 +414,19 @@ struct Operand {
     parent: LLVMValueRef,
     value: LLVMValueRef,
     index: u32,
+}
+
+impl Operand {
+    fn replace(&mut self, value: LLVMValueRef) {
+        unsafe {
+            if !LLVMIsAMDNode(self.parent).is_null() {
+                let value = LLVMValueAsMetadata(value);
+                LLVMReplaceMDNodeOperandWith(self.parent, self.index, value);
+            } else if !LLVMIsAUser(self.parent).is_null() {
+                LLVMSetOperand(self.parent, self.index, value);
+            }
+        }
+    }
 }
 
 impl Item {
