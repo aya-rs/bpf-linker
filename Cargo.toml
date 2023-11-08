@@ -23,7 +23,7 @@ simplelog = { version = "0.12.1" }
 # lib deps
 ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.0", optional = true }
-libc = { version = "0.2.149" }
+libc = { version = "0.2.150" }
 llvm-sys = { version = "170.0.0" }
 log = { version = "0.4.20" }
 thiserror = { version = "1.0.50" }
