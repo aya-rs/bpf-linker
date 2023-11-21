@@ -567,20 +567,17 @@ impl DISanitizer {
                             return;
                         }
 
-                        // variadic enum not supported => emit warning and strip out the children array
-                        // i.e. pub enum Foo { Bar, Baz(u32), Bad(u64, u64) }
-
-                        // we detect this is a variadic enum if the child element is a DW_TAG_variant_part
+                        let mut is_data_carrying_enum = false;
                         let mut members = Vec::new();
                         for element in di_composite_type.elements() {
                             match element.into_metadata_kind() {
-                                MetadataKind::DICompositeType(mut di_composite_type) => {
-                                    // The presence of `DW_TAG_variant_part` in a composite type
-                                    // means that we are processing a data-carrying enum. Such
-                                    // type is not supported by the Linux kernel, so we need to
-                                    // remove the children, so BTF doesn't contain data carried
-                                    // by the enum variant.
-                                    match di_composite_type.di_type.di_scope.di_node.tag() {
+                                MetadataKind::DICompositeType(di_composite_type_inner) => {
+                                    // The presence of a composite type with `DW_TAG_variant_part`
+                                    // as a member of an another composite type means that we are
+                                    // processing a data-carrying enum. Such type is not supported
+                                    // by the Linux kernel. We need to remove the children, so BTF
+                                    // doesn't contain data carried by the enum variant.
+                                    match di_composite_type_inner.di_type.di_scope.di_node.tag() {
                                         DW_TAG_variant_part => {
                                             let line = di_composite_type.di_type.line();
                                             let file = di_composite_type
@@ -601,19 +598,13 @@ impl DISanitizer {
                                             };
 
                                             warn!(
-                                                "at {}:{}: enum {}: not emitting BTF",
+                                                "found data carrying enum {} ({}:{}), not emitting
+                                                the debug info of its children",
                                                 filename, line, name
                                             );
 
-                                            // Remove children.
-                                            // TODO(vadorovsky): We might be leaking memory here,
-                                            // let's double-check if we can dispose the children.
-                                            di_composite_type
-                                                .replace_elements(MDNode::empty(self.context));
-                                            // Remove name.
-                                            di_composite_type
-                                                .replace_name(self.context, "")
-                                                .unwrap();
+                                            is_data_carrying_enum = true;
+                                            break;
                                         }
                                         _ => {}
                                     }
@@ -653,7 +644,11 @@ impl DISanitizer {
                                 _ => {}
                             }
                         }
-                        if !members.is_empty() {
+                        if is_data_carrying_enum {
+                            // TODO(vadorovsky): We might be leaking memory here,
+                            // let's double-check if we can dispose the old operands.
+                            di_composite_type.replace_elements(MDNode::empty(self.context));
+                        } else if !members.is_empty() {
                             members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
                             let sorted_elements =
                                 MDNode::with_elements(self.context, members.as_mut_slice());
