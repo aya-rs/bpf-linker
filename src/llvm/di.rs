@@ -10,7 +10,7 @@ use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use log::{trace, warn};
 
 use super::{
-    ir::{MDNode, Metadata, MetadataKind, Value, ValueType},
+    ir::{MDNode, Metadata, MetadataKind, Value},
     symbol_name, Message,
 };
 use crate::llvm::iter::*;
@@ -701,7 +701,7 @@ impl DISanitizer {
 
         self.node_stack.push(value);
 
-        if let ValueType::MDNode(mdnode) = Value::new(value).into_value_type() {
+        if let Value::MDNode(mdnode) = Value::new(value) {
             let metadata_kind = LLVMGetMetadataKind(mdnode.metadata.metadata);
             trace!(
                 "{one:depth$}mdnode kind:{:?} n_operands:{} value: {}",
