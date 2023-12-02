@@ -13,26 +13,18 @@ use super::di::{
     DICommonBlock, DICompositeType, DIDerivedType, DIGlobalVariable, DISubprogram, DIType,
 };
 
-pub enum ValueType {
+pub enum Value {
     MDNode(MDNode),
-    Unknown(Value),
-}
-
-pub struct Value {
-    value: LLVMValueRef,
+    Unknown(LLVMValueRef),
 }
 
 impl Value {
     pub fn new(value: LLVMValueRef) -> Self {
-        Self { value }
-    }
-
-    pub fn into_value_type(self) -> ValueType {
-        if unsafe { !LLVMIsAMDNode(self.value).is_null() } {
-            let mdnode = unsafe { MDNode::from_value_ref(self.value) };
-            return ValueType::MDNode(mdnode);
+        if unsafe { !LLVMIsAMDNode(value).is_null() } {
+            let mdnode = unsafe { MDNode::from_value_ref(value) };
+            return Value::MDNode(mdnode);
         }
-        ValueType::Unknown(self)
+        Value::Unknown(value)
     }
 }
 
