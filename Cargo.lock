@@ -215,7 +215,7 @@ checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 [[package]]
 name = "compiletest_rs"
 version = "0.10.2"
-source = "git+https://github.com/Manishearth/compiletest-rs.git#3997d91f20153c98d2831cea846766562a179f31"
+source = "git+https://github.com/Manishearth/compiletest-rs.git#6e418275b9c5a631e76f11ab0e05186e7eca45e6"
 dependencies = [
  "diff",
  "filetime",
