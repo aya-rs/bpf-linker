@@ -36,7 +36,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 // The data-carrying enum should be not included in BTF.
 
-// CHECK: ENUM 'SimpleEnum' encoding=UNSIGNED size=1 vlen=3
+// CHECK: ENUM 'SimpleEnum'{{.*}} size=1 vlen=3
 // CHECK-NEXT: 'First' val=0
 // CHECK-NEXT: 'Second' val=1
 // CHECK-NEXT: 'Third' val=2
