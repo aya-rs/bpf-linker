@@ -10,7 +10,7 @@ use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use log::{trace, warn};
 
 use super::{
-    ir::{MDNode, Metadata, MetadataKind, Value},
+    ir::{MDNode, Metadata, Value},
     symbol_name, Message,
 };
 use crate::llvm::iter::*;
@@ -61,7 +61,7 @@ impl DINode {
 
     /// Returns a DWARF tag for the given debug info node.
     pub fn tag(&self) -> DwTag {
-        DwTag(unsafe { LLVMGetDINodeTag(self.md_node.metadata.metadata) })
+        DwTag(unsafe { LLVMGetDINodeTag(self.md_node.metadata()) })
     }
 }
 
@@ -102,7 +102,7 @@ impl DIScope {
 
     pub fn file(&self, context: LLVMContextRef) -> DIFile {
         unsafe {
-            let metadata = LLVMDIScopeGetFile(self.di_node.md_node.metadata.metadata);
+            let metadata = LLVMDIScopeGetFile(self.di_node.md_node.metadata());
             DIFile::from_metadata_ref(context, metadata)
         }
     }
@@ -141,9 +141,8 @@ impl DIFile {
         //
         // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
         // gets freed when calling `LLVMDisposeDIBuilder`.
-        let ptr = unsafe {
-            LLVMDIFileGetFilename(self.di_scope.di_node.md_node.metadata.metadata, &mut len)
-        };
+        let ptr =
+            unsafe { LLVMDIFileGetFilename(self.di_scope.di_node.md_node.metadata(), &mut len) };
         NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
     }
 }
@@ -187,27 +186,24 @@ impl DIType {
         // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
         // gets freed when calling `LLVMDisposeDIBuilder`. Example:
         // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
-        let ptr =
-            unsafe { LLVMDITypeGetName(self.di_scope.di_node.md_node.metadata.metadata, &mut len) };
+        let ptr = unsafe { LLVMDITypeGetName(self.di_scope.di_node.md_node.metadata(), &mut len) };
         NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
     }
 
     /// Returns the flags associated with the type.
     pub fn flags(&self) -> LLVMDIFlags {
-        unsafe { LLVMDITypeGetFlags(self.di_scope.di_node.md_node.metadata.metadata) }
+        unsafe { LLVMDITypeGetFlags(self.di_scope.di_node.md_node.metadata()) }
     }
 
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
     pub fn offset_in_bits(&self) -> usize {
-        unsafe {
-            LLVMDITypeGetOffsetInBits(self.di_scope.di_node.md_node.metadata.metadata) as usize
-        }
+        unsafe { LLVMDITypeGetOffsetInBits(self.di_scope.di_node.md_node.metadata()) as usize }
     }
 
     /// Returns the line number in the source code where the type is defined.
     pub fn line(&self) -> u32 {
-        unsafe { LLVMDITypeGetLine(self.di_scope.di_node.md_node.metadata.metadata) }
+        unsafe { LLVMDITypeGetLine(self.di_scope.di_node.md_node.metadata()) }
     }
 
     /// Replaces the name of the type with a new name.
@@ -260,7 +256,7 @@ impl DIDerivedType {
     pub fn base_type(&self) -> Metadata {
         unsafe {
             let value = LLVMGetOperand(
-                self.di_type.di_scope.di_node.md_node.metadata.value,
+                self.di_type.di_scope.di_node.md_node.value,
                 DIDerivedTypeOperand::BaseType as u32,
             );
             Metadata::from_value_ref(value)
@@ -324,7 +320,7 @@ impl DICompositeType {
     pub fn elements(&self) -> impl Iterator<Item = Metadata> {
         let elements = unsafe {
             LLVMGetOperand(
-                self.di_type.di_scope.di_node.md_node.metadata.value,
+                self.di_type.di_scope.di_node.md_node.value,
                 DICompositeTypeOperand::Elements as u32,
             )
         };
@@ -349,12 +345,11 @@ impl DICompositeType {
     /// as operants. The metadata node can be empty if the intention is to
     /// remove all elements of the composite type.
     pub fn replace_elements(&mut self, mdnode: MDNode) {
-        let value = self.di_type.di_scope.di_node.md_node.metadata.value;
         unsafe {
             LLVMReplaceMDNodeOperandWith(
-                value,
+                self.di_type.di_scope.di_node.md_node.value,
                 DICompositeTypeOperand::Elements as u32,
-                mdnode.metadata.metadata,
+                LLVMValueAsMetadata(mdnode.value),
             )
         }
     }
@@ -468,7 +463,7 @@ impl DISubprogram {
 
     /// Returns the name of the subprogram.
     pub fn name(&self) -> Option<&CStr> {
-        let value = self.di_local_scope.di_scope.di_node.md_node.metadata.value;
+        let value = self.di_local_scope.di_scope.di_node.md_node.value;
         let operand = unsafe { LLVMGetOperand(value, DISubprogramOperand::Name as u32) };
         let mut len = 0;
         // `LLVMGetMDString` doesn't allocate any memory, it just returns a
@@ -545,8 +540,8 @@ impl DISanitizer {
     }
 
     fn mdnode(&mut self, mdnode: MDNode) {
-        match mdnode.metadata.into_metadata_kind() {
-            MetadataKind::DICompositeType(mut di_composite_type) => {
+        match mdnode.try_into().expect("MDNode is not Metadata") {
+            Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.di_type.di_scope.di_node.tag() {
@@ -570,8 +565,8 @@ impl DISanitizer {
                         let mut is_data_carrying_enum = false;
                         let mut members = Vec::new();
                         for element in di_composite_type.elements() {
-                            match element.into_metadata_kind() {
-                                MetadataKind::DICompositeType(di_composite_type_inner) => {
+                            match element {
+                                Metadata::DICompositeType(di_composite_type_inner) => {
                                     // The presence of a composite type with `DW_TAG_variant_part`
                                     // as a member of another composite type means that we are
                                     // processing a data-carrying enum. Such types are not supported
@@ -608,13 +603,11 @@ impl DISanitizer {
                                         _ => {}
                                     }
                                 }
-                                MetadataKind::DIDerivedType(di_derived_type) => {
+                                Metadata::DIDerivedType(di_derived_type) => {
                                     let base_type = di_derived_type.base_type();
 
-                                    match base_type.into_metadata_kind() {
-                                        MetadataKind::DICompositeType(
-                                            base_type_di_composite_type,
-                                        ) => {
+                                    match base_type {
+                                        Metadata::DICompositeType(base_type_di_composite_type) => {
                                             let base_type_name = base_type_di_composite_type.name();
                                             if let Some(base_type_name) = base_type_name {
                                                 let base_type_name =
@@ -655,7 +648,7 @@ impl DISanitizer {
                     _ => (),
                 }
             }
-            MetadataKind::DIDerivedType(mut di_derived_type) => {
+            Metadata::DIDerivedType(mut di_derived_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_derived_type.di_type.di_scope.di_node.tag() {
@@ -667,7 +660,7 @@ impl DISanitizer {
                 }
             }
             // Sanitize function (subprogram) names.
-            MetadataKind::DISubprogram(mut di_subprogram) => {
+            Metadata::DISubprogram(mut di_subprogram) => {
                 if let Some(name) = di_subprogram.name() {
                     let name = sanitize_type_name(name.to_string_lossy());
                     di_subprogram
@@ -702,7 +695,7 @@ impl DISanitizer {
         self.node_stack.push(value);
 
         if let Value::MDNode(mdnode) = Value::new(value) {
-            let metadata_kind = LLVMGetMetadataKind(mdnode.metadata.metadata);
+            let metadata_kind = LLVMGetMetadataKind(mdnode.metadata());
             trace!(
                 "{one:depth$}mdnode kind:{:?} n_operands:{} value: {}",
                 metadata_kind,
