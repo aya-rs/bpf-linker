@@ -28,28 +28,16 @@ impl Value {
     }
 }
 
-pub enum MetadataKind {
+pub enum Metadata {
     DICompositeType(DICompositeType),
     DIGlobalVariable(DIGlobalVariable),
     DICommonBlock(DICommonBlock),
     DIDerivedType(DIDerivedType),
     DISubprogram(DISubprogram),
-    Unknown(Metadata),
-}
-
-/// Represents LLVM IR metadata.
-pub struct Metadata {
-    pub(crate) metadata: LLVMMetadataRef,
-    pub(crate) value: LLVMValueRef,
+    Unknown(LLVMValueRef),
 }
 
 impl Metadata {
-    /// Constructs a new [`Metadata`] from the given raw pointer.
-    pub(crate) fn from_metadata_ref(context: LLVMContextRef, metadata: LLVMMetadataRef) -> Self {
-        let value = unsafe { LLVMMetadataAsValue(context, metadata) };
-        Self { metadata, value }
-    }
-
     /// Constructs a new [`Metadata`] from the given `value`.
     ///
     /// # Safety
@@ -60,30 +48,27 @@ impl Metadata {
     /// method doesn't perform any valiation checks.
     pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
         let metadata = LLVMValueAsMetadata(value);
-        Self { metadata, value }
-    }
 
-    pub fn into_metadata_kind(self) -> MetadataKind {
-        match unsafe { LLVMGetMetadataKind(self.metadata) } {
+        match unsafe { LLVMGetMetadataKind(metadata) } {
             LLVMMetadataKind::LLVMDICompositeTypeMetadataKind => {
-                let di_composite_type = unsafe { DICompositeType::from_value_ref(self.value) };
-                MetadataKind::DICompositeType(di_composite_type)
+                let di_composite_type = unsafe { DICompositeType::from_value_ref(value) };
+                Metadata::DICompositeType(di_composite_type)
             }
             LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind => {
-                let di_global_variale = unsafe { DIGlobalVariable::from_value_ref(self.value) };
-                MetadataKind::DIGlobalVariable(di_global_variale)
+                let di_global_variale = unsafe { DIGlobalVariable::from_value_ref(value) };
+                Metadata::DIGlobalVariable(di_global_variale)
             }
             LLVMMetadataKind::LLVMDICommonBlockMetadataKind => {
-                let di_common_block = unsafe { DICommonBlock::from_value_ref(self.value) };
-                MetadataKind::DICommonBlock(di_common_block)
+                let di_common_block = unsafe { DICommonBlock::from_value_ref(value) };
+                Metadata::DICommonBlock(di_common_block)
             }
             LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind => {
-                let di_derived_type = unsafe { DIDerivedType::from_value_ref(self.value) };
-                MetadataKind::DIDerivedType(di_derived_type)
+                let di_derived_type = unsafe { DIDerivedType::from_value_ref(value) };
+                Metadata::DIDerivedType(di_derived_type)
             }
             LLVMMetadataKind::LLVMDISubprogramMetadataKind => {
-                let di_subprogram = unsafe { DISubprogram::from_value_ref(self.value) };
-                MetadataKind::DISubprogram(di_subprogram)
+                let di_subprogram = unsafe { DISubprogram::from_value_ref(value) };
+                Metadata::DISubprogram(di_subprogram)
             }
             LLVMMetadataKind::LLVMMDStringMetadataKind
             | LLVMMetadataKind::LLVMConstantAsMetadataMetadataKind
@@ -115,14 +100,23 @@ impl Metadata {
             | LLVMMetadataKind::LLVMDIStringTypeMetadataKind
             | LLVMMetadataKind::LLVMDIGenericSubrangeMetadataKind
             | LLVMMetadataKind::LLVMDIArgListMetadataKind
-            | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => MetadataKind::Unknown(self),
+            | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Unknown(value),
         }
+    }
+}
+
+impl TryFrom<MDNode> for Metadata {
+    type Error = ();
+
+    fn try_from(md_node: MDNode) -> Result<Self, Self::Error> {
+        // FIXME: fail if md_node isn't a Metadata node
+        Ok(unsafe { Self::from_value_ref(md_node.value) })
     }
 }
 
 /// Represents a metadata node.
 pub struct MDNode {
-    pub metadata: Metadata,
+    pub value: LLVMValueRef,
 }
 
 impl MDNode {
@@ -138,11 +132,10 @@ impl MDNode {
         context: LLVMContextRef,
         metadata: LLVMMetadataRef,
     ) -> Self {
-        let metadata = Metadata::from_metadata_ref(context, metadata);
-        Self { metadata }
+        MDNode::from_value_ref(LLVMMetadataAsValue(context, metadata))
     }
 
-    /// Constructs a new [`Metadata`] from the given `value`.
+    /// Constructs a new [`MDNode`] from the given `value`.
     ///
     /// # Safety
     ///
@@ -151,15 +144,18 @@ impl MDNode {
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any valiation checks.
     pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let metadata = Metadata::from_value_ref(value);
-        Self { metadata }
+        Self { value }
+    }
+
+    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
+    pub fn metadata(&self) -> LLVMMetadataRef {
+        unsafe { LLVMValueAsMetadata(self.value) }
     }
 
     /// Constructs an empty metadata node.
     pub fn empty(context: LLVMContextRef) -> Self {
         let metadata = unsafe { LLVMMDNodeInContext2(context, core::ptr::null_mut(), 0) };
-        let metadata = Metadata::from_metadata_ref(context, metadata);
-        Self { metadata }
+        unsafe { Self::from_metadata_ref(context, metadata) }
     }
 
     /// Replaces the name of the subprogram with a new name.
@@ -174,7 +170,7 @@ impl MDNode {
         name_operand_index: u32,
         name: &str,
     ) -> Result<(), NulError> {
-        let value = self.metadata.value;
+        let value = self.value;
         let cstr = CString::new(name)?;
         let name = unsafe { LLVMMDStringInContext2(context, cstr.as_ptr(), name.len()) };
         unsafe { LLVMReplaceMDNodeOperandWith(value, name_operand_index, name) };
@@ -190,15 +186,14 @@ impl MDNode {
         let metadata = unsafe {
             let mut elements: Vec<LLVMMetadataRef> = elements
                 .iter()
-                .map(|di_type| di_type.di_scope.di_node.md_node.metadata.metadata)
+                .map(|di_type| LLVMValueAsMetadata(di_type.di_scope.di_node.md_node.value))
                 .collect();
-            let metadata = LLVMMDNodeInContext2(
+            LLVMMDNodeInContext2(
                 context,
                 elements.as_mut_slice().as_mut_ptr(),
                 elements.len(),
-            );
-            Metadata::from_metadata_ref(context, metadata)
+            )
         };
-        Self { metadata }
+        unsafe { Self::from_metadata_ref(context, metadata) }
     }
 }
