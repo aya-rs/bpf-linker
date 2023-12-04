@@ -30,21 +30,6 @@ pub struct DINode<'ctx> {
 }
 
 impl<'ctx> DINode<'ctx> {
-    /// Constructs a new [`DINode`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DINode`](https://llvm.org/doxygen/classllvm_1_1DINode.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        Self {
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
     /// Returns the low level `LLVMMetadataRef` corresponding to this node.
     pub fn metadata(&self) -> LLVMMetadataRef {
         unsafe { LLVMValueAsMetadata(self.value_ref) }
@@ -56,24 +41,6 @@ impl<'ctx> DINode<'ctx> {
     }
 }
 
-impl<'ctx> TryFrom<DIDerivedType<'ctx>> for DINode<'ctx> {
-    type Error = ();
-
-    fn try_from(di_derived_type: DIDerivedType) -> Result<Self, Self::Error> {
-        // FIXME: perform a check
-        Ok(unsafe { Self::from_value_ref(di_derived_type.value_ref) })
-    }
-}
-
-impl<'ctx> TryFrom<DICompositeType<'ctx>> for DINode<'ctx> {
-    type Error = ();
-
-    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
-        // FIXME: perform a check
-        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
-    }
-}
-
 /// Represents the debug information for a code scope.
 pub struct DIScope<'ctx> {
     pub(super) value_ref: LLVMValueRef,
@@ -81,21 +48,6 @@ pub struct DIScope<'ctx> {
 }
 
 impl<'ctx> DIScope<'ctx> {
-    /// Constructs a new [`DIScope`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `value` corresponds to a valid
-    /// instance of [LLVM `DIScope`](https://llvm.org/doxygen/classllvm_1_1DIScope.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        Self {
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
     /// Returns the low level `LLVMMetadataRef` corresponding to this node.
     pub fn metadata(&self) -> LLVMMetadataRef {
         unsafe { LLVMValueAsMetadata(self.value_ref) }
@@ -106,15 +58,6 @@ impl<'ctx> DIScope<'ctx> {
             let metadata = LLVMDIScopeGetFile(self.metadata());
             DIFile::from_metadata_ref(metadata)
         }
-    }
-}
-
-impl<'ctx> TryFrom<DICompositeType<'ctx>> for DIScope<'ctx> {
-    type Error = ();
-
-    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
-        // FIXME: perform a check
-        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
     }
 }
 
@@ -231,21 +174,9 @@ impl<'ctx> DIType<'ctx> {
     }
 }
 
-impl<'ctx> TryFrom<DIDerivedType<'ctx>> for DIType<'ctx> {
-    type Error = ();
-
-    fn try_from(di_derived_type: DIDerivedType) -> Result<Self, Self::Error> {
-        // FIXME: Perform a check
-        Ok(unsafe { Self::from_value_ref(di_derived_type.value_ref) })
-    }
-}
-
-impl<'ctx> TryFrom<DICompositeType<'ctx>> for DIType<'ctx> {
-    type Error = ();
-
-    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
-        // FIXME: Perform a check
-        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
+impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
+    fn from(di_derived_type: DIDerivedType) -> Self {
+        unsafe { Self::from_value_ref(di_derived_type.value_ref) }
     }
 }
 

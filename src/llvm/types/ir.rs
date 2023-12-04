@@ -12,7 +12,7 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
-use super::di::{DICompositeType, DIDerivedType, DINode, DISubprogram, DIType};
+use super::di::{DICompositeType, DIDerivedType, DISubprogram, DIType};
 
 pub(crate) fn replace_name(
     value_ref: LLVMValueRef,
@@ -185,14 +185,5 @@ impl<'ctx> MDNode<'ctx> {
             )
         };
         unsafe { Self::from_metadata_ref(context, metadata) }
-    }
-}
-
-impl<'ctx> TryFrom<DINode<'ctx>> for MDNode<'ctx> {
-    type Error = ();
-
-    fn try_from(di_node: DINode) -> Result<Self, Self::Error> {
-        // FIXME: fail here if it's not a MDNode
-        Ok(unsafe { Self::from_value_ref(di_node.value_ref) })
     }
 }

@@ -152,15 +152,14 @@ impl DISanitizer {
                                                     remove_name = true;
                                                     // And don't include the field in the sanitized DI.
                                                 } else {
-                                                    members
-                                                        .push(di_derived_type.try_into().unwrap());
+                                                    members.push(di_derived_type.into());
                                                 }
                                             } else {
-                                                members.push(di_derived_type.try_into().unwrap());
+                                                members.push(di_derived_type.into());
                                             }
                                         }
                                         _ => {
-                                            members.push(di_derived_type.try_into().unwrap());
+                                            members.push(di_derived_type.into());
                                         }
                                     }
                                 }
