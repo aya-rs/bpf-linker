@@ -15,7 +15,7 @@ use super::di::{
 
 pub enum Value {
     MDNode(MDNode),
-    Unknown(LLVMValueRef),
+    Other(LLVMValueRef),
 }
 
 impl Value {
@@ -24,7 +24,7 @@ impl Value {
             let mdnode = unsafe { MDNode::from_value_ref(value) };
             return Value::MDNode(mdnode);
         }
-        Value::Unknown(value)
+        Value::Other(value)
     }
 }
 
@@ -34,7 +34,7 @@ pub enum Metadata {
     DICommonBlock(DICommonBlock),
     DIDerivedType(DIDerivedType),
     DISubprogram(DISubprogram),
-    Unknown(LLVMValueRef),
+    Other(LLVMValueRef),
 }
 
 impl Metadata {
@@ -100,7 +100,7 @@ impl Metadata {
             | LLVMMetadataKind::LLVMDIStringTypeMetadataKind
             | LLVMMetadataKind::LLVMDIGenericSubrangeMetadataKind
             | LLVMMetadataKind::LLVMDIArgListMetadataKind
-            | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Unknown(value),
+            | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Other(value),
         }
     }
 }
