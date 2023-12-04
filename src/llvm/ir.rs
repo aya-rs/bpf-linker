@@ -1,4 +1,7 @@
-use std::ffi::{CString, NulError};
+use std::{
+    ffi::{CString, NulError},
+    marker::PhantomData,
+};
 
 use llvm_sys::{
     core::{
@@ -9,16 +12,26 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
-use super::di::{
-    DICommonBlock, DICompositeType, DIDerivedType, DIGlobalVariable, DISubprogram, DIType,
-};
+use super::di::{DICompositeType, DIDerivedType, DINode, DISubprogram, DIType};
 
-pub enum Value {
-    MDNode(MDNode),
+pub(crate) fn replace_name(
+    value_ref: LLVMValueRef,
+    context: LLVMContextRef,
+    name_operand_index: u32,
+    name: &str,
+) -> Result<(), NulError> {
+    let cstr = CString::new(name)?;
+    let name = unsafe { LLVMMDStringInContext2(context, cstr.as_ptr(), name.len()) };
+    unsafe { LLVMReplaceMDNodeOperandWith(value_ref, name_operand_index, name) };
+    Ok(())
+}
+
+pub enum Value<'ctx> {
+    MDNode(MDNode<'ctx>),
     Other(LLVMValueRef),
 }
 
-impl Value {
+impl<'ctx> Value<'ctx> {
     pub fn new(value: LLVMValueRef) -> Self {
         if unsafe { !LLVMIsAMDNode(value).is_null() } {
             let mdnode = unsafe { MDNode::from_value_ref(value) };
@@ -28,16 +41,14 @@ impl Value {
     }
 }
 
-pub enum Metadata {
-    DICompositeType(DICompositeType),
-    DIGlobalVariable(DIGlobalVariable),
-    DICommonBlock(DICommonBlock),
-    DIDerivedType(DIDerivedType),
-    DISubprogram(DISubprogram),
+pub enum Metadata<'ctx> {
+    DICompositeType(DICompositeType<'ctx>),
+    DIDerivedType(DIDerivedType<'ctx>),
+    DISubprogram(DISubprogram<'ctx>),
     Other(LLVMValueRef),
 }
 
-impl Metadata {
+impl<'ctx> Metadata<'ctx> {
     /// Constructs a new [`Metadata`] from the given `value`.
     ///
     /// # Safety
@@ -54,14 +65,6 @@ impl Metadata {
                 let di_composite_type = unsafe { DICompositeType::from_value_ref(value) };
                 Metadata::DICompositeType(di_composite_type)
             }
-            LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind => {
-                let di_global_variale = unsafe { DIGlobalVariable::from_value_ref(value) };
-                Metadata::DIGlobalVariable(di_global_variale)
-            }
-            LLVMMetadataKind::LLVMDICommonBlockMetadataKind => {
-                let di_common_block = unsafe { DICommonBlock::from_value_ref(value) };
-                Metadata::DICommonBlock(di_common_block)
-            }
             LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind => {
                 let di_derived_type = unsafe { DIDerivedType::from_value_ref(value) };
                 Metadata::DIDerivedType(di_derived_type)
@@ -70,7 +73,9 @@ impl Metadata {
                 let di_subprogram = unsafe { DISubprogram::from_value_ref(value) };
                 Metadata::DISubprogram(di_subprogram)
             }
-            LLVMMetadataKind::LLVMMDStringMetadataKind
+            LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind
+            | LLVMMetadataKind::LLVMDICommonBlockMetadataKind
+            | LLVMMetadataKind::LLVMMDStringMetadataKind
             | LLVMMetadataKind::LLVMConstantAsMetadataMetadataKind
             | LLVMMetadataKind::LLVMLocalAsMetadataMetadataKind
             | LLVMMetadataKind::LLVMDistinctMDOperandPlaceholderMetadataKind
@@ -105,21 +110,22 @@ impl Metadata {
     }
 }
 
-impl TryFrom<MDNode> for Metadata {
+impl<'ctx> TryFrom<MDNode<'ctx>> for Metadata<'ctx> {
     type Error = ();
 
     fn try_from(md_node: MDNode) -> Result<Self, Self::Error> {
         // FIXME: fail if md_node isn't a Metadata node
-        Ok(unsafe { Self::from_value_ref(md_node.value) })
+        Ok(unsafe { Self::from_value_ref(md_node.value_ref) })
     }
 }
 
 /// Represents a metadata node.
-pub struct MDNode {
-    pub value: LLVMValueRef,
+pub struct MDNode<'ctx> {
+    pub(super) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl MDNode {
+impl<'ctx> MDNode<'ctx> {
     /// Constructs a new [`MDNode`] from the given `metadata`.
     ///
     /// # Safety
@@ -143,38 +149,22 @@ impl MDNode {
     /// instance of [LLVM `MDNode`](https://llvm.org/doxygen/classllvm_1_1MDNode.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any valiation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        Self { value }
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns the low level `LLVMMetadataRef` corresponding to this node.
     pub fn metadata(&self) -> LLVMMetadataRef {
-        unsafe { LLVMValueAsMetadata(self.value) }
+        unsafe { LLVMValueAsMetadata(self.value_ref) }
     }
 
     /// Constructs an empty metadata node.
     pub fn empty(context: LLVMContextRef) -> Self {
         let metadata = unsafe { LLVMMDNodeInContext2(context, core::ptr::null_mut(), 0) };
         unsafe { Self::from_metadata_ref(context, metadata) }
-    }
-
-    /// Replaces the name of the subprogram with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub(crate) fn replace_name(
-        &mut self,
-        context: LLVMContextRef,
-        name_operand_index: u32,
-        name: &str,
-    ) -> Result<(), NulError> {
-        let value = self.value;
-        let cstr = CString::new(name)?;
-        let name = unsafe { LLVMMDStringInContext2(context, cstr.as_ptr(), name.len()) };
-        unsafe { LLVMReplaceMDNodeOperandWith(value, name_operand_index, name) };
-        Ok(())
     }
 
     /// Constructs a new metadata node from an array of [`DIType`] elements.
@@ -186,7 +176,7 @@ impl MDNode {
         let metadata = unsafe {
             let mut elements: Vec<LLVMMetadataRef> = elements
                 .iter()
-                .map(|di_type| LLVMValueAsMetadata(di_type.di_scope.di_node.md_node.value))
+                .map(|di_type| LLVMValueAsMetadata(di_type.value_ref))
                 .collect();
             LLVMMDNodeInContext2(
                 context,
@@ -195,5 +185,14 @@ impl MDNode {
             )
         };
         unsafe { Self::from_metadata_ref(context, metadata) }
+    }
+}
+
+impl<'ctx> TryFrom<DINode<'ctx>> for MDNode<'ctx> {
+    type Error = ();
+
+    fn try_from(di_node: DINode) -> Result<Self, Self::Error> {
+        // FIXME: fail here if it's not a MDNode
+        Ok(unsafe { Self::from_value_ref(di_node.value_ref) })
     }
 }
