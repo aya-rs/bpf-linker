@@ -2,6 +2,7 @@ use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     ffi::{CStr, NulError},
     hash::Hasher,
+    marker::PhantomData,
     ptr::NonNull,
 };
 
@@ -25,27 +26,12 @@ const MAX_KSYM_NAME_LEN: usize = 128;
 /// `DINode` is a fundamental structure used in the construction of LLVM's
 /// debugging information ecosystem. It serves as a building block for more
 /// complex debug information entities such as scopes, types and variables.
-pub struct DINode {
-    pub md_node: MDNode,
+pub struct DINode<'ctx> {
+    pub(super) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DINode {
-    /// Constructs a new [`DINode`] from the given `metadata`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `metadata` corresponds to a valid
-    /// instance of [LLVM `DINode`](https://llvm.org/doxygen/classllvm_1_1DINode.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(
-        context: LLVMContextRef,
-        metadata: LLVMMetadataRef,
-    ) -> Self {
-        let md_node = MDNode::from_metadata_ref(context, metadata);
-        Self { md_node }
-    }
-
+impl<'ctx> DINode<'ctx> {
     /// Constructs a new [`DINode`] from the given `value`.
     ///
     /// # Safety
@@ -54,39 +40,49 @@ impl DINode {
     /// instance of [LLVM `DINode`](https://llvm.org/doxygen/classllvm_1_1DINode.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let md_node = MDNode::from_value_ref(value);
-        Self { md_node }
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
+    pub fn metadata(&self) -> LLVMMetadataRef {
+        unsafe { LLVMValueAsMetadata(self.value_ref) }
     }
 
     /// Returns a DWARF tag for the given debug info node.
     pub fn tag(&self) -> DwTag {
-        DwTag(unsafe { LLVMGetDINodeTag(self.md_node.metadata()) })
+        DwTag(unsafe { LLVMGetDINodeTag(self.metadata()) })
+    }
+}
+
+impl<'ctx> TryFrom<DIDerivedType<'ctx>> for DINode<'ctx> {
+    type Error = ();
+
+    fn try_from(di_derived_type: DIDerivedType) -> Result<Self, Self::Error> {
+        // FIXME: perform a check
+        Ok(unsafe { Self::from_value_ref(di_derived_type.value_ref) })
+    }
+}
+
+impl<'ctx> TryFrom<DICompositeType<'ctx>> for DINode<'ctx> {
+    type Error = ();
+
+    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
+        // FIXME: perform a check
+        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
     }
 }
 
 /// Represents the debug information for a code scope.
-pub struct DIScope {
-    pub di_node: DINode,
+pub struct DIScope<'ctx> {
+    pub(super) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DIScope {
-    /// Constructs a new [`DIScope`] from the given `metadata`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `metadata` corresponds to a valid
-    /// instance of [LLVM `DIScope`](https://llvm.org/doxygen/classllvm_1_1DIScope.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(
-        context: LLVMContextRef,
-        metadata: LLVMMetadataRef,
-    ) -> Self {
-        let di_node = DINode::from_metadata_ref(context, metadata);
-        DIScope { di_node }
-    }
-
+impl<'ctx> DIScope<'ctx> {
     /// Constructs a new [`DIScope`] from the given `value`.
     ///
     /// # Safety
@@ -95,16 +91,32 @@ impl DIScope {
     /// instance of [LLVM `DIScope`](https://llvm.org/doxygen/classllvm_1_1DIScope.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_node = DINode::from_value_ref(value);
-        Self { di_node }
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
     }
 
-    pub fn file(&self, context: LLVMContextRef) -> DIFile {
+    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
+    pub fn metadata(&self) -> LLVMMetadataRef {
+        unsafe { LLVMValueAsMetadata(self.value_ref) }
+    }
+
+    pub fn file(&self) -> DIFile {
         unsafe {
-            let metadata = LLVMDIScopeGetFile(self.di_node.md_node.metadata());
-            DIFile::from_metadata_ref(context, metadata)
+            let metadata = LLVMDIScopeGetFile(self.metadata());
+            DIFile::from_metadata_ref(metadata)
         }
+    }
+}
+
+impl<'ctx> TryFrom<DICompositeType<'ctx>> for DIScope<'ctx> {
+    type Error = ();
+
+    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
+        // FIXME: perform a check
+        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
     }
 }
 
@@ -112,11 +124,12 @@ impl DIScope {
 ///
 /// A `DIFile` debug info node, which represents a given file, is referenced by
 /// other debug info nodes which belong to the file.
-pub struct DIFile {
-    pub di_scope: DIScope,
+pub struct DIFile<'ctx> {
+    pub(super) metadata_ref: LLVMMetadataRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DIFile {
+impl<'ctx> DIFile<'ctx> {
     /// Constructs a new [`DIFile`] from the given `metadata`.
     ///
     /// # Safety
@@ -125,12 +138,11 @@ impl DIFile {
     /// instance of [LLVM `DIFile`](https://llvm.org/doxygen/classllvm_1_1DIFile.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(
-        context: LLVMContextRef,
-        metadata: LLVMMetadataRef,
-    ) -> Self {
-        let di_scope = DIScope::from_metadata_ref(context, metadata);
-        Self { di_scope }
+    pub(crate) unsafe fn from_metadata_ref(metadata_ref: LLVMMetadataRef) -> Self {
+        Self {
+            metadata_ref,
+            _marker: PhantomData,
+        }
     }
 
     pub fn filename(&self) -> Option<&CStr> {
@@ -141,8 +153,7 @@ impl DIFile {
         //
         // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
         // gets freed when calling `LLVMDisposeDIBuilder`.
-        let ptr =
-            unsafe { LLVMDIFileGetFilename(self.di_scope.di_node.md_node.metadata(), &mut len) };
+        let ptr = unsafe { LLVMDIFileGetFilename(self.metadata_ref, &mut len) };
         NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
     }
 }
@@ -152,17 +163,18 @@ impl DIFile {
 #[repr(u32)]
 enum DITypeOperand {
     /// Name of the type.
-    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L743)
-    /// (`DIComppsiteType` inherits the `getName()` method from `DIType`).
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L743).
     Name = 2,
 }
 
 /// Represents the debug information for a primitive type in LLVM IR.
-pub struct DIType {
-    pub di_scope: DIScope,
+pub struct DIType<'ctx> {
+    pub(super) metadata_ref: LLVMMetadataRef,
+    pub(super) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DIType {
+impl<'ctx> DIType<'ctx> {
     /// Constructs a new [`DIType`] from the given `value`.
     ///
     /// # Safety
@@ -171,9 +183,13 @@ impl DIType {
     /// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_scope = DIScope::from_value_ref(value);
-        Self { di_scope }
+    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+        Self {
+            metadata_ref,
+            value_ref,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns the name of the type.
@@ -186,24 +202,24 @@ impl DIType {
         // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
         // gets freed when calling `LLVMDisposeDIBuilder`. Example:
         // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
-        let ptr = unsafe { LLVMDITypeGetName(self.di_scope.di_node.md_node.metadata(), &mut len) };
+        let ptr = unsafe { LLVMDITypeGetName(self.metadata_ref, &mut len) };
         NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
     }
 
     /// Returns the flags associated with the type.
     pub fn flags(&self) -> LLVMDIFlags {
-        unsafe { LLVMDITypeGetFlags(self.di_scope.di_node.md_node.metadata()) }
+        unsafe { LLVMDITypeGetFlags(self.metadata_ref) }
     }
 
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
     pub fn offset_in_bits(&self) -> usize {
-        unsafe { LLVMDITypeGetOffsetInBits(self.di_scope.di_node.md_node.metadata()) as usize }
+        unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) as usize }
     }
 
     /// Returns the line number in the source code where the type is defined.
     pub fn line(&self) -> u32 {
-        unsafe { LLVMDITypeGetLine(self.di_scope.di_node.md_node.metadata()) }
+        unsafe { LLVMDITypeGetLine(self.metadata_ref) }
     }
 
     /// Replaces the name of the type with a new name.
@@ -213,10 +229,25 @@ impl DIType {
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
     pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
-        self.di_scope
-            .di_node
-            .md_node
-            .replace_name(context, DITypeOperand::Name as u32, name)
+        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
+    }
+}
+
+impl<'ctx> TryFrom<DIDerivedType<'ctx>> for DIType<'ctx> {
+    type Error = ();
+
+    fn try_from(di_derived_type: DIDerivedType) -> Result<Self, Self::Error> {
+        // FIXME: Perform a check
+        Ok(unsafe { Self::from_value_ref(di_derived_type.value_ref) })
+    }
+}
+
+impl<'ctx> TryFrom<DICompositeType<'ctx>> for DIType<'ctx> {
+    type Error = ();
+
+    fn try_from(di_composite_type: DICompositeType) -> Result<Self, Self::Error> {
+        // FIXME: Perform a check
+        Ok(unsafe { Self::from_value_ref(di_composite_type.value_ref) })
     }
 }
 
@@ -234,11 +265,12 @@ enum DIDerivedTypeOperand {
 /// The types derived from other types usually add a level of indirection or an
 /// alternative name. The examples of derived types are pointers, references,
 /// typedefs, etc.
-pub struct DIDerivedType {
-    di_type: DIType,
+pub struct DIDerivedType<'ctx> {
+    value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DIDerivedType {
+impl<'ctx> DIDerivedType<'ctx> {
     /// Constructs a new [`DIDerivedType`] from the given `value`.
     ///
     /// # Safety
@@ -247,30 +279,36 @@ impl DIDerivedType {
     /// instance of [LLVM `DIDerivedType`](https://llvm.org/doxygen/classllvm_1_1DIDerivedType.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_type = DIType::from_value_ref(value);
-        Self { di_type }
+    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn as_node(&self) -> DINode<'ctx> {
+        DINode {
+            value_ref: self.value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn as_type(&self) -> DIType<'ctx> {
+        let value_ref = self.value_ref;
+        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+        DIType {
+            value_ref,
+            metadata_ref,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns the base type of this derived type.
     pub fn base_type(&self) -> Metadata {
         unsafe {
-            let value = LLVMGetOperand(
-                self.di_type.di_scope.di_node.md_node.value,
-                DIDerivedTypeOperand::BaseType as u32,
-            );
+            let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
             Metadata::from_value_ref(value)
         }
-    }
-
-    /// Replaces the name of the derived type with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulEror` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
-        self.di_type.replace_name(context, name)
     }
 }
 
@@ -287,11 +325,12 @@ enum DICompositeTypeOperand {
 ///
 /// Composite type is a kind of type that can include other types, such as
 /// structures, enums, unions, etc.
-pub struct DICompositeType {
-    di_type: DIType,
+pub struct DICompositeType<'ctx> {
+    value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DICompositeType {
+impl<'ctx> DICompositeType<'ctx> {
     /// Constructs a new [`DICompositeType`] from the given `value`.
     ///
     /// # Safety
@@ -300,44 +339,46 @@ impl DICompositeType {
     /// instance of [LLVM `DICompositeType`](https://llvm.org/doxygen/classllvm_1_1DICompositeType.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_type = DIType::from_value_ref(value);
-        Self { di_type }
+    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
     }
 
-    /// Returns the name of the composite type.
-    pub fn name(&self) -> Option<&CStr> {
-        self.di_type.name()
+    pub fn as_node(&self) -> DINode<'ctx> {
+        DINode {
+            value_ref: self.value_ref,
+            _marker: PhantomData,
+        }
     }
 
-    /// Returns the flags associated with the composite type.
-    pub fn flags(&self) -> LLVMDIFlags {
-        self.di_type.flags()
+    pub fn as_scope(&self) -> DIScope<'ctx> {
+        DIScope {
+            value_ref: self.value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn as_type(&self) -> DIType<'ctx> {
+        let value_ref = self.value_ref;
+        let metadata_ref = unsafe { LLVMValueAsMetadata(self.value_ref) };
+        DIType {
+            value_ref,
+            metadata_ref,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns an iterator over elements (struct fields, enum variants, etc.)
     /// of the composite type.
     pub fn elements(&self) -> impl Iterator<Item = Metadata> {
-        let elements = unsafe {
-            LLVMGetOperand(
-                self.di_type.di_scope.di_node.md_node.value,
-                DICompositeTypeOperand::Elements as u32,
-            )
-        };
+        let elements =
+            unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::Elements as u32) };
         let operands = unsafe { LLVMGetNumOperands(elements) };
 
         (0..operands)
             .map(move |i| unsafe { Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)) })
-    }
-
-    /// Replaces the name of the composite type with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulEror` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
-        self.di_type.replace_name(context, name)
     }
 
     /// Replaces the elements of the composite type with a new metadata node.
@@ -347,91 +388,11 @@ impl DICompositeType {
     pub fn replace_elements(&mut self, mdnode: MDNode) {
         unsafe {
             LLVMReplaceMDNodeOperandWith(
-                self.di_type.di_scope.di_node.md_node.value,
+                self.value_ref,
                 DICompositeTypeOperand::Elements as u32,
-                LLVMValueAsMetadata(mdnode.value),
+                LLVMValueAsMetadata(mdnode.value_ref),
             )
         }
-    }
-}
-
-/// Represents the debug information for a variable in LLVM IR.
-pub struct DIVariable {
-    pub di_node: DINode,
-}
-
-impl DIVariable {
-    /// Constructs a new [`DIVariable`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DIVariable`](https://llvm.org/doxygen/classllvm_1_1DIVariable.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_node = DINode::from_value_ref(value);
-        Self { di_node }
-    }
-}
-
-/// Represents the debug information for a global variable in LLVM IR.
-pub struct DIGlobalVariable {
-    pub di_variable: DIVariable,
-}
-
-impl DIGlobalVariable {
-    /// Constructs a new [`DIGlobalVariable`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DIGlobalVariable`](https://llvm.org/doxygen/classllvm_1_1DIGlobalVariable.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_variable = DIVariable::from_value_ref(value);
-        Self { di_variable }
-    }
-}
-
-/// Represents the debug information for a common block in LLVM IR.
-pub struct DICommonBlock {
-    pub di_scope: DIScope,
-}
-
-impl DICommonBlock {
-    /// Constructs a new [`DICommonBlock`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DICommonBlack`](https://llvm.org/doxygen/classllvm_1_1DICommonBlock.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_scope = DIScope::from_value_ref(value);
-        Self { di_scope }
-    }
-}
-
-/// Represents the debug information for a local scope in LLVM IR.
-pub struct DILocalScope {
-    pub di_scope: DIScope,
-}
-
-impl DILocalScope {
-    /// Constructs a new [`DILocalScope`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DILocalScope`](https://llvm.org/doxygen/classllvm_1_1DILocalScope.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_scope = DIScope::from_value_ref(value);
-        Self { di_scope }
     }
 }
 
@@ -443,11 +404,12 @@ enum DISubprogramOperand {
 }
 
 /// Represents the debug information for a subprogram (function) in LLVM IR.
-pub struct DISubprogram {
-    pub di_local_scope: DILocalScope,
+pub struct DISubprogram<'ctx> {
+    pub(super) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
 }
 
-impl DISubprogram {
+impl<'ctx> DISubprogram<'ctx> {
     /// Constructs a new [`DISubprogram`] from the given `value`.
     ///
     /// # Safety
@@ -456,15 +418,16 @@ impl DISubprogram {
     /// instance of [LLVM `DISubprogram`](https://llvm.org/doxygen/classllvm_1_1DISubprogram.html).
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
-        let di_local_scope = DILocalScope::from_value_ref(value);
-        DISubprogram { di_local_scope }
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        DISubprogram {
+            value_ref,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns the name of the subprogram.
     pub fn name(&self) -> Option<&CStr> {
-        let value = self.di_local_scope.di_scope.di_node.md_node.value;
-        let operand = unsafe { LLVMGetOperand(value, DISubprogramOperand::Name as u32) };
+        let operand = unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::Name as u32) };
         let mut len = 0;
         // `LLVMGetMDString` doesn't allocate any memory, it just returns a
         // pointer to the string which is already a part of the `Metadata`
@@ -484,7 +447,8 @@ impl DISubprogram {
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
     pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
-        self.di_local_scope.di_scope.di_node.md_node.replace_name(
+        super::ir::replace_name(
+            self.value_ref,
             context,
             DISubprogramOperand::Name as u32,
             name,
@@ -544,13 +508,14 @@ impl DISanitizer {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
-                match di_composite_type.di_type.di_scope.di_node.tag() {
+                match di_composite_type.as_node().tag() {
                     DW_TAG_structure_type => {
-                        if let Some(name) = di_composite_type.name() {
+                        if let Some(name) = di_composite_type.as_type().name() {
                             let name = name.to_string_lossy();
                             // Clear the name from generics.
                             let name = sanitize_type_name(name);
                             di_composite_type
+                                .as_type()
                                 .replace_name(self.context, name.as_str())
                                 .unwrap();
                         }
@@ -558,12 +523,13 @@ impl DISanitizer {
                         // This is a forward declaration. We don't need to do
                         // anything on the declaration, we're going to process
                         // the actual definition.
-                        if di_composite_type.flags() == LLVMDIFlagFwdDecl {
+                        if di_composite_type.as_type().flags() == LLVMDIFlagFwdDecl {
                             return;
                         }
 
                         let mut is_data_carrying_enum = false;
-                        let mut members = Vec::new();
+                        let mut remove_name = false;
+                        let mut members: Vec<DIType> = Vec::new();
                         for element in di_composite_type.elements() {
                             match element {
                                 Metadata::DICompositeType(di_composite_type_inner) => {
@@ -572,16 +538,14 @@ impl DISanitizer {
                                     // processing a data-carrying enum. Such types are not supported
                                     // by the Linux kernel. We need to remove the children, so BTF
                                     // doesn't contain data carried by the enum variant.
-                                    match di_composite_type_inner.di_type.di_scope.di_node.tag() {
+                                    match di_composite_type_inner.as_node().tag() {
                                         DW_TAG_variant_part => {
-                                            let line = di_composite_type.di_type.line();
-                                            let file = di_composite_type
-                                                .di_type
-                                                .di_scope
-                                                .file(self.context);
+                                            let line = di_composite_type.as_type().line();
+                                            let scope = di_composite_type.as_scope();
+                                            let file = scope.file();
                                             let filename = file.filename();
 
-                                            let name = match di_composite_type.di_type.name() {
+                                            let name = match di_composite_type.as_type().name() {
                                                 Some(name) => name.to_string_lossy().to_string(),
                                                 None => "(anon)".to_owned(),
                                             };
@@ -608,7 +572,8 @@ impl DISanitizer {
 
                                     match base_type {
                                         Metadata::DICompositeType(base_type_di_composite_type) => {
-                                            let base_type_name = base_type_di_composite_type.name();
+                                            let base_type = base_type_di_composite_type.as_type();
+                                            let base_type_name = base_type.name();
                                             if let Some(base_type_name) = base_type_name {
                                                 let base_type_name =
                                                     base_type_name.to_string_lossy();
@@ -617,44 +582,53 @@ impl DISanitizer {
                                                 // BTF maps accepted by the Linux kernel.
                                                 if base_type_name == "AyaBtfMapMarker" {
                                                     // Remove the name from the struct.
-                                                    di_composite_type
-                                                        .replace_name(self.context, "")
-                                                        .unwrap();
+                                                    remove_name = true;
                                                     // And don't include the field in the sanitized DI.
                                                 } else {
-                                                    members.push(di_derived_type.di_type);
+                                                    members
+                                                        .push(di_derived_type.try_into().unwrap());
                                                 }
                                             } else {
-                                                members.push(di_derived_type.di_type);
+                                                members.push(di_derived_type.try_into().unwrap());
                                             }
                                         }
                                         _ => {
-                                            members.push(di_derived_type.di_type);
+                                            members.push(di_derived_type.try_into().unwrap());
                                         }
                                     }
                                 }
                                 _ => {}
                             }
                         }
-                        if is_data_carrying_enum {
-                            di_composite_type.replace_elements(MDNode::empty(self.context));
-                        } else if !members.is_empty() {
+                        if members.is_empty() {
                             members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
                             let sorted_elements =
                                 MDNode::with_elements(self.context, members.as_mut_slice());
                             di_composite_type.replace_elements(sorted_elements);
                         }
+                        if is_data_carrying_enum {
+                            di_composite_type.replace_elements(MDNode::empty(self.context));
+                        }
+                        if remove_name {
+                            di_composite_type
+                                .as_type()
+                                .replace_name(self.context, "")
+                                .unwrap();
+                        }
                     }
                     _ => (),
                 }
             }
-            Metadata::DIDerivedType(mut di_derived_type) => {
+            Metadata::DIDerivedType(di_derived_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
-                match di_derived_type.di_type.di_scope.di_node.tag() {
+                match di_derived_type.as_node().tag() {
                     DW_TAG_pointer_type => {
                         // remove rust names
-                        di_derived_type.replace_name(self.context, "").unwrap();
+                        di_derived_type
+                            .as_type()
+                            .replace_name(self.context, "")
+                            .unwrap();
                     }
                     _ => (),
                 }
@@ -842,14 +816,6 @@ unsafe fn is_user(v: LLVMValueRef) -> bool {
 
 unsafe fn is_globalobject(v: LLVMValueRef) -> bool {
     !LLVMIsAGlobalObject(v).is_null()
-}
-
-unsafe fn _is_globalvariable(v: LLVMValueRef) -> bool {
-    !LLVMIsAGlobalVariable(v).is_null()
-}
-
-unsafe fn _is_function(v: LLVMValueRef) -> bool {
-    !LLVMIsAFunction(v).is_null()
 }
 
 unsafe fn can_get_all_metadata(v: LLVMValueRef) -> bool {
