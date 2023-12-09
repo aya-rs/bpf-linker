@@ -166,14 +166,13 @@ impl DISanitizer {
                                 _ => {}
                             }
                         }
-                        if members.is_empty() {
+                        if is_data_carrying_enum {
+                            di_composite_type.replace_elements(MDNode::empty(self.context));
+                        } else if !members.is_empty() {
                             members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
                             let sorted_elements =
                                 MDNode::with_elements(self.context, members.as_mut_slice());
                             di_composite_type.replace_elements(sorted_elements);
-                        }
-                        if is_data_carrying_enum {
-                            di_composite_type.replace_elements(MDNode::empty(self.context));
                         }
                         if remove_name {
                             di_composite_type
