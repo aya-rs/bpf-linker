@@ -75,14 +75,13 @@ impl DISanitizer {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
-                match di_composite_type.as_node().tag() {
+                match di_composite_type.tag() {
                     DW_TAG_structure_type => {
-                        if let Some(name) = di_composite_type.as_type().name() {
+                        if let Some(name) = di_composite_type.name() {
                             let name = name.to_string_lossy();
                             // Clear the name from generics.
                             let name = sanitize_type_name(name);
                             di_composite_type
-                                .as_type()
                                 .replace_name(self.context, name.as_str())
                                 .unwrap();
                         }
@@ -90,7 +89,7 @@ impl DISanitizer {
                         // This is a forward declaration. We don't need to do
                         // anything on the declaration, we're going to process
                         // the actual definition.
-                        if di_composite_type.as_type().flags() == LLVMDIFlagFwdDecl {
+                        if di_composite_type.flags() == LLVMDIFlagFwdDecl {
                             return;
                         }
 
@@ -105,14 +104,13 @@ impl DISanitizer {
                                     // processing a data-carrying enum. Such types are not supported
                                     // by the Linux kernel. We need to remove the children, so BTF
                                     // doesn't contain data carried by the enum variant.
-                                    match di_composite_type_inner.as_node().tag() {
+                                    match di_composite_type_inner.tag() {
                                         DW_TAG_variant_part => {
-                                            let line = di_composite_type.as_type().line();
-                                            let scope = di_composite_type.as_scope();
-                                            let file = scope.file();
+                                            let line = di_composite_type.line();
+                                            let file = di_composite_type.file();
                                             let filename = file.filename();
 
-                                            let name = match di_composite_type.as_type().name() {
+                                            let name = match di_composite_type.name() {
                                                 Some(name) => name.to_string_lossy().to_string(),
                                                 None => "(anon)".to_owned(),
                                             };
@@ -139,9 +137,9 @@ impl DISanitizer {
 
                                     match base_type {
                                         Metadata::DICompositeType(base_type_di_composite_type) => {
-                                            let base_type = base_type_di_composite_type.as_type();
-                                            let base_type_name = base_type.name();
-                                            if let Some(base_type_name) = base_type_name {
+                                            if let Some(base_type_name) =
+                                                base_type_di_composite_type.name()
+                                            {
                                                 let base_type_name =
                                                     base_type_name.to_string_lossy();
                                                 // `AyaBtfMapMarker` is a type which is used in fields of BTF map
@@ -175,25 +173,19 @@ impl DISanitizer {
                             di_composite_type.replace_elements(sorted_elements);
                         }
                         if remove_name {
-                            di_composite_type
-                                .as_type()
-                                .replace_name(self.context, "")
-                                .unwrap();
+                            di_composite_type.replace_name(self.context, "").unwrap();
                         }
                     }
                     _ => (),
                 }
             }
-            Metadata::DIDerivedType(di_derived_type) => {
+            Metadata::DIDerivedType(mut di_derived_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
-                match di_derived_type.as_node().tag() {
+                match di_derived_type.tag() {
                     DW_TAG_pointer_type => {
                         // remove rust names
-                        di_derived_type
-                            .as_type()
-                            .replace_name(self.context, "")
-                            .unwrap();
+                        di_derived_type.replace_name(self.context, "").unwrap();
                     }
                     _ => (),
                 }
