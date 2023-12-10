@@ -19,46 +19,19 @@ use llvm_sys::{
 
 use super::ir::{MDNode, Metadata};
 
-/// Represents a debug info node.
+/// Returns a DWARF tag for the given debug info node.
 ///
-/// `DINode` is a fundamental structure used in the construction of LLVM's
-/// debugging information ecosystem. It serves as a building block for more
-/// complex debug information entities such as scopes, types and variables.
-pub struct DINode<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
-    _marker: PhantomData<&'ctx ()>,
-}
-
-impl<'ctx> DINode<'ctx> {
-    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
-    pub fn metadata(&self) -> LLVMMetadataRef {
-        unsafe { LLVMValueAsMetadata(self.value_ref) }
-    }
-
-    /// Returns a DWARF tag for the given debug info node.
-    pub fn tag(&self) -> DwTag {
-        DwTag(unsafe { LLVMGetDINodeTag(self.metadata()) })
-    }
-}
-
-/// Represents the debug information for a code scope.
-pub struct DIScope<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
-    _marker: PhantomData<&'ctx ()>,
-}
-
-impl<'ctx> DIScope<'ctx> {
-    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
-    pub fn metadata(&self) -> LLVMMetadataRef {
-        unsafe { LLVMValueAsMetadata(self.value_ref) }
-    }
-
-    pub fn file(&self) -> DIFile {
-        unsafe {
-            let metadata = LLVMDIScopeGetFile(self.metadata());
-            DIFile::from_metadata_ref(metadata)
-        }
-    }
+/// This function should be called in `tag` method of all LLVM debug info types
+/// inheriting from [`DINode`](https://llvm.org/doxygen/classllvm_1_1DINode.html).
+///
+/// # Safety
+///
+/// This function assumes that the given `metadata_ref` corresponds to a valid
+/// instance of [LLVM `DINode`](https://llvm.org/doxygen/classllvm_1_1DINode.html).
+/// It's the caller's responsibility to ensure this invariant, as this function
+/// doesn't perform any validation checks.
+unsafe fn di_node_tag(metadata_ref: LLVMMetadataRef) -> DwTag {
+    DwTag(LLVMGetDINodeTag(metadata_ref))
 }
 
 /// Represents a source code file in debug infomation.
@@ -108,6 +81,30 @@ enum DITypeOperand {
     Name = 2,
 }
 
+/// Returns the name of the type.
+///
+/// This function should be called in `name` method of `DIType` and all other
+/// LLVM debug info types inheriting from it.
+///
+/// # Safety
+///
+/// This function assumes that the given `metadata_ref` corresponds to a valid
+/// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
+/// It's the caller's responsibility to ensure this invariant, as this function
+/// doesn't perform any validation checks.
+unsafe fn di_type_name<'a>(metadata_ref: LLVMMetadataRef) -> Option<&'a CStr> {
+    let mut len = 0;
+    // `LLVMDITypeGetName` doesn't allocate any memory, it just returns
+    // a pointer to the string which is already a part of `DIType`:
+    // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/lib/IR/DebugInfo.cpp#L1489-L1493
+    //
+    // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
+    // gets freed when calling `LLVMDisposeDIBuilder`. Example:
+    // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
+    let ptr = LLVMDITypeGetName(metadata_ref, &mut len);
+    NonNull::new(ptr as *mut _).map(|ptr| CStr::from_ptr(ptr.as_ptr()))
+}
+
 /// Represents the debug information for a primitive type in LLVM IR.
 pub struct DIType<'ctx> {
     pub(super) metadata_ref: LLVMMetadataRef,
@@ -133,44 +130,10 @@ impl<'ctx> DIType<'ctx> {
         }
     }
 
-    /// Returns the name of the type.
-    pub fn name(&self) -> Option<&CStr> {
-        let mut len = 0;
-        // `LLVMDITypeGetName` doesn't allocate any memory, it just returns
-        // a pointer to the string which is already a part of `DIType`:
-        // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/lib/IR/DebugInfo.cpp#L1489-L1493
-        //
-        // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
-        // gets freed when calling `LLVMDisposeDIBuilder`. Example:
-        // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/tools/llvm-c-test/debuginfo.c#L249-L255
-        let ptr = unsafe { LLVMDITypeGetName(self.metadata_ref, &mut len) };
-        NonNull::new(ptr as *mut _).map(|ptr| unsafe { CStr::from_ptr(ptr.as_ptr()) })
-    }
-
-    /// Returns the flags associated with the type.
-    pub fn flags(&self) -> LLVMDIFlags {
-        unsafe { LLVMDITypeGetFlags(self.metadata_ref) }
-    }
-
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
     pub fn offset_in_bits(&self) -> usize {
         unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) as usize }
-    }
-
-    /// Returns the line number in the source code where the type is defined.
-    pub fn line(&self) -> u32 {
-        unsafe { LLVMDITypeGetLine(self.metadata_ref) }
-    }
-
-    /// Replaces the name of the type with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
-        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
     }
 }
 
@@ -195,6 +158,7 @@ enum DIDerivedTypeOperand {
 /// alternative name. The examples of derived types are pointers, references,
 /// typedefs, etc.
 pub struct DIDerivedType<'ctx> {
+    metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
@@ -209,25 +173,10 @@ impl<'ctx> DIDerivedType<'ctx> {
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
     pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        let metadata_ref = LLVMValueAsMetadata(value_ref);
         Self {
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn as_node(&self) -> DINode<'ctx> {
-        DINode {
-            value_ref: self.value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn as_type(&self) -> DIType<'ctx> {
-        let value_ref = self.value_ref;
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
-        DIType {
-            value_ref,
             metadata_ref,
+            value_ref,
             _marker: PhantomData,
         }
     }
@@ -238,6 +187,21 @@ impl<'ctx> DIDerivedType<'ctx> {
             let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
             Metadata::from_value_ref(value)
         }
+    }
+
+    /// Replaces the name of the type with a new name.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
+    /// be converted into a `CString`.
+    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
+    }
+
+    /// Returns a DWARF tag of the given derived type.
+    pub fn tag(&self) -> DwTag {
+        unsafe { di_node_tag(self.metadata_ref) }
     }
 }
 
@@ -255,6 +219,7 @@ enum DICompositeTypeOperand {
 /// Composite type is a kind of type that can include other types, such as
 /// structures, enums, unions, etc.
 pub struct DICompositeType<'ctx> {
+    metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
@@ -269,32 +234,10 @@ impl<'ctx> DICompositeType<'ctx> {
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
     pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        let metadata_ref = LLVMValueAsMetadata(value_ref);
         Self {
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn as_node(&self) -> DINode<'ctx> {
-        DINode {
-            value_ref: self.value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn as_scope(&self) -> DIScope<'ctx> {
-        DIScope {
-            value_ref: self.value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn as_type(&self) -> DIType<'ctx> {
-        let value_ref = self.value_ref;
-        let metadata_ref = unsafe { LLVMValueAsMetadata(self.value_ref) };
-        DIType {
-            value_ref,
             metadata_ref,
+            value_ref,
             _marker: PhantomData,
         }
     }
@@ -310,6 +253,29 @@ impl<'ctx> DICompositeType<'ctx> {
             .map(move |i| unsafe { Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)) })
     }
 
+    /// Returns the name of the composite type.
+    pub fn name(&self) -> Option<&CStr> {
+        unsafe { di_type_name(self.metadata_ref) }
+    }
+
+    /// Returns the file that the composite type belongs to.
+    pub fn file(&self) -> DIFile {
+        unsafe {
+            let metadata = LLVMDIScopeGetFile(self.metadata_ref);
+            DIFile::from_metadata_ref(metadata)
+        }
+    }
+
+    /// Returns the flags associated with the composity type.
+    pub fn flags(&self) -> LLVMDIFlags {
+        unsafe { LLVMDITypeGetFlags(self.metadata_ref) }
+    }
+
+    /// Returns the line number in the source code where the type is defined.
+    pub fn line(&self) -> u32 {
+        unsafe { LLVMDITypeGetLine(self.metadata_ref) }
+    }
+
     /// Replaces the elements of the composite type with a new metadata node.
     /// The provided metadata node should contain new composite type elements
     /// as operants. The metadata node can be empty if the intention is to
@@ -322,6 +288,21 @@ impl<'ctx> DICompositeType<'ctx> {
                 LLVMValueAsMetadata(mdnode.value_ref),
             )
         }
+    }
+
+    /// Replaces the name of the type with a new name.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
+    /// be converted into a `CString`.
+    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
+    }
+
+    /// Returns a DWARF tag of the given composite type.
+    pub fn tag(&self) -> DwTag {
+        unsafe { di_node_tag(self.metadata_ref) }
     }
 }
 
