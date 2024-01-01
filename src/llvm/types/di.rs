@@ -247,7 +247,9 @@ impl<'ctx> DICompositeType<'ctx> {
     pub fn elements(&self) -> impl Iterator<Item = Metadata> {
         let elements =
             unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::Elements as u32) };
-        let operands = unsafe { LLVMGetNumOperands(elements) };
+        let operands = NonNull::new(elements)
+            .map(|elements| unsafe { LLVMGetNumOperands(elements.as_ptr()) })
+            .unwrap_or(0);
 
         (0..operands)
             .map(move |i| unsafe { Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)) })
