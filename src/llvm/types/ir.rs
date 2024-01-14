@@ -5,12 +5,17 @@ use std::{
 
 use llvm_sys::{
     core::{
-        LLVMIsAMDNode, LLVMMDNodeInContext2, LLVMMDStringInContext2, LLVMMetadataAsValue,
-        LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata,
+        LLVMDisposeValueMetadataEntries, LLVMGetNumOperands, LLVMGetOperand,
+        LLVMGlobalCopyAllMetadata, LLVMIsAGlobalObject, LLVMIsAInstruction, LLVMIsAMDNode,
+        LLVMIsAUser, LLVMMDNodeInContext2, LLVMMDStringInContext2, LLVMMetadataAsValue,
+        LLVMPrintValueToString, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata,
+        LLVMValueMetadataEntriesGetKind, LLVMValueMetadataEntriesGetMetadata,
     },
     debuginfo::{LLVMGetMetadataKind, LLVMMetadataKind},
-    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
+    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueMetadataEntry, LLVMValueRef},
 };
+
+use crate::llvm::Message;
 
 use super::di::{DICompositeType, DIDerivedType, DISubprogram, DIType};
 
@@ -26,9 +31,35 @@ pub(crate) fn replace_name(
     Ok(())
 }
 
+#[derive(Clone)]
 pub enum Value<'ctx> {
     MDNode(MDNode<'ctx>),
     Other(LLVMValueRef),
+}
+
+impl<'ctx> std::fmt::Debug for Value<'ctx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value_to_string = |value| {
+            Message {
+                ptr: unsafe { LLVMPrintValueToString(value) },
+            }
+            .as_c_str()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+        };
+        match self {
+            Self::MDNode(node) => f
+                .debug_struct("MDNode")
+                .field("value", &value_to_string(node.value_ref))
+                .finish(),
+            Self::Other(value) => f
+                .debug_struct("Other")
+                .field("value", &value_to_string(*value))
+                .finish(),
+        }
+    }
 }
 
 impl<'ctx> Value<'ctx> {
@@ -38,6 +69,26 @@ impl<'ctx> Value<'ctx> {
             return Value::MDNode(mdnode);
         }
         Value::Other(value)
+    }
+
+    pub fn metadata_entries(&self) -> Option<MetadataEntries> {
+        let value = match self {
+            Value::MDNode(node) => node.value_ref,
+            Value::Other(value) => *value,
+        };
+        MetadataEntries::new(value)
+    }
+
+    pub fn operands(&self) -> Option<impl Iterator<Item = LLVMValueRef>> {
+        let value = match self {
+            Value::MDNode(node) => Some(node.value_ref),
+            Value::Other(value) if unsafe { !LLVMIsAUser(*value).is_null() } => Some(*value),
+            _ => None,
+        };
+
+        value.map(|value| unsafe {
+            (0..LLVMGetNumOperands(value)).map(move |i| LLVMGetOperand(value, i as u32))
+        })
     }
 }
 
@@ -120,6 +171,7 @@ impl<'ctx> TryFrom<MDNode<'ctx>> for Metadata<'ctx> {
 }
 
 /// Represents a metadata node.
+#[derive(Clone)]
 pub struct MDNode<'ctx> {
     pub(super) value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
@@ -156,11 +208,6 @@ impl<'ctx> MDNode<'ctx> {
         }
     }
 
-    /// Returns the low level `LLVMMetadataRef` corresponding to this node.
-    pub fn metadata(&self) -> LLVMMetadataRef {
-        unsafe { LLVMValueAsMetadata(self.value_ref) }
-    }
-
     /// Constructs an empty metadata node.
     pub fn empty(context: LLVMContextRef) -> Self {
         let metadata = unsafe { LLVMMDNodeInContext2(context, core::ptr::null_mut(), 0) };
@@ -185,5 +232,43 @@ impl<'ctx> MDNode<'ctx> {
             )
         };
         unsafe { Self::from_metadata_ref(context, metadata) }
+    }
+}
+
+pub struct MetadataEntries {
+    entries: *mut LLVMValueMetadataEntry,
+    count: usize,
+}
+
+impl MetadataEntries {
+    pub fn new(v: LLVMValueRef) -> Option<Self> {
+        if unsafe { LLVMIsAGlobalObject(v).is_null() && LLVMIsAInstruction(v).is_null() } {
+            return None;
+        }
+
+        let mut count = 0;
+        let entries = unsafe { LLVMGlobalCopyAllMetadata(v, &mut count) };
+        if entries.is_null() {
+            return None;
+        }
+
+        Some(MetadataEntries { entries, count })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (LLVMMetadataRef, u32)> + '_ {
+        (0..self.count).map(move |index| unsafe {
+            (
+                LLVMValueMetadataEntriesGetMetadata(self.entries, index as u32),
+                LLVMValueMetadataEntriesGetKind(self.entries, index as u32),
+            )
+        })
+    }
+}
+
+impl Drop for MetadataEntries {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeValueMetadataEntries(self.entries);
+        }
     }
 }

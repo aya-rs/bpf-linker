@@ -1,6 +1,5 @@
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
-    ffi::CStr,
     hash::Hasher,
 };
 
@@ -8,13 +7,9 @@ use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use log::{trace, warn};
 
-use super::{
-    symbol_name,
-    types::{
-        di::DIType,
-        ir::{MDNode, Metadata, Value},
-    },
-    Message,
+use super::types::{
+    di::DIType,
+    ir::{MDNode, Metadata, Value},
 };
 use crate::llvm::iter::*;
 
@@ -27,8 +22,8 @@ pub struct DISanitizer {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
-    cache: Cache,
-    node_stack: Vec<LLVMValueRef>,
+    visited_nodes: HashSet<u64>,
+    item_stack: Vec<Item>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -60,17 +55,17 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
 }
 
 impl DISanitizer {
-    pub unsafe fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
+    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
         DISanitizer {
             context,
             module,
-            builder: LLVMCreateDIBuilder(module),
-            cache: Cache::new(),
-            node_stack: Vec::new(),
+            builder: unsafe { LLVMCreateDIBuilder(module) },
+            visited_nodes: HashSet::new(),
+            item_stack: Vec::new(),
         }
     }
 
-    fn mdnode(&mut self, mdnode: MDNode) {
+    fn visit_mdnode(&mut self, mdnode: MDNode) {
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
@@ -204,198 +199,117 @@ impl DISanitizer {
     }
 
     // navigate the tree of LLVMValueRefs (DFS-pre-order)
-    unsafe fn discover(&mut self, value: LLVMValueRef, depth: usize) {
-        let one = "    ";
+    fn visit_item(&mut self, item: Item, depth: usize) {
+        let value = item.value_ref();
+        let log_prefix = "";
+        let log_depth = depth * 4;
+        trace!(
+            "{log_prefix:log_depth$}visiting item: {item:?} id: {} value: {value:?}",
+            item.id(),
+        );
 
-        if value.is_null() {
-            trace!("{one:depth$}skipping null node");
-            return;
-        }
-
-        // TODO: doing this on the pointer value is not good
-        let key = if is_mdnode(value) {
-            LLVMValueAsMetadata(value) as u64
-        } else {
-            value as u64
+        let value = match (value, &item) {
+            // An operand with no value is valid and means that the operand is
+            // not set
+            (v, Item::Operand(_, _)) if v.is_null() => return,
+            (v, _) if !v.is_null() => Value::new(v),
+            // All other items should have values
+            (_, item) => panic!("{item:?} has no value"),
         };
-        if self.cache.hit(key) {
-            trace!("{one:depth$}skipping already visited node");
+
+        if !self.visited_nodes.insert(item.id()) {
+            trace!("{log_prefix:log_depth$}already visited");
             return;
         }
 
-        self.node_stack.push(value);
+        self.item_stack.push(item.clone());
 
-        if let Value::MDNode(mdnode) = Value::new(value) {
-            let metadata_kind = LLVMGetMetadataKind(mdnode.metadata());
-            trace!(
-                "{one:depth$}mdnode kind:{:?} n_operands:{} value: {}",
-                metadata_kind,
-                LLVMGetMDNodeNumOperands(value),
-                Message {
-                    ptr: LLVMPrintValueToString(value)
-                }
-                .as_c_str()
-                .unwrap()
-                .to_str()
-                .unwrap()
-            );
-
-            self.mdnode(mdnode)
-        } else {
-            trace!(
-                "{one:depth$}node value: {}",
-                Message {
-                    ptr: LLVMPrintValueToString(value)
-                }
-                .as_c_str()
-                .unwrap()
-                .to_str()
-                .unwrap()
-            );
+        if let Value::MDNode(mdnode) = value.clone() {
+            self.visit_mdnode(mdnode)
         }
 
-        if can_get_all_metadata(value) {
-            for (index, (kind, metadata)) in iter_metadata_copy(value).enumerate() {
-                let metadata_value = LLVMMetadataAsValue(self.context, metadata);
-                trace!("{one:depth$}all_metadata entry: index:{}", index);
-                self.discover(metadata_value, depth + 1);
-
-                if is_instruction(value) {
-                    LLVMSetMetadata(value, kind, metadata_value);
-                } else {
-                    LLVMGlobalSetMetadata(value, kind, metadata);
-                }
+        if let Some(operands) = value.operands() {
+            for (index, operand) in operands.enumerate() {
+                self.visit_item(Item::Operand(operand, index), depth + 1)
             }
         }
 
-        if can_get_operands(value) {
-            for (index, operand) in iter_operands(value).enumerate() {
-                trace!(
-                    "{one:depth$}operand index:{} name:{} value:{}",
-                    index,
-                    symbol_name(value),
-                    Message {
-                        ptr: LLVMPrintValueToString(value)
+        if let Some(entries) = value.metadata_entries() {
+            for (index, (metadata, kind)) in entries.iter().enumerate() {
+                let metadata_value = unsafe { LLVMMetadataAsValue(self.context, metadata) };
+                self.visit_item(Item::MetadataEntry(metadata_value, kind, index), depth + 1);
+            }
+        }
+
+        match item {
+            Item::Function(function) => {
+                let params_count = unsafe { LLVMCountParams(function) };
+                for i in 0..params_count {
+                    let param = unsafe { LLVMGetParam(function, i) };
+                    self.visit_item(Item::FunctionParam(param), depth + 1);
+                }
+
+                for basic_block in function.basic_blocks_iter() {
+                    for instruction in basic_block.instructions_iter() {
+                        self.visit_item(Item::Instruction(instruction), depth + 1);
                     }
-                    .as_c_str()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                );
-                self.discover(operand, depth + 1)
+                }
             }
+            _ => {}
         }
-
-        assert_eq!(self.node_stack.pop(), Some(value));
     }
 
-    pub unsafe fn run(&mut self) {
-        for sym in self.module.named_metadata_iter() {
-            let mut len: usize = 0;
-            let name = CStr::from_ptr(LLVMGetNamedMetadataName(sym, &mut len))
-                .to_str()
-                .unwrap();
-            // just for debugging, we are not visiting those nodes for the moment
-            trace!("named metadata name:{}", name);
-        }
-
+    pub fn run(mut self) {
         let module = self.module;
-        for (i, sym) in module.globals_iter().enumerate() {
-            trace!("global index:{} name:{}", i, symbol_name(sym));
-            self.discover(sym, 0);
+        for value in module.globals_iter() {
+            self.visit_item(Item::GlobalVariable(value), 0);
         }
-
-        for (i, sym) in module.global_aliases_iter().enumerate() {
-            trace!("global aliases index:{} name:{}", i, symbol_name(sym));
-            self.discover(sym, 0);
+        for value in module.global_aliases_iter() {
+            self.visit_item(Item::GlobalAlias(value), 0);
         }
 
         for function in module.functions_iter() {
-            trace!("function > name:{}", symbol_name(function));
-            self.discover(function, 0);
-
-            let params_count = LLVMCountParams(function);
-            for i in 0..params_count {
-                let param = LLVMGetParam(function, i);
-                trace!("function param name:{} index:{}", symbol_name(param), i);
-                self.discover(param, 1);
-            }
-
-            for basic_block in function.basic_blocks_iter() {
-                trace!("function block");
-                for instruction in basic_block.instructions_iter() {
-                    let n_operands = LLVMGetNumOperands(instruction);
-                    trace!("function block instruction num_operands: {}", n_operands);
-                    for index in 0..n_operands {
-                        let operand = LLVMGetOperand(instruction, index as u32);
-                        if is_instruction(operand) {
-                            self.discover(operand, 2);
-                        }
-                    }
-
-                    self.discover(instruction, 1);
-                }
-            }
+            self.visit_item(Item::Function(function), 0);
         }
 
-        LLVMDisposeDIBuilder(self.builder);
+        unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
 }
 
-// utils
-
-unsafe fn iter_operands(v: LLVMValueRef) -> impl Iterator<Item = LLVMValueRef> {
-    (0..LLVMGetNumOperands(v)).map(move |i| LLVMGetOperand(v, i as u32))
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Item {
+    GlobalVariable(LLVMValueRef),
+    GlobalAlias(LLVMValueRef),
+    Function(LLVMValueRef),
+    FunctionParam(LLVMValueRef),
+    Instruction(LLVMValueRef),
+    Operand(LLVMValueRef, usize),
+    MetadataEntry(LLVMValueRef, u32, usize),
 }
 
-unsafe fn iter_metadata_copy(v: LLVMValueRef) -> impl Iterator<Item = (u32, LLVMMetadataRef)> {
-    let mut count = 0;
-    let entries = LLVMGlobalCopyAllMetadata(v, &mut count);
-    (0..count).map(move |index| {
-        (
-            LLVMValueMetadataEntriesGetKind(entries, index as u32),
-            LLVMValueMetadataEntriesGetMetadata(entries, index as u32),
-        )
-    })
-}
-
-unsafe fn is_instruction(v: LLVMValueRef) -> bool {
-    !LLVMIsAInstruction(v).is_null()
-}
-
-unsafe fn is_mdnode(v: LLVMValueRef) -> bool {
-    !LLVMIsAMDNode(v).is_null()
-}
-
-unsafe fn is_user(v: LLVMValueRef) -> bool {
-    !LLVMIsAUser(v).is_null()
-}
-
-unsafe fn is_globalobject(v: LLVMValueRef) -> bool {
-    !LLVMIsAGlobalObject(v).is_null()
-}
-
-unsafe fn can_get_all_metadata(v: LLVMValueRef) -> bool {
-    is_globalobject(v) || is_instruction(v)
-}
-
-unsafe fn can_get_operands(v: LLVMValueRef) -> bool {
-    is_mdnode(v) || is_user(v)
-}
-
-pub struct Cache {
-    keys: HashSet<u64>,
-}
-
-impl Cache {
-    pub fn new() -> Self {
-        Cache {
-            keys: HashSet::new(),
+impl Item {
+    fn value_ref(&self) -> LLVMValueRef {
+        match self {
+            Item::GlobalVariable(v) => *v,
+            Item::GlobalAlias(v) => *v,
+            Item::Function(v) => *v,
+            Item::FunctionParam(v) => *v,
+            Item::Instruction(v) => *v,
+            Item::Operand(v, _) => *v,
+            Item::MetadataEntry(v, _, _) => *v,
         }
     }
 
-    pub fn hit(&mut self, key: u64) -> bool {
-        !self.keys.insert(key)
+    fn id(&self) -> u64 {
+        match self {
+            Item::GlobalVariable(v) => *v as u64,
+            Item::GlobalAlias(v) => *v as u64,
+            Item::Function(v) => *v as u64,
+            Item::FunctionParam(v) => *v as u64,
+            Item::Instruction(v) => *v as u64,
+            Item::Operand(v, _) => *v as u64,
+            Item::MetadataEntry(v, _, _) => *v as u64,
+        }
     }
 }
 
