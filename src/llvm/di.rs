@@ -254,8 +254,8 @@ impl DISanitizer {
             );
         }
 
-        if can_get_all_metadata(value) {
-            for (index, (kind, metadata)) in iter_metadata_copy(value).enumerate() {
+        if let Some(entries) = MetadataEntries::new(value) {
+            for (index, (metadata, kind)) in entries.iter().enumerate() {
                 let metadata_value = LLVMMetadataAsValue(self.context, metadata);
                 trace!("{one:depth$}all_metadata entry: index:{}", index);
                 self.discover(metadata_value, depth + 1);
@@ -348,15 +348,42 @@ unsafe fn iter_operands(v: LLVMValueRef) -> impl Iterator<Item = LLVMValueRef> {
     (0..LLVMGetNumOperands(v)).map(move |i| LLVMGetOperand(v, i as u32))
 }
 
-unsafe fn iter_metadata_copy(v: LLVMValueRef) -> impl Iterator<Item = (u32, LLVMMetadataRef)> {
-    let mut count = 0;
-    let entries = LLVMGlobalCopyAllMetadata(v, &mut count);
-    (0..count).map(move |index| {
-        (
-            LLVMValueMetadataEntriesGetKind(entries, index as u32),
-            LLVMValueMetadataEntriesGetMetadata(entries, index as u32),
-        )
-    })
+struct MetadataEntries {
+    entries: *mut LLVMValueMetadataEntry,
+    count: usize,
+}
+
+impl MetadataEntries {
+    fn new(v: LLVMValueRef) -> Option<Self> {
+        if unsafe { LLVMIsAGlobalObject(v).is_null() && LLVMIsAInstruction(v).is_null() } {
+            return None;
+        }
+
+        let mut count = 0;
+        let entries = unsafe { LLVMGlobalCopyAllMetadata(v, &mut count) };
+        if entries.is_null() {
+            return None;
+        }
+
+        Some(MetadataEntries { entries, count })
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (LLVMMetadataRef, u32)> + '_ {
+        (0..self.count).map(move |index| unsafe {
+            (
+                LLVMValueMetadataEntriesGetMetadata(self.entries, index as u32),
+                LLVMValueMetadataEntriesGetKind(self.entries, index as u32),
+            )
+        })
+    }
+}
+
+impl Drop for MetadataEntries {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeValueMetadataEntries(self.entries);
+        }
+    }
 }
 
 unsafe fn is_instruction(v: LLVMValueRef) -> bool {
@@ -369,14 +396,6 @@ unsafe fn is_mdnode(v: LLVMValueRef) -> bool {
 
 unsafe fn is_user(v: LLVMValueRef) -> bool {
     !LLVMIsAUser(v).is_null()
-}
-
-unsafe fn is_globalobject(v: LLVMValueRef) -> bool {
-    !LLVMIsAGlobalObject(v).is_null()
-}
-
-unsafe fn can_get_all_metadata(v: LLVMValueRef) -> bool {
-    is_globalobject(v) || is_instruction(v)
 }
 
 unsafe fn can_get_operands(v: LLVMValueRef) -> bool {
