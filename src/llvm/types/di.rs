@@ -317,7 +317,7 @@ enum DISubprogramOperand {
 
 /// Represents the debug information for a subprogram (function) in LLVM IR.
 pub struct DISubprogram<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
+    pub value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 

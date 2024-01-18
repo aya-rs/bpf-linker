@@ -6,10 +6,10 @@ use std::{
 use llvm_sys::{
     core::{
         LLVMDisposeValueMetadataEntries, LLVMGetNumOperands, LLVMGetOperand,
-        LLVMGlobalCopyAllMetadata, LLVMIsAGlobalObject, LLVMIsAInstruction, LLVMIsAMDNode,
-        LLVMIsAUser, LLVMMDNodeInContext2, LLVMMDStringInContext2, LLVMMetadataAsValue,
-        LLVMPrintValueToString, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata,
-        LLVMValueMetadataEntriesGetKind, LLVMValueMetadataEntriesGetMetadata,
+        LLVMGlobalCopyAllMetadata, LLVMIsAFunction, LLVMIsAGlobalObject, LLVMIsAInstruction,
+        LLVMIsAMDNode, LLVMIsAUser, LLVMMDNodeInContext2, LLVMMDStringInContext2,
+        LLVMMetadataAsValue, LLVMPrintValueToString, LLVMReplaceMDNodeOperandWith,
+        LLVMValueAsMetadata, LLVMValueMetadataEntriesGetKind, LLVMValueMetadataEntriesGetMetadata,
     },
     debuginfo::{LLVMGetMetadataKind, LLVMMetadataKind},
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueMetadataEntry, LLVMValueRef},
@@ -34,6 +34,7 @@ pub(crate) fn replace_name(
 #[derive(Clone)]
 pub enum Value<'ctx> {
     MDNode(MDNode<'ctx>),
+    Function(LLVMValueRef),
     Other(LLVMValueRef),
 }
 
@@ -54,7 +55,7 @@ impl<'ctx> std::fmt::Debug for Value<'ctx> {
                 .debug_struct("MDNode")
                 .field("value", &value_to_string(node.value_ref))
                 .finish(),
-            Self::Other(value) => f
+            Self::Function(value) | Self::Other(value) => f
                 .debug_struct("Other")
                 .field("value", &value_to_string(*value))
                 .finish(),
@@ -67,6 +68,8 @@ impl<'ctx> Value<'ctx> {
         if unsafe { !LLVMIsAMDNode(value).is_null() } {
             let mdnode = unsafe { MDNode::from_value_ref(value) };
             return Value::MDNode(mdnode);
+        } else if unsafe { !LLVMIsAFunction(value).is_null() } {
+            return Value::Function(value);
         }
         Value::Other(value)
     }
@@ -74,6 +77,7 @@ impl<'ctx> Value<'ctx> {
     pub fn metadata_entries(&self) -> Option<MetadataEntries> {
         let value = match self {
             Value::MDNode(node) => node.value_ref,
+            Value::Function(value) => *value,
             Value::Other(value) => *value,
         };
         MetadataEntries::new(value)
@@ -82,6 +86,7 @@ impl<'ctx> Value<'ctx> {
     pub fn operands(&self) -> Option<impl Iterator<Item = LLVMValueRef>> {
         let value = match self {
             Value::MDNode(node) => Some(node.value_ref),
+            Value::Function(value) => Some(*value),
             Value::Other(value) if unsafe { !LLVMIsAUser(*value).is_null() } => Some(*value),
             _ => None,
         };

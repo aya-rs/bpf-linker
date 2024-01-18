@@ -1,5 +1,6 @@
 use std::{
-    collections::{hash_map::DefaultHasher, HashSet},
+    borrow::Cow,
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     hash::Hasher,
 };
 
@@ -7,9 +8,12 @@ use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use log::{trace, warn};
 
-use super::types::{
-    di::DIType,
-    ir::{MDNode, Metadata, Value},
+use super::{
+    symbol_name,
+    types::{
+        di::DIType,
+        ir::{MDNode, Metadata, Value},
+    },
 };
 use crate::llvm::iter::*;
 
@@ -24,6 +28,7 @@ pub struct DISanitizer {
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     item_stack: Vec<Item>,
+    fixed_subprograms: HashMap<u64, LLVMMetadataRef>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -62,12 +67,13 @@ impl DISanitizer {
             builder: unsafe { LLVMCreateDIBuilder(module) },
             visited_nodes: HashSet::new(),
             item_stack: Vec::new(),
+            fixed_subprograms: HashMap::new(),
         }
     }
 
-    fn visit_mdnode(&mut self, mdnode: MDNode) {
+    fn visit_mdnode(&mut self, mdnode: MDNode, already_visited: bool) {
         match mdnode.try_into().expect("MDNode is not Metadata") {
-            Metadata::DICompositeType(mut di_composite_type) => {
+            Metadata::DICompositeType(mut di_composite_type) if !already_visited => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.tag() {
@@ -174,7 +180,7 @@ impl DISanitizer {
                     _ => (),
                 }
             }
-            Metadata::DIDerivedType(mut di_derived_type) => {
+            Metadata::DIDerivedType(mut di_derived_type) if !already_visited => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_derived_type.tag() {
@@ -187,6 +193,27 @@ impl DISanitizer {
             }
             // Sanitize function (subprogram) names.
             Metadata::DISubprogram(mut di_subprogram) => {
+                let value_id = di_subprogram.value_ref as u64;
+                if let Some(new_program) = self.fixed_subprograms.get(&value_id) {
+                    let parent = self.item_stack[self.item_stack.len() - 2].value_ref();
+                    let current = self.item_stack.last().unwrap();
+                    match current {
+                        Item::Operand(_current_value, index) => unsafe {
+                            if !LLVMIsAMDNode(parent).is_null() {
+                                LLVMReplaceMDNodeOperandWith(parent, *index, *new_program);
+                            } else if !LLVMIsAUser(parent).is_null() {
+                                LLVMSetOperand(
+                                    parent,
+                                    *index,
+                                    LLVMMetadataAsValue(self.context, *new_program),
+                                );
+                            } else {
+                            }
+                        },
+                        _ => panic!("parent is not an operand"),
+                    }
+                }
+
                 if let Some(name) = di_subprogram.name() {
                     let name = sanitize_type_name(name.to_string_lossy());
                     di_subprogram
@@ -205,7 +232,7 @@ impl DISanitizer {
         let log_depth = depth * 4;
         trace!(
             "{log_prefix:log_depth$}visiting item: {item:?} id: {} value: {value:?}",
-            item.id(),
+            item.value_id(),
         );
 
         let value = match (value, &item) {
@@ -217,50 +244,56 @@ impl DISanitizer {
             (_, item) => panic!("{item:?} has no value"),
         };
 
-        if !self.visited_nodes.insert(item.id()) {
-            trace!("{log_prefix:log_depth$}already visited");
-            return;
-        }
+        let already_visited = !self.visited_nodes.insert(item.value_id());
 
         self.item_stack.push(item.clone());
 
         if let Value::MDNode(mdnode) = value.clone() {
-            self.visit_mdnode(mdnode)
+            self.visit_mdnode(mdnode, already_visited)
         }
 
-        if let Some(operands) = value.operands() {
-            for (index, operand) in operands.enumerate() {
-                self.visit_item(Item::Operand(operand, index), depth + 1)
-            }
-        }
-
-        if let Some(entries) = value.metadata_entries() {
-            for (index, (metadata, kind)) in entries.iter().enumerate() {
-                let metadata_value = unsafe { LLVMMetadataAsValue(self.context, metadata) };
-                self.visit_item(Item::MetadataEntry(metadata_value, kind, index), depth + 1);
-            }
-        }
-
-        match item {
-            Item::Function(function) => {
-                let params_count = unsafe { LLVMCountParams(function) };
-                for i in 0..params_count {
-                    let param = unsafe { LLVMGetParam(function, i) };
-                    self.visit_item(Item::FunctionParam(param), depth + 1);
+        if !already_visited {
+            if let Some(operands) = value.operands() {
+                for (index, operand) in operands.enumerate() {
+                    self.visit_item(Item::Operand(operand, index as u32), depth + 1)
                 }
+            }
 
-                for basic_block in function.basic_blocks_iter() {
-                    for instruction in basic_block.instructions_iter() {
-                        self.visit_item(Item::Instruction(instruction), depth + 1);
+            if let Some(entries) = value.metadata_entries() {
+                for (index, (metadata, kind)) in entries.iter().enumerate() {
+                    let metadata_value = unsafe { LLVMMetadataAsValue(self.context, metadata) };
+                    self.visit_item(Item::MetadataEntry(metadata_value, kind, index), depth + 1);
+                }
+            }
+
+            match value {
+                Value::Function(function) => {
+                    let params_count = unsafe { LLVMCountParams(function) };
+                    for i in 0..params_count {
+                        let param = unsafe { LLVMGetParam(function, i) };
+                        self.visit_item(Item::FunctionParam(param), depth + 1);
+                    }
+
+                    for basic_block in function.basic_blocks_iter() {
+                        for instruction in basic_block.instructions_iter() {
+                            self.visit_item(Item::Instruction(instruction), depth + 1);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
+        } else {
+            trace!("{log_prefix:log_depth$}already visited");
         }
+
+        let _ = self.item_stack.pop().unwrap();
     }
 
-    pub fn run(mut self) {
+    pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
         let module = self.module;
+
+        self.fixed_subprograms = self.fix_subprogram_linkage(exported_symbols);
+
         for value in module.globals_iter() {
             self.visit_item(Item::GlobalVariable(value), 0);
         }
@@ -274,6 +307,110 @@ impl DISanitizer {
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
+    fn fix_subprogram_linkage(
+        &mut self,
+        export_symbols: &HashSet<Cow<'static, str>>,
+    ) -> HashMap<u64, LLVMMetadataRef> {
+        let mut replace = HashMap::new();
+
+        for function in self.module.functions_iter() {
+            let name = symbol_name(function);
+            if export_symbols.contains(name) {
+                continue;
+            }
+
+            unsafe {
+                // Skip functions that don't have subprograms.
+                let sub_program = LLVMGetSubprogram(function);
+
+                if sub_program.is_null() {
+                    continue;
+                }
+                let sub_program_val = LLVMMetadataAsValue(self.context, sub_program);
+
+                let scope = LLVMValueAsMetadata(LLVMGetOperand(sub_program_val, 1));
+
+                let mut name_len = 0;
+                let name = LLVMGetMDString(LLVMGetOperand(sub_program_val, 2), &mut name_len);
+                let mut linkage_name_len = 0;
+                let linkage_name = {
+                    let ln = LLVMGetOperand(sub_program_val, 3);
+                    if ln.is_null() {
+                        core::ptr::null()
+                    } else {
+                        LLVMGetMDString(ln, &mut linkage_name_len)
+                    }
+                };
+
+                let ty = LLVMValueAsMetadata(LLVMGetOperand(sub_program_val, 4));
+
+                // Create a new subprogram that has DISPFlagLocalToUnit set, so the BTF backend emits it
+                // with linkage=static
+                let new_program = LLVMDIBuilderCreateFunction(
+                    self.builder,
+                    scope,
+                    name,
+                    name_len as usize,
+                    linkage_name,
+                    linkage_name_len as usize,
+                    LLVMDIScopeGetFile(sub_program),
+                    LLVMDISubprogramGetLine(sub_program),
+                    ty,
+                    1,
+                    1,
+                    LLVMDISubprogramGetLine(sub_program),
+                    LLVMDITypeGetFlags(sub_program),
+                    1,
+                );
+                // Technically this must be called as part of the builder API, but effectively does
+                // nothing because we don't add any variables through the builder API, instead we
+                // replace retained nodes manually below.
+                LLVMDIBuilderFinalizeSubprogram(self.builder, new_program);
+                // Point the function to the new subprogram.
+                LLVMSetSubprogram(function, new_program);
+
+                // There's no way to set the unit with LLVMDIBuilderCreateFunction
+                // so we set it after creation.
+                let unit = LLVMValueAsMetadata(LLVMGetOperand(
+                    LLVMMetadataAsValue(self.context, sub_program),
+                    5,
+                ));
+                LLVMReplaceMDNodeOperandWith(
+                    LLVMMetadataAsValue(self.context, new_program),
+                    5,
+                    unit,
+                );
+
+                // Add retained nodes from the old program. This is needed to preserve local debug
+                // variables, including function arguments which otherwise become "anon". See
+                // LLVMDIBuilderFinalizeSubprogram and DISubprogram::replaceRetainedNodes.
+                let retained_nodes =
+                    LLVMGetOperand(LLVMMetadataAsValue(self.context, sub_program), 7);
+                if !retained_nodes.is_null() {
+                    LLVMReplaceMDNodeOperandWith(
+                        LLVMMetadataAsValue(self.context, new_program),
+                        7,
+                        LLVMValueAsMetadata(retained_nodes),
+                    );
+                }
+
+                // Remove retained nodes from the old program or we'll hit a debug assertion since
+                // its debug variables no longer point to the program. See the
+                // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
+                let empty_node = LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0);
+                LLVMReplaceMDNodeOperandWith(
+                    LLVMMetadataAsValue(self.context, sub_program),
+                    7,
+                    empty_node,
+                );
+
+                let ret = replace.insert(sub_program_val as u64, new_program);
+                assert!(ret.is_none());
+            }
+        }
+
+        replace
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -283,7 +420,7 @@ enum Item {
     Function(LLVMValueRef),
     FunctionParam(LLVMValueRef),
     Instruction(LLVMValueRef),
-    Operand(LLVMValueRef, usize),
+    Operand(LLVMValueRef, u32),
     MetadataEntry(LLVMValueRef, u32, usize),
 }
 
@@ -300,7 +437,7 @@ impl Item {
         }
     }
 
-    fn id(&self) -> u64 {
+    fn value_id(&self) -> u64 {
         match self {
             Item::GlobalVariable(v) => *v as u64,
             Item::GlobalAlias(v) => *v as u64,
