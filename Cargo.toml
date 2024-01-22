@@ -17,7 +17,7 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-clap = { version = "4.4.17", features = ["derive"] }
+clap = { version = "4.4.18", features = ["derive"] }
 simplelog = { version = "0.12.1" }
 
 # lib deps
@@ -30,9 +30,9 @@ thiserror = { version = "1.0.56" }
 
 [dev-dependencies]
 compiletest_rs = { version = "0.10.1" }
-regex = { version = "1.10.2", default-features = false }
+regex = { version = "1.10.3", default-features = false }
 rustc-build-sysroot = { version = "0.4.4", default-features = false }
-which = { version = "4.2.0", default-features = false, features = ["regex"] }
+which = { version = "6.0.0", default-features = false, features = ["regex"] }
 
 [[bin]]
 name = "bpf-linker"
