@@ -5,7 +5,7 @@ mod types;
 use std::{
     borrow::Cow,
     collections::HashSet,
-    ffi::{c_void, CStr, CString},
+    ffi::{c_uchar, c_void, CStr, CString},
     os::raw::c_char,
     ptr, slice, str,
 };
@@ -109,7 +109,7 @@ pub unsafe fn find_embedded_bitcode(
             if name.to_str().unwrap() == ".llvmbc" {
                 let buf = LLVMGetSectionContents(iter);
                 let size = LLVMGetSectionSize(iter) as usize;
-                ret = Some(slice::from_raw_parts(buf, size).to_vec());
+                ret = Some(slice::from_raw_parts(buf as *const c_uchar, size).to_vec());
                 break;
             }
         }
@@ -261,18 +261,18 @@ unsafe fn module_asm_is_probestack(module: LLVMModuleRef) -> bool {
         return false;
     }
 
-    let asm = String::from_utf8_lossy(slice::from_raw_parts(ptr, len));
+    let asm = String::from_utf8_lossy(slice::from_raw_parts(ptr as *const c_uchar, len));
     asm.contains("__rust_probestack")
 }
 
 fn symbol_name<'a>(value: *mut llvm_sys::LLVMValue) -> &'a str {
     let mut name_len = 0;
     let ptr = unsafe { LLVMGetValueName2(value, &mut name_len) };
-    unsafe { str::from_utf8(slice::from_raw_parts(ptr, name_len)).unwrap() }
+    unsafe { str::from_utf8(slice::from_raw_parts(ptr as *const c_uchar, name_len)).unwrap() }
 }
 
 unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
-    let attr_kind = LLVMGetEnumAttributeKindForName(name.as_ptr(), name.len());
+    let attr_kind = LLVMGetEnumAttributeKindForName(name.as_ptr() as *const c_char, name.len());
     LLVMRemoveEnumAttributeAtIndex(function, LLVMAttributeFunctionIndex, attr_kind);
 }
 
@@ -367,5 +367,5 @@ impl Drop for Message {
 fn mdstring_to_str<'a>(mdstring: LLVMValueRef) -> &'a str {
     let mut len = 0;
     let ptr = unsafe { LLVMGetMDString(mdstring, &mut len) };
-    unsafe { str::from_utf8(slice::from_raw_parts(ptr, len as usize)).unwrap() }
+    unsafe { str::from_utf8(slice::from_raw_parts(ptr as *const c_uchar, len as usize)).unwrap() }
 }

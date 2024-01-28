@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    ffi::c_char,
     hash::Hasher,
     ptr,
 };
@@ -343,9 +344,9 @@ impl DISanitizer {
                 let new_program = LLVMDIBuilderCreateFunction(
                     self.builder,
                     sub_program.scope().unwrap(),
-                    name.as_ptr(),
+                    name.as_ptr() as *const c_char,
                     name.len(),
-                    linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()),
+                    linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()) as *const c_char,
                     linkage_name.unwrap_or("").len(),
                     sub_program.file(),
                     sub_program.line(),
