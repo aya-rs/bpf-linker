@@ -2,14 +2,12 @@ use std::{
     ffi::{CStr, NulError},
     marker::PhantomData,
     ptr::NonNull,
+    str,
 };
 
 use gimli::DwTag;
 use llvm_sys::{
-    core::{
-        LLVMGetMDString, LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith,
-        LLVMValueAsMetadata,
-    },
+    core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
         LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDITypeGetFlags,
         LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMGetDINodeTag,
@@ -17,7 +15,10 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
-use super::ir::{MDNode, Metadata};
+use crate::llvm::{
+    mdstring_to_str,
+    types::ir::{MDNode, Metadata},
+};
 
 /// Returns a DWARF tag for the given debug info node.
 ///
@@ -338,18 +339,9 @@ impl<'ctx> DISubprogram<'ctx> {
     }
 
     /// Returns the name of the subprogram.
-    pub fn name(&self) -> Option<&CStr> {
+    pub fn name(&self) -> Option<&str> {
         let operand = unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::Name as u32) };
-        let mut len = 0;
-        // `LLVMGetMDString` doesn't allocate any memory, it just returns a
-        // pointer to the string which is already a part of the `Metadata`
-        // representing the operand:
-        // https://github.com/llvm/llvm-project/blob/cd6022916bff1d6fab007b554810b631549ba43c/llvm/lib/IR/Core.cpp#L1257-L1265
-        //
-        // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
-        // gets freed when calling `LLVMDisposeDIBuilder`.
-        let ptr = unsafe { LLVMGetMDString(operand, &mut len) };
-        (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) })
+        NonNull::new(operand).map(|_| mdstring_to_str(operand))
     }
 
     /// Replaces the name of the subprogram with a new name.

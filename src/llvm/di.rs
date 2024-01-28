@@ -192,8 +192,9 @@ impl DISanitizer {
             }
             // Sanitize function (subprogram) names.
             Metadata::DISubprogram(mut di_subprogram) => {
+                // Sanitize function names
                 if let Some(name) = di_subprogram.name() {
-                    let name = sanitize_type_name(name.to_string_lossy());
+                    let name = sanitize_type_name(name);
                     di_subprogram
                         .replace_name(self.context, name.as_str())
                         .unwrap();
