@@ -9,8 +9,9 @@ use gimli::DwTag;
 use llvm_sys::{
     core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
-        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDITypeGetFlags,
-        LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMGetDINodeTag,
+        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
+        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
+        LLVMGetDINodeTag,
     },
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
@@ -313,12 +314,17 @@ impl<'ctx> DICompositeType<'ctx> {
 /// to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DISubprogramOperand {
+    Scope = 1,
     Name = 2,
+    LinkageName = 3,
+    Ty = 4,
+    Unit = 5,
+    RetainedNodes = 7,
 }
 
 /// Represents the debug information for a subprogram (function) in LLVM IR.
 pub struct DISubprogram<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
+    pub value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
@@ -344,6 +350,34 @@ impl<'ctx> DISubprogram<'ctx> {
         NonNull::new(operand).map(|_| mdstring_to_str(operand))
     }
 
+    /// Returns the linkage name of the subprogram.
+    pub fn linkage_name(&self) -> Option<&str> {
+        let operand =
+            unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::LinkageName as u32) };
+        NonNull::new(operand).map(|_| mdstring_to_str(operand))
+    }
+
+    pub fn ty(&self) -> LLVMMetadataRef {
+        unsafe {
+            LLVMValueAsMetadata(LLVMGetOperand(
+                self.value_ref,
+                DISubprogramOperand::Ty as u32,
+            ))
+        }
+    }
+
+    pub fn file(&self) -> LLVMMetadataRef {
+        unsafe { LLVMDIScopeGetFile(LLVMValueAsMetadata(self.value_ref)) }
+    }
+
+    pub fn line(&self) -> u32 {
+        unsafe { LLVMDISubprogramGetLine(LLVMValueAsMetadata(self.value_ref)) }
+    }
+
+    pub fn type_flags(&self) -> i32 {
+        unsafe { LLVMDITypeGetFlags(LLVMValueAsMetadata(self.value_ref)) }
+    }
+
     /// Replaces the name of the subprogram with a new name.
     ///
     /// # Errors
@@ -357,5 +391,42 @@ impl<'ctx> DISubprogram<'ctx> {
             DISubprogramOperand::Name as u32,
             name,
         )
+    }
+
+    pub fn scope(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let operand = LLVMGetOperand(self.value_ref, DISubprogramOperand::Scope as u32);
+            NonNull::new(operand).map(|_| LLVMValueAsMetadata(operand))
+        }
+    }
+
+    pub fn unit(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let operand = LLVMGetOperand(self.value_ref, DISubprogramOperand::Unit as u32);
+            NonNull::new(operand).map(|_| LLVMValueAsMetadata(operand))
+        }
+    }
+
+    pub fn set_unit(&mut self, unit: LLVMMetadataRef) {
+        unsafe {
+            LLVMReplaceMDNodeOperandWith(self.value_ref, DISubprogramOperand::Unit as u32, unit)
+        };
+    }
+
+    pub fn retained_nodes(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let nodes = LLVMGetOperand(self.value_ref, DISubprogramOperand::RetainedNodes as u32);
+            NonNull::new(nodes).map(|_| LLVMValueAsMetadata(nodes))
+        }
+    }
+
+    pub fn set_retained_nodes(&mut self, nodes: LLVMMetadataRef) {
+        unsafe {
+            LLVMReplaceMDNodeOperandWith(
+                self.value_ref,
+                DISubprogramOperand::RetainedNodes as u32,
+                nodes,
+            )
+        };
     }
 }
