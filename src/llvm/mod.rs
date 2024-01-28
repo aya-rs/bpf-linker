@@ -107,7 +107,7 @@ pub unsafe fn find_embedded_bitcode(
         if !name.is_null() {
             let name = CStr::from_ptr(name);
             if name.to_str().unwrap() == ".llvmbc" {
-                let buf = LLVMGetSectionContents(iter) as *const u8;
+                let buf = LLVMGetSectionContents(iter);
                 let size = LLVMGetSectionSize(iter) as usize;
                 ret = Some(slice::from_raw_parts(buf, size).to_vec());
                 break;
@@ -261,7 +261,7 @@ unsafe fn module_asm_is_probestack(module: LLVMModuleRef) -> bool {
         return false;
     }
 
-    let asm = String::from_utf8_lossy(slice::from_raw_parts(ptr as *const u8, len));
+    let asm = String::from_utf8_lossy(slice::from_raw_parts(ptr, len));
     asm.contains("__rust_probestack")
 }
 
