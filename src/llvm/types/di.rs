@@ -2,22 +2,24 @@ use std::{
     ffi::{CStr, NulError},
     marker::PhantomData,
     ptr::NonNull,
+    str,
 };
 
 use gimli::DwTag;
 use llvm_sys::{
-    core::{
-        LLVMGetMDString, LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith,
-        LLVMValueAsMetadata,
-    },
+    core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
-        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDITypeGetFlags,
-        LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMGetDINodeTag,
+        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
+        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
+        LLVMGetDINodeTag,
     },
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
-use super::ir::{MDNode, Metadata};
+use crate::llvm::{
+    mdstring_to_str,
+    types::ir::{MDNode, Metadata},
+};
 
 /// Returns a DWARF tag for the given debug info node.
 ///
@@ -312,12 +314,17 @@ impl<'ctx> DICompositeType<'ctx> {
 /// to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DISubprogramOperand {
+    Scope = 1,
     Name = 2,
+    LinkageName = 3,
+    Ty = 4,
+    Unit = 5,
+    RetainedNodes = 7,
 }
 
 /// Represents the debug information for a subprogram (function) in LLVM IR.
 pub struct DISubprogram<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
+    pub value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
@@ -338,18 +345,37 @@ impl<'ctx> DISubprogram<'ctx> {
     }
 
     /// Returns the name of the subprogram.
-    pub fn name(&self) -> Option<&CStr> {
+    pub fn name(&self) -> Option<&str> {
         let operand = unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::Name as u32) };
-        let mut len = 0;
-        // `LLVMGetMDString` doesn't allocate any memory, it just returns a
-        // pointer to the string which is already a part of the `Metadata`
-        // representing the operand:
-        // https://github.com/llvm/llvm-project/blob/cd6022916bff1d6fab007b554810b631549ba43c/llvm/lib/IR/Core.cpp#L1257-L1265
-        //
-        // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
-        // gets freed when calling `LLVMDisposeDIBuilder`.
-        let ptr = unsafe { LLVMGetMDString(operand, &mut len) };
-        (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) })
+        NonNull::new(operand).map(|_| mdstring_to_str(operand))
+    }
+
+    /// Returns the linkage name of the subprogram.
+    pub fn linkage_name(&self) -> Option<&str> {
+        let operand =
+            unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::LinkageName as u32) };
+        NonNull::new(operand).map(|_| mdstring_to_str(operand))
+    }
+
+    pub fn ty(&self) -> LLVMMetadataRef {
+        unsafe {
+            LLVMValueAsMetadata(LLVMGetOperand(
+                self.value_ref,
+                DISubprogramOperand::Ty as u32,
+            ))
+        }
+    }
+
+    pub fn file(&self) -> LLVMMetadataRef {
+        unsafe { LLVMDIScopeGetFile(LLVMValueAsMetadata(self.value_ref)) }
+    }
+
+    pub fn line(&self) -> u32 {
+        unsafe { LLVMDISubprogramGetLine(LLVMValueAsMetadata(self.value_ref)) }
+    }
+
+    pub fn type_flags(&self) -> i32 {
+        unsafe { LLVMDITypeGetFlags(LLVMValueAsMetadata(self.value_ref)) }
     }
 
     /// Replaces the name of the subprogram with a new name.
@@ -365,5 +391,42 @@ impl<'ctx> DISubprogram<'ctx> {
             DISubprogramOperand::Name as u32,
             name,
         )
+    }
+
+    pub fn scope(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let operand = LLVMGetOperand(self.value_ref, DISubprogramOperand::Scope as u32);
+            NonNull::new(operand).map(|_| LLVMValueAsMetadata(operand))
+        }
+    }
+
+    pub fn unit(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let operand = LLVMGetOperand(self.value_ref, DISubprogramOperand::Unit as u32);
+            NonNull::new(operand).map(|_| LLVMValueAsMetadata(operand))
+        }
+    }
+
+    pub fn set_unit(&mut self, unit: LLVMMetadataRef) {
+        unsafe {
+            LLVMReplaceMDNodeOperandWith(self.value_ref, DISubprogramOperand::Unit as u32, unit)
+        };
+    }
+
+    pub fn retained_nodes(&self) -> Option<LLVMMetadataRef> {
+        unsafe {
+            let nodes = LLVMGetOperand(self.value_ref, DISubprogramOperand::RetainedNodes as u32);
+            NonNull::new(nodes).map(|_| LLVMValueAsMetadata(nodes))
+        }
+    }
+
+    pub fn set_retained_nodes(&mut self, nodes: LLVMMetadataRef) {
+        unsafe {
+            LLVMReplaceMDNodeOperandWith(
+                self.value_ref,
+                DISubprogramOperand::RetainedNodes as u32,
+                nodes,
+            )
+        };
     }
 }
