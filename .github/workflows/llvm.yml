@@ -24,7 +24,7 @@ jobs:
 
       - name: Cache
         id: cache-llvm
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: llvm-install
           key: ${{ steps.cache-key.outputs.cache-key }}

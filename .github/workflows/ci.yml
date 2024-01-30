@@ -123,7 +123,7 @@ jobs:
 
       - name: Restore LLVM
         if: matrix.llvm == 'source'
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: llvm-install
           key: ${{ needs.llvm.outputs.cache-key }}
