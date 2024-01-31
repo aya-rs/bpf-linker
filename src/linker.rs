@@ -451,7 +451,10 @@ impl Linker {
         // programs and maps and remove dead code.
 
         unsafe {
-            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            // if we want to emit BTF, we need to sanitize the debug information
+            if self.options.btf {
+                llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            }
 
             llvm::optimize(
                 self.target_machine,
@@ -463,6 +466,7 @@ impl Linker {
         }
         .map_err(LinkerError::OptimizeError)?;
 
+        // if we don't need BTF emission, we can strip DI
         if !self.options.btf {
             let ok = unsafe { llvm::strip_debug_info(self.module) };
             debug!("Stripping DI, changed={}", ok);
