@@ -18,7 +18,9 @@ edition = "2021"
 [dependencies]
 # cli deps
 clap = { version = "4.5.0", features = ["derive"] }
-simplelog = { version = "0.12.1" }
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+tracing-tree = "0.3"
 
 # lib deps
 ar = { version = "0.9.0" }
@@ -28,6 +30,7 @@ libc = { version = "0.2.153" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "180.0.0-rc2" }
 log = { version = "0.4.20" }
 thiserror = { version = "1.0.57" }
+tracing = "0.1"
 
 [dev-dependencies]
 compiletest_rs = { version = "0.10.1" }

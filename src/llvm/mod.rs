@@ -48,7 +48,7 @@ use llvm_sys::{
     },
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
-use log::{debug, error};
+use tracing::{debug, error};
 
 use crate::OptLevel;
 
