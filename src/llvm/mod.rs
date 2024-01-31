@@ -22,6 +22,7 @@ use llvm_sys::{
         LLVMModuleCreateWithNameInContext, LLVMPrintModuleToFile, LLVMRemoveEnumAttributeAtIndex,
         LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
     },
+    debuginfo::LLVMStripModuleDebugInfo,
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
     },
@@ -252,6 +253,11 @@ pub unsafe fn optimize(
     }
 
     Ok(())
+}
+
+/// strips debug information, returns true if DI got stripped
+pub unsafe fn strip_debug_info(module: LLVMModuleRef) -> bool {
+    LLVMStripModuleDebugInfo(module) != 0
 }
 
 unsafe fn module_asm_is_probestack(module: LLVMModuleRef) -> bool {
