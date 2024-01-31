@@ -219,6 +219,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    /// Emit BTF information
+    pub btf: bool,
 }
 
 /// BPF Linker
@@ -459,7 +461,14 @@ impl Linker {
                 &self.options.export_symbols,
             )
         }
-        .map_err(LinkerError::OptimizeError)
+        .map_err(LinkerError::OptimizeError)?;
+
+        if !self.options.btf {
+            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            debug!("Stripping DI, changed={}", ok);
+        }
+
+        Ok(())
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
