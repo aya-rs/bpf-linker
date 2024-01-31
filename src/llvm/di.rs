@@ -8,7 +8,7 @@ use std::{
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
-use log::{trace, warn};
+use tracing::{span, trace, warn, Level};
 
 use super::types::{
     di::DIType,
@@ -204,16 +204,13 @@ impl DISanitizer {
     }
 
     // navigate the tree of LLVMValueRefs (DFS-pre-order)
-    fn visit_item(&mut self, mut item: Item, depth: usize) {
+    fn visit_item(&mut self, mut item: Item) {
         let value_ref = item.value_ref();
         let value_id = item.value_id();
 
-        let log_prefix = "";
-        let log_depth = depth * 4;
-        trace!(
-            "{log_prefix:log_depth$}visiting item: {item:?} id: {} value: {value_ref:?}",
-            item.value_id(),
-        );
+        let item_span = span!(Level::TRACE, "item", value_id);
+        let _enter = item_span.enter();
+        trace!(?item, value = ?value_ref, "visiting item");
 
         let value = match (value_ref, &item) {
             // An operand with no value is valid and means that the operand is
@@ -235,7 +232,7 @@ impl DISanitizer {
 
         let first_visit = self.visited_nodes.insert(value_id);
         if !first_visit {
-            trace!("{log_prefix:log_depth$}already visited");
+            trace!("already visited");
             return;
         }
 
@@ -247,21 +244,18 @@ impl DISanitizer {
 
         if let Some(operands) = value.operands() {
             for (index, operand) in operands.enumerate() {
-                self.visit_item(
-                    Item::Operand(Operand {
-                        parent: value_ref,
-                        value: operand,
-                        index: index as u32,
-                    }),
-                    depth + 1,
-                )
+                self.visit_item(Item::Operand(Operand {
+                    parent: value_ref,
+                    value: operand,
+                    index: index as u32,
+                }))
             }
         }
 
         if let Some(entries) = value.metadata_entries() {
             for (index, (metadata, kind)) in entries.iter().enumerate() {
                 let metadata_value = unsafe { LLVMMetadataAsValue(self.context, metadata) };
-                self.visit_item(Item::MetadataEntry(metadata_value, kind, index), depth + 1);
+                self.visit_item(Item::MetadataEntry(metadata_value, kind, index));
             }
         }
 
@@ -269,12 +263,12 @@ impl DISanitizer {
         // those too.
         if let Value::Function(fun) = value {
             for param in fun.params() {
-                self.visit_item(Item::FunctionParam(param), depth + 1);
+                self.visit_item(Item::FunctionParam(param));
             }
 
             for basic_block in fun.basic_blocks() {
                 for instruction in basic_block.instructions_iter() {
-                    self.visit_item(Item::Instruction(instruction), depth + 1);
+                    self.visit_item(Item::Instruction(instruction));
                 }
             }
         }
@@ -288,14 +282,14 @@ impl DISanitizer {
         self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
 
         for value in module.globals_iter() {
-            self.visit_item(Item::GlobalVariable(value), 0);
+            self.visit_item(Item::GlobalVariable(value));
         }
         for value in module.global_aliases_iter() {
-            self.visit_item(Item::GlobalAlias(value), 0);
+            self.visit_item(Item::GlobalAlias(value));
         }
 
         for function in module.functions_iter() {
-            self.visit_item(Item::Function(function), 0);
+            self.visit_item(Item::Function(function));
         }
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };

@@ -22,8 +22,8 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMModuleRef},
     target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
 };
-use log::{debug, error, info, warn};
 use thiserror::Error;
+use tracing::{debug, error, info, warn};
 
 use crate::llvm;
 
