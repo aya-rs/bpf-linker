@@ -1,5 +1,5 @@
 // assembly-output: bpf-linker
-// compile-flags: --crate-type cdylib -C link-arg=--emit=llvm-ir -C link-arg=--btf -C debuginfo=2
+// compile-flags: --crate-type cdylib -C link-arg=--emit=llvm-ir -C link-arg=--btf -C debuginfo=2 -C link-arg=--log-file=/tmp/bpf-linker
 
 // Verify that the linker correctly massages map names.
 #![no_std]

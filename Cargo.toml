@@ -18,7 +18,6 @@ edition = "2021"
 [dependencies]
 # cli deps
 clap = { version = "4.4.7", features = ["derive"] }
-simplelog = { version = "0.12.1" }
 
 # lib deps
 ar = { version = "0.9.0" }
@@ -26,8 +25,11 @@ aya-rustc-llvm-proxy = { version = "0.9.0", optional = true }
 gimli = { version = "0.28.0" }
 libc = { version = "0.2.150" }
 llvm-sys = { version = "170.0.0" }
-log = { version = "0.4.20" }
 thiserror = { version = "1.0.50" }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry"] }
+tracing-tree = "0.3"
 
 [dev-dependencies]
 compiletest_rs = { version = "0.10.1" }
