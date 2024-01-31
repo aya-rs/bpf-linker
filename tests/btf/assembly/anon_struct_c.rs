@@ -3,7 +3,7 @@
 //! tests/c/anon.c.
 
 // assembly-output: bpf-linker
-// compile-flags: --crate-type bin -C link-arg=--emit=obj -C debuginfo=2 -Z unstable-options -L native=target/bitcode -l link-arg=target/bitcode/anon.bc
+// compile-flags: --crate-type bin -C link-arg=--emit=obj -C link-arg=--btf -C debuginfo=2 -Z unstable-options -L native=target/bitcode -l link-arg=target/bitcode/anon.bc
 
 #![no_std]
 #![no_main]
