@@ -219,6 +219,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    /// Emit BTF information
+    pub btf: bool,
 }
 
 /// BPF Linker
@@ -449,7 +451,10 @@ impl Linker {
         // programs and maps and remove dead code.
 
         unsafe {
-            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            // if we want to emit BTF, we need to sanitize the debug information
+            if self.options.btf {
+                llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            }
 
             llvm::optimize(
                 self.target_machine,
@@ -459,7 +464,15 @@ impl Linker {
                 &self.options.export_symbols,
             )
         }
-        .map_err(LinkerError::OptimizeError)
+        .map_err(LinkerError::OptimizeError)?;
+
+        // if we don't need BTF emission, we can strip DI
+        if !self.options.btf {
+            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            debug!("Stripping DI, changed={}", ok);
+        }
+
+        Ok(())
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {

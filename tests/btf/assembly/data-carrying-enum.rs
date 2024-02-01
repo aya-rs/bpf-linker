@@ -1,5 +1,5 @@
 // assembly-output: bpf-linker
-// compile-flags: --crate-type cdylib -C link-arg=--emit=obj -C debuginfo=2
+// compile-flags: --crate-type cdylib -C link-arg=--emit=obj -C link-arg=--btf -C debuginfo=2
 
 #![no_std]
 

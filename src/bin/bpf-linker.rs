@@ -89,6 +89,10 @@ struct CommandLine {
     #[clap(long, default_value = "obj")]
     emit: Vec<CliOutputType>,
 
+    /// Emit BTF information
+    #[clap(long)]
+    btf: bool,
+
     /// Add a directory to the library search path
     #[clap(short = 'L', number_of_values = 1)]
     libs: Vec<PathBuf>,
@@ -165,6 +169,7 @@ fn main() {
         cpu_features,
         output,
         emit,
+        btf,
         libs,
         optimize,
         export_symbols,
@@ -280,6 +285,7 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
+        btf,
     });
 
     if let Err(e) = linker.link() {
