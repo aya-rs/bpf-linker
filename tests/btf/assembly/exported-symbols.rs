@@ -1,5 +1,5 @@
 // assembly-output: bpf-linker
-// compile-flags: --crate-type bin -C link-arg=--emit=obj -C debuginfo=2 -C link-arg=--log-level=debug -C link-arg=--log-file=/tmp/linker-lol.log -C link-arg=--btf
+// compile-flags: --crate-type bin -C link-arg=--emit=obj -C debuginfo=2 -C link-arg=--btf
 #![no_std]
 #![no_main]
 
