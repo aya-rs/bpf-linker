@@ -77,14 +77,15 @@ impl DISanitizer {
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.tag() {
                     DW_TAG_structure_type => {
-                        if let Some(name) = di_composite_type.name() {
-                            let name = name.to_string_lossy();
-                            // Clear the name from generics.
-                            let name = sanitize_type_name(name);
-                            di_composite_type
-                                .replace_name(self.context, name.as_str())
-                                .unwrap();
-                        }
+                        let (original_name, sanitized_name) = match di_composite_type.name() {
+                            Some(name) => {
+                                let original_name = name.to_string_lossy().to_string();
+                                let sanitized_name = sanitize_type_name(&original_name);
+
+                                (Some(original_name), Some(sanitized_name))
+                            }
+                            None => (None, None),
+                        };
 
                         // This is a forward declaration. We don't need to do
                         // anything on the declaration, we're going to process
@@ -110,8 +111,8 @@ impl DISanitizer {
                                             let file = di_composite_type.file();
                                             let filename = file.filename();
 
-                                            let name = match di_composite_type.name() {
-                                                Some(name) => name.to_string_lossy().to_string(),
+                                            let name = match original_name {
+                                                Some(name) => name,
                                                 None => "(anon)".to_owned(),
                                             };
                                             let filename = match filename {
@@ -173,7 +174,14 @@ impl DISanitizer {
                             di_composite_type.replace_elements(sorted_elements);
                         }
                         if remove_name {
+                            // If the type was marked with `AyaBtfMapMarker`,
+                            // remove the name.
                             di_composite_type.replace_name(self.context, "").unwrap();
+                        } else if let Some(sanitized_name) = sanitized_name {
+                            // Clear the name from characters incompatible with C.
+                            di_composite_type
+                                .replace_name(self.context, sanitized_name.as_str())
+                                .unwrap();
                         }
                     }
                     _ => (),
