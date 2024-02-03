@@ -125,8 +125,7 @@ impl DISanitizer {
                                             };
 
                                             warn!(
-                                                "found data carrying enum {name} ({filename}:{line}), not emitting
-                                                the debug info for it"
+                                                "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it"
                                             );
 
                                             is_data_carrying_enum = true;
