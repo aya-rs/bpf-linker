@@ -28,6 +28,7 @@ pub struct DISanitizer {
     visited_nodes: HashSet<u64>,
     item_stack: Vec<Item>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
+    skipped_types: Vec<String>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -67,6 +68,7 @@ impl DISanitizer {
             visited_nodes: HashSet::new(),
             item_stack: Vec::new(),
             replace_operands: HashMap::new(),
+            skipped_types: Vec::new(),
         }
     }
 
@@ -124,9 +126,10 @@ impl DISanitizer {
                                                 None => "<unknown>".to_owned(),
                                             };
 
-                                            warn!(
+                                            trace!(
                                                 "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it"
                                             );
+                                            self.skipped_types.push(name);
 
                                             is_data_carrying_enum = true;
                                             break;
@@ -300,6 +303,13 @@ impl DISanitizer {
 
         for function in module.functions_iter() {
             self.visit_item(Item::Function(function));
+        }
+
+        if !self.skipped_types.is_empty() {
+            warn!(
+                "debug info was not emitted for the following types: {}",
+                self.skipped_types.join(", ")
+            );
         }
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
