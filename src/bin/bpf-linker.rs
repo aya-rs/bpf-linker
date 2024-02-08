@@ -103,10 +103,9 @@ struct CommandLine {
     #[clap(long, value_name = "path")]
     log_file: Option<PathBuf>,
 
-    /// Set the log level. If not specified, no logging is used. Can be one of
-    /// `error`, `warn`, `info`, `debug`, `trace`.
-    #[clap(long, value_name = "level")]
-    log_level: Option<Level>,
+    /// Set the log level. Can be one of `error`, `warn`, `info`, `debug`, `trace`.
+    #[clap(long, value_name = "level", default_value = "warn")]
+    log_level: Level,
 
     /// Try hard to unroll loops. Useful when targeting kernels that don't support loops
     #[clap(long)]
@@ -199,37 +198,35 @@ fn main() {
     }
 
     // Configure tracing.
-    if let Some(log_level) = log_level {
-        let subscriber_registry = tracing_subscriber::registry()
-            .with(EnvFilter::from_default_env().add_directive(log_level.into()));
-        let (subscriber, _guard): (
-            Box<dyn Subscriber + Send + Sync + 'static>,
-            Option<WorkerGuard>,
-        ) = match log_file {
-            Some(log_file) => {
-                let file_appender = tracing_appender::rolling::never(
-                    log_file.parent().unwrap_or_else(|| {
-                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
-                    }),
-                    log_file.file_name().unwrap_or_else(|| {
-                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
-                    }),
-                );
-                let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-                let subscriber = subscriber_registry
-                    .with(tracing_layer(io::stdout))
-                    .with(tracing_layer(non_blocking));
+    let subscriber_registry = tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env().add_directive(log_level.into()));
+    let (subscriber, _guard): (
+        Box<dyn Subscriber + Send + Sync + 'static>,
+        Option<WorkerGuard>,
+    ) = match log_file {
+        Some(log_file) => {
+            let file_appender = tracing_appender::rolling::never(
+                log_file.parent().unwrap_or_else(|| {
+                    error("invalid log_file", clap::error::ErrorKind::InvalidValue)
+                }),
+                log_file.file_name().unwrap_or_else(|| {
+                    error("invalid log_file", clap::error::ErrorKind::InvalidValue)
+                }),
+            );
+            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+            let subscriber = subscriber_registry
+                .with(tracing_layer(io::stdout))
+                .with(tracing_layer(non_blocking));
 
-                (Box::new(subscriber), Some(_guard))
-            }
-            None => {
-                let subscriber = subscriber_registry.with(tracing_layer(io::stderr));
-                (Box::new(subscriber), None)
-            }
-        };
-        if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-            error(&e.to_string(), clap::error::ErrorKind::Format);
+            (Box::new(subscriber), Some(_guard))
         }
+        None => {
+            let subscriber = subscriber_registry.with(tracing_layer(io::stderr));
+            (Box::new(subscriber), None)
+        }
+    };
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        error(&e.to_string(), clap::error::ErrorKind::Format);
     }
 
     info!(
