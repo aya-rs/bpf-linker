@@ -8,7 +8,7 @@ use std::{
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
-use tracing::{span, trace, warn, Level};
+use tracing::{info, span, trace, Level};
 
 use super::types::{
     di::DIType,
@@ -306,7 +306,7 @@ impl DISanitizer {
         }
 
         if !self.skipped_types.is_empty() {
-            warn!(
+            info!(
                 "debug info was not emitted for the following types: {}",
                 self.skipped_types.join(", ")
             );
