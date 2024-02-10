@@ -450,12 +450,16 @@ impl Linker {
         // run optimizations. Will optionally remove noinline attributes, intern all non exported
         // programs and maps and remove dead code.
 
-        unsafe {
+        if self.options.btf {
             // if we want to emit BTF, we need to sanitize the debug information
-            if self.options.btf {
-                llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
-            }
+            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+        } else {
+            // if we don't need BTF emission, we can strip DI
+            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            debug!("Stripping DI, changed={}", ok);
+        }
 
+        unsafe {
             llvm::optimize(
                 self.target_machine,
                 self.module,
@@ -465,12 +469,6 @@ impl Linker {
             )
         }
         .map_err(LinkerError::OptimizeError)?;
-
-        // if we don't need BTF emission, we can strip DI
-        if !self.options.btf {
-            let ok = unsafe { llvm::strip_debug_info(self.module) };
-            debug!("Stripping DI, changed={}", ok);
-        }
 
         Ok(())
     }
