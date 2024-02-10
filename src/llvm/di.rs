@@ -344,31 +344,31 @@ impl DISanitizer {
             }
 
             // Skip functions that don't have subprograms.
-            let Some(mut sub_program) = function.sub_program(self.context) else {
+            let Some(mut subprogram) = function.subprogram(self.context) else {
                 continue;
             };
 
-            let name = sub_program.name().unwrap();
-            let linkage_name = sub_program.linkage_name();
-            let ty = sub_program.ty();
+            let name = subprogram.name().unwrap();
+            let linkage_name = subprogram.linkage_name();
+            let ty = subprogram.ty();
 
             // Create a new subprogram that has DISPFlagLocalToUnit set, so the BTF backend emits it
             // with linkage=static
             let mut new_program = unsafe {
                 let new_program = LLVMDIBuilderCreateFunction(
                     self.builder,
-                    sub_program.scope().unwrap(),
+                    subprogram.scope().unwrap(),
                     name.as_ptr() as *const c_char,
                     name.len(),
                     linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()) as *const c_char,
                     linkage_name.unwrap_or("").len(),
-                    sub_program.file(),
-                    sub_program.line(),
+                    subprogram.file(),
+                    subprogram.line(),
                     ty,
                     1,
                     1,
-                    sub_program.line(),
-                    sub_program.type_flags(),
+                    subprogram.line(),
+                    subprogram.type_flags(),
                     1,
                 );
                 // Technically this must be called as part of the builder API, but effectively does
@@ -384,7 +384,7 @@ impl DISanitizer {
 
             // There's no way to set the unit with LLVMDIBuilderCreateFunction
             // so we set it after creation.
-            if let Some(unit) = sub_program.unit() {
+            if let Some(unit) = subprogram.unit() {
                 new_program.set_unit(unit);
             }
 
@@ -392,7 +392,7 @@ impl DISanitizer {
             // variables, including function arguments which otherwise become "anon". See
             // LLVMDIBuilderFinalizeSubprogram and
             // DISubprogram::replaceRetainedNodes.
-            if let Some(retained_nodes) = sub_program.retained_nodes() {
+            if let Some(retained_nodes) = subprogram.retained_nodes() {
                 new_program.set_retained_nodes(retained_nodes);
             }
 
@@ -401,9 +401,9 @@ impl DISanitizer {
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
             let empty_node =
                 unsafe { LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0) };
-            sub_program.set_retained_nodes(empty_node);
+            subprogram.set_retained_nodes(empty_node);
 
-            let ret = replace.insert(sub_program.value_ref as u64, unsafe {
+            let ret = replace.insert(subprogram.value_ref as u64, unsafe {
                 LLVMValueAsMetadata(new_program.value_ref)
             });
             assert!(ret.is_none());

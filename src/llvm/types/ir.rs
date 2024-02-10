@@ -326,14 +326,14 @@ impl<'ctx> Function<'ctx> {
         self.value_ref.basic_blocks_iter()
     }
 
-    pub(crate) fn sub_program(&self, context: LLVMContextRef) -> Option<DISubprogram<'ctx>> {
-        let sub_program = unsafe { LLVMGetSubprogram(self.value_ref) };
-        NonNull::new(sub_program).map(|_| unsafe {
-            DISubprogram::from_value_ref(LLVMMetadataAsValue(context, sub_program))
+    pub(crate) fn subprogram(&self, context: LLVMContextRef) -> Option<DISubprogram<'ctx>> {
+        let subprogram = unsafe { LLVMGetSubprogram(self.value_ref) };
+        NonNull::new(subprogram).map(|_| unsafe {
+            DISubprogram::from_value_ref(LLVMMetadataAsValue(context, subprogram))
         })
     }
 
-    pub(crate) fn set_subprogram(&mut self, sub_program: &DISubprogram) {
-        unsafe { LLVMSetSubprogram(self.value_ref, LLVMValueAsMetadata(sub_program.value_ref)) };
+    pub(crate) fn set_subprogram(&mut self, subprogram: &DISubprogram) {
+        unsafe { LLVMSetSubprogram(self.value_ref, LLVMValueAsMetadata(subprogram.value_ref)) };
     }
 }
