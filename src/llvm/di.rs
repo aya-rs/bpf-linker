@@ -390,8 +390,7 @@ impl DISanitizer {
 
             // Add retained nodes from the old program. This is needed to preserve local debug
             // variables, including function arguments which otherwise become "anon". See
-            // LLVMDIBuilderFinalizeSubprogram and
-            // DISubprogram::replaceRetainedNodes.
+            // LLVMDIBuilderFinalizeSubprogram and DISubprogram::replaceRetainedNodes.
             if let Some(retained_nodes) = subprogram.retained_nodes() {
                 new_program.set_retained_nodes(retained_nodes);
             }
