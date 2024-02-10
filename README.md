@@ -71,7 +71,41 @@ target = "bpfel-unknown-none"
 build-std = ["core"]
 ```
 
-# Clang
+#### (Experimental) BTF support
+
+To emit [BTF debug information](https://www.kernel.org/doc/html/next/bpf/btf.html),
+set the following rustflags:
+
+```
+-C debuginfo=1 -C link-arg=--btf
+```
+
+These flags will work only for the eBPF targets (`bpfeb-unknown-none`,
+`bpfel-unknown-none`). Make sure you are specifying them only for eBPF crates,
+not for the user-space ones!
+
+When compiling an eBPF crate directly with `cargo +nightly build`, they can be
+defined through the `RUSTFLAGS` environment variable:
+
+```sh
+RUSTFLAGS="-C debuginfo=1 -C link-arg=--btf" cargo +nightly build --target=bpfel-unknown-none -Z build-std=core --release
+```
+
+To avoid specifying them manually, you can put them in `.cargo/config.toml`:
+
+```toml
+[build]
+target = "bpfel-unknown-none"
+rustflags = "-C debuginfo=1 -C link-arg=--btf"
+
+[unstable]
+build-std = ["core"]
+```
+
+After that, the BPF object file present in `target/bpfel-unknown-none/release`
+should contain a BTF section.
+
+## Clang
 
 For a simple example of how to use the linker with clang see [this
 gist](https://gist.github.com/alessandrod/ed6f11ba41bcd8a19d8655e57a00350b). In
