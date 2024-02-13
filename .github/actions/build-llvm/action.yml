@@ -1,0 +1,121 @@
+description: Build LLVM
+
+inputs:
+  git-ref:
+    description: "LLVM git repository reference"
+    required: true
+  cxxflags:
+    description: "Additional CXXFLAGS"
+    required: false
+  ldflags:
+    description: "Additional LDFLAGS"
+    required: false
+  clang:
+    description: "Name of clang binary"
+    required: true
+  clangxx:
+    description: "Name of clang++ binary"
+    required: true
+  find-root-path-mode-program:
+    description: "Whether to search for programs in CMAKE_FIND_ROOT_PATH"
+    required: false
+  system-name:
+    description: "Operating system type"
+    required: true
+  system-processor:
+    description: "Processor family"
+    required: true
+  sysroot:
+    description: "Root directory for the given architecture"
+    required: false
+  build-static:
+    description: "Link dependencies statically"
+    required: true
+  enable-libcxx:
+    description: "Enable LLVM libc++ as the standard library"
+    required: true
+  host-triple:
+    description: "Host triple"
+    required: true
+  linker:
+    description: "Linker"
+    required: false
+  install-dir:
+    description: "Directory in which artifacts are installed"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout LLVM Source
+      uses: actions/checkout@v4
+      with:
+        repository: aya-rs/llvm-project
+        ref: ${{ inputs.git-ref }}
+        path: llvm-project
+
+    - name: Configure LLVM
+      shell: bash
+      env:
+        CXXFLAGS: ${{ inputs.cxxflags }}
+        LDFLAGS: ${{ inputs.ldflags }}
+      run: |
+        set -euxo pipefail
+        cmake \
+           -S llvm-project/llvm \
+           -B llvm-build \
+           -G Ninja \
+           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+           -DCMAKE_ASM_COMPILER="${{ inputs.clang }}" \
+           -DCMAKE_C_COMPILER="${{ inputs.clang }}" \
+           -DCMAKE_CXX_COMPILER="${{ inputs.clangxx }}" \
+           -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM="${{ inputs.find-root-path-mode-program }}" \
+           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-dir }}" \
+           -DCMAKE_SKIP_INSTALL_RPATH="${{ inputs.build-static }}" \
+           -DCMAKE_SYSROOT="${{ inputs.sysroot }}" \
+           -DCMAKE_SYSTEM_NAME="${{ inputs.system-name }}" \
+           -DCMAKE_SYSTEM_PROCESSOR="${{ inputs.system-processor }}" \
+           -DLLVM_BUILD_STATIC="${{ inputs.build-static }}" \
+           -DLLVM_BUILD_TOOLS=OFF \
+           -DLLVM_ENABLE_ASSERTIONS=ON \
+           -DLLVM_ENABLE_LIBCXX="${{ inputs.enable-libcxx }}" \
+           -DLLVM_ENABLE_PROJECTS= \
+           -DLLVM_ENABLE_RUNTIMES= \
+           -DLLVM_HOST_TRIPLE="${{ inputs.host-triple }}" \
+           -DLLVM_USE_LINKER="${{ inputs.linker }}" \
+           -DLLVM_USE_STATIC_ZSTD=ON \
+           -DLLVM_TARGETS_TO_BUILD=BPF
+
+    - name: Build LLVM
+      # env:
+      #   # Create symlinks rather than copies to conserve disk space. At the time of this writing,
+      #   # GitHub-hosted runners have 14GB of SSD space
+      #   # (https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources).
+      #   #
+      #   # Since the LLVM build creates a bunch of symlinks (and this setting does not turn those
+      #   # into symlinks-to-symlinks), use absolute symlinks so we can distinguish the two cases.
+      #   CMAKE_INSTALL_MODE: ABS_SYMLINK
+      shell: bash
+      run: |
+        set -euxo pipefail
+        cmake --build llvm-build \
+          --target llvm-config \
+          --target install
+        # There is no target for **installing** the native llvm-config build, even
+        # though a standalone build is possible. Let's just move it.
+        mv llvm-build/NATIVE/bin/llvm-config ${{ inputs.install-dir }}/bin/
+
+    # - name: Rewrite LLVM Symlinks
+    #   # Move targets over the symlinks that point to them.
+    #   #
+    #   # This whole dance would be simpler if CMake supported CMAKE_INSTALL_MODE=MOVE.
+    #   shell: bash
+    #   run: |
+    #     set -euxo pipefail
+    #     find llvm-install -type l -execdir sh -eux -c '
+    #       for link in "$@"; do
+    #         target=$(readlink "$link")
+    #         case $target in
+    #           /*) mv "$target" "$link" ;;
+    #         esac
+    #       done
+    #     ' sh {} +

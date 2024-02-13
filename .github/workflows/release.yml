@@ -8,16 +8,89 @@ jobs:
   llvm:
     uses: ./.github/workflows/llvm.yml
 
-  upload-bins:
-    # TODO: Build for macos someday.
-    runs-on: ubuntu-22.04
+  upload-bins-linux:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains-cross-arm64
+            sysroot: /usr/aarch64-gentoo-linux-musl
+            rustflags: "-C linker=clang -C link-arg=-fuse-ld=lld \
+              -C link-arg=--target=aarch64-gentoo-linux-musl \
+              -C link-arg=--sysroot=/usr/aarch64-gentoo-linux-musl \
+              -L /usr/aarch64-gentoo-linux-musl/lib \
+              -L /usr/aarch64-gentoo-linux-musl/usr/lib \
+              -L /usr/aarch64-gentoo-linux-musl/usr/lib/clang/17/lib \
+              -l static=c++abi"
+          - target: x86_64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains
+            sysroot: /
+            rustflags: "-C linker=clang -C link-arg=-fuse-ld=lld \
+              -L /lib -L /usr/lib -L /usr/lib/clang/17/lib \
+              -l static=c++abi"
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.container }}
     needs: llvm
     steps:
       - name: Restore LLVM
         uses: actions/cache/restore@v4
         with:
-          path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          path: ${{ env.GITHUB_WORKSPACE }}/llvm-install
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target)] }}
+          fail-on-cache-miss: true
+
+      - name: Add LLVM to PATH
+        run: |
+          echo "${{ env.GITHUB_WORKSPACE }}/llvm-install/bin" >> $GITHUB_PATH
+          echo "$PATH"
+
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Add system LLVM toolchain (clang, lld) to PATH
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "/usr/lib/llvm/17/bin" >> $GITHUB_PATH
+
+      # NOTE(vadorovsky): In Gentoo, /usr/lib/libc++{.a,so} are ldscripts.
+      # However, Rust expects an actual static library there. A long-term
+      # solution would be teaching build.rs in llvm-sys to detect that, but for
+      # now let's just move the static lib to the expected location.
+      - name: Move libc++ static lib to libc++.a
+        shell: bash
+        run: |
+          mv ${{ matrix.sysroot }}/usr/lib/libc++_static.a ${{ matrix.sysroot }}/usr/lib/libc++.a
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: bpf-linker
+          target: ${{ matrix.target }}
+          features: llvm-sys/force-static
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
+  upload-bins-macos:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+    runs-on: macos-latest
+    needs: llvm
+    steps:
+      - name: Restore LLVM
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/llvm-install
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target)] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH
@@ -31,6 +104,7 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bpf-linker
+          target: ${{ matrix.target }}
           features: llvm-sys/force-static
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

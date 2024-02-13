@@ -3,99 +3,137 @@ name: LLVM
 on:
   workflow_call:
     outputs:
-      cache-key:
-        value: ${{ jobs.llvm.outputs.cache-key }}
+      cache-key-llvm-aarch64-apple-darwin:
+        value: ${{ jobs.llvm-macos.outputs.cache-key-llvm-aarch64-apple-darwin }}
+      cache-key-llvm-aarch64-unknown-linux-musl:
+        value: ${{ jobs.llvm-linux.outputs.cache-key-llvm-aarch64-unknown-linux-musl }}
+      cache-key-llvm-x86_64-apple-darwin:
+        value: ${{ jobs.llvm-macos.outputs.cache-key-llvm-x86_64-apple-darwin }}
+      cache-key-llvm-x86_64-unknown-linux-musl:
+        value: ${{ jobs.llvm-linux.outputs.cache-key-llvm-x86_64-unknown-linux-musl }}
 
 jobs:
-  llvm:
-    runs-on: ubuntu-22.04
-    name: llvm
+  llvm-linux:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains-cross-arm64
+            clang: aarch64-gentoo-linux-musl-clang
+            clangxx: aarch64-gentoo-linux-musl-clang++
+            system-processor: aarch64
+            sysroot: /usr/aarch64-gentoo-linux-musl
+          - target: x86_64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains
+            clang: clang
+            clangxx: clang++
+            system-processor: x86_64
+            sysroot: /
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.target.container }}
+    name: LLVM Linux
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.cache-key }}
+      cache-key-llvm-aarch64-unknown-linux-musl: ${{ steps.cache-key-llvm.outputs.cache-key-llvm-aarch64-unknown-linux-musl }}
+      cache-key-llvm-x86_64-unknown-linux-musl: ${{ steps.cache-key-llvm.outputs.cache-key-llvm-x86_64-unknown-linux-musl }}
     steps:
-      - id: ls-remote
+      - uses: actions/checkout@v4
+
+      - name: Check LLVM repository
+        id: ls-remote
         run: |
           set -euxo pipefail
           value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/18.0-2024-02-13 | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
-      - id: cache-key
-        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+      - name: Construct LLVM cache ID
+        id: cache-key-llvm
+        run: echo "cache-key-llvm-${{ matrix.target }}=llvm-${{ matrix.target }}-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
 
       - name: Cache
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: llvm-install
-          key: ${{ steps.cache-key.outputs.cache-key }}
+          path: ${{ env.GITHUB_WORKSPACE }}/llvm-install
+          key: ${{ steps.cache-key-llvm.outputs[format('cache-key-llvm-{0}', matrix.target)] }}
           lookup-only: true
 
-      - name: Install Tools
+      - name: Add LLVM to PATH
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-            gpg --dearmor - | \
-            sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-          echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | \
-            sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+          echo "/usr/lib/llvm/17/bin" >> $GITHUB_PATH
 
-          sudo apt update
-          sudo apt -y install cmake ninja-build clang lld
-
-      - name: Checkout LLVM Source
+      - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
+        uses: ./.github/actions/build-llvm
         with:
-          repository: aya-rs/llvm-project
-          ref: ${{ steps.ls-remote.outputs.sha }}
-          path: llvm-project
+          git-ref: ${{ steps.ls-remote.outputs.sha }}
+          cxxflags: "-stdlib=libc++"
+          ldflags: "-fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind"
+          clang: ${{ matrix.clang }}
+          clangxx: ${{ matrix.clangxx }}
+          find-root-path-mode-program: NEVER
+          system-name: Linux
+          system-processor: ${{ matrix.system-processor }}
+          sysroot: ${{ matrix.sysroot }}
+          build-static: ON
+          enable-libcxx: ON
+          host-triple: ${{ matrix.target }}
+          linker: lld
+          install-dir: ${{ env.GITHUB_WORKSPACE }}/llvm-install
 
-      - name: Configure LLVM
+  llvm-macos:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            system-processor: aarch64
+          - target: x86_64-apple-darwin
+            system-processor: x86_64
+    runs-on: macos-latest
+    name: LLVM macOS
+    outputs:
+      cache-key-llvm-aarch64-apple-darwin: ${{ steps.cache-key-llvm.outputs.cache-key-llvm-aarch64-apple-darwin }}
+      cache-key-llvm-x86_64-apple-darwin: ${{ steps.cache-key-llvm.outputs.cache-key-llvm-x86_64-apple-darwin }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check LLVM repository
+        id: ls-remote
+        run: |
+          set -euxo pipefail
+          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/18.0-2024-02-13 | cut -f1)
+          echo "sha=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Construct LLVM cache ID
+        id: cache-key-llvm
+        run: echo "cache-key-llvm-${{ matrix.target }}=llvm-${{ matrix.target }}-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+
+      - name: Cache
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/llvm-install
+          key: ${{ steps.cache-key-llvm.outputs[format('cache-key-llvm-{0}', matrix.target)] }}
+          lookup-only: true
+
+      - name: Install Tools (macOS)
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          cmake \
-            -S llvm-project/llvm \
-            -B llvm-build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/llvm-install" \
-            -DLLVM_BUILD_LLVM_DYLIB=ON \
-            -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_ENABLE_PROJECTS= \
-            -DLLVM_ENABLE_RUNTIMES= \
-            -DLLVM_INSTALL_UTILS=ON \
-            -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DLLVM_TARGETS_TO_BUILD=BPF \
-            -DLLVM_USE_LINKER=lld
+          brew install cmake ninja
 
-      - name: Install LLVM
+      - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
-        env:
-          # Create symlinks rather than copies to conserve disk space. At the time of this writing,
-          # GitHub-hosted runners have 14GB of SSD space
-          # (https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources).
-          #
-          # Since the LLVM build creates a bunch of symlinks (and this setting does not turn those
-          # into symlinks-to-symlinks), use absolute symlinks so we can distinguish the two cases.
-          CMAKE_INSTALL_MODE: ABS_SYMLINK
-        run: cmake --build llvm-build --target install
-
-      - name: Rewrite LLVM Symlinks
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        # Move targets over the symlinks that point to them.
-        #
-        # This whole dance would be simpler if CMake supported CMAKE_INSTALL_MODE=MOVE.
-        run: |
-          set -euxo pipefail
-          find llvm-install -type l -execdir sh -eux -c '
-            for link in "$@"; do
-              target=$(readlink "$link")
-              case $target in
-                /*) mv "$target" "$link" ;;
-              esac
-            done
-          ' sh {} +
+        uses: ./.github/actions/build-llvm
+        with:
+          git-ref: ${{ steps.ls-remote.outputs.sha }}
+          clang: clang
+          clangxx: clang++
+          system-name: Darwin
+          system-processor: ${{ matrix.system-processor }}
+          build-static: OFF
+          enable-libcxx: OFF
+          host-triple: ${{ matrix.target }}
+          install-dir: ${{ github.workspace }}/llvm-install
