@@ -73,9 +73,9 @@ checksum = "d67af77d68a931ecd5cbd8a3b5987d63a1d1d1278f7f6a60ae33db485cdebb69"
 
 [[package]]
 name = "aya-rustc-llvm-proxy"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "423e4e05b90542aacbd1c64fdba582f6a31d6dba64593cac880335e2dc3f1f57"
+checksum = "a6e7d10ef4dc7f1b3e2d87fd7baf496d50481d578025ac682b3951d4813b1bdb"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -377,15 +377,15 @@ checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
 
 [[package]]
 name = "llvm-sys"
-version = "170.0.0"
+version = "180.0.0-rc2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46e01f7c4a977a4880a4366f3d2d5889cd83400f7af306fb2d0a2298fb3185b2"
+checksum = "f7ab441c1c1753fc9a3a939da2589b750a16c6d6e616c6a24ac3dbb38969a7e4"
 dependencies = [
  "anyhow",
  "cc",
  "lazy_static",
  "libc",
- "regex",
+ "regex-lite",
  "semver",
 ]
 
@@ -514,6 +514,12 @@ dependencies = [
  "memchr",
  "regex-syntax",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b661b2f27137bdbc16f00eda72866a92bb28af1753ffbd56744fb6e2e9cd8e"
 
 [[package]]
 name = "regex-syntax"

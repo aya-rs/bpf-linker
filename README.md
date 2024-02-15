@@ -17,7 +17,7 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 ## Installation
 
-The linker requires LLVM 16. It can use the same LLVM used by the rust compiler,
+The linker requires LLVM 18. It can use the same LLVM used by the rust compiler,
 or it can use an external LLVM installation.
 
 If your target is `aarch64-unknown-linux-gnu` (i.e. Linux on Apple Silicon) you 
@@ -33,14 +33,14 @@ cargo install bpf-linker
 
 ### Using external LLVM
 
-On Debian based distributions you need to install the `llvm-16-dev`, `libclang-16-dev`
-and `libpolly-16-dev` packages. If your distro doesn't have them you can get them
+On Debian based distributions you need to install the `llvm-18-dev`, `libclang-18-dev`
+and `libpolly-18-dev` packages. If your distro doesn't have them you can get them
 from the official LLVM repo at https://apt.llvm.org.
 
 On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
 If your distro doesn't have them you can get them from Fedora Rawhide.
 
-Once you have installed LLVM 16 you can install the linker running:
+Once you have installed LLVM 18 you can install the linker running:
 
 ```sh
 cargo install bpf-linker --no-default-features
