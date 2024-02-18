@@ -3,22 +3,15 @@
 #[cfg(feature = "rust-llvm")]
 extern crate aya_rustc_llvm_proxy;
 
-use std::{
-    env,
-    fs::{self, OpenOptions},
-    os::fd::AsRawFd,
-    path::PathBuf,
-    str::FromStr,
-};
+use std::{env, fs, io, path::PathBuf, str::FromStr};
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::Parser;
-use libc::dup2;
-use log::info;
-use simplelog::{
-    ColorChoice, Config, LevelFilter, SimpleLogger, TermLogger, TerminalMode, WriteLogger,
-};
 use thiserror::Error;
+use tracing::{info, Level, Subscriber};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{fmt::MakeWriter, prelude::*, EnvFilter};
+use tracing_tree::HierarchicalLayer;
 
 #[derive(Debug, Error)]
 enum CliError {
@@ -65,6 +58,7 @@ impl FromStr for CliOutputType {
         }))
     }
 }
+
 #[derive(Debug, Parser)]
 struct CommandLine {
     /// LLVM target triple. When not provided, the target is inferred from the inputs
@@ -87,7 +81,11 @@ struct CommandLine {
 
     /// Output type. Can be one of `llvm-bc`, `asm`, `llvm-ir`, `obj`
     #[clap(long, default_value = "obj")]
-    emit: CliOutputType,
+    emit: Vec<CliOutputType>,
+
+    /// Emit BTF information
+    #[clap(long)]
+    btf: bool,
 
     /// Add a directory to the library search path
     #[clap(short = 'L', number_of_values = 1)]
@@ -105,9 +103,10 @@ struct CommandLine {
     #[clap(long, value_name = "path")]
     log_file: Option<PathBuf>,
 
-    /// Set the log level. Can be one of `off`, `info`, `warn`, `debug`, `trace`.
+    /// Set the log level. If not specified, no logging is used. Can be one of
+    /// `error`, `warn`, `info`, `debug`, `trace`.
     #[clap(long, value_name = "level")]
-    log_level: Option<LevelFilter>,
+    log_level: Option<Level>,
 
     /// Try hard to unroll loops. Useful when targeting kernels that don't support loops
     #[clap(long)]
@@ -151,6 +150,18 @@ struct CommandLine {
     _debug: bool,
 }
 
+/// Returns a [`HierarchicalLayer`](tracing_tree::HierarchicalLayer) for the
+/// given `writer`.
+fn tracing_layer<W>(writer: W) -> HierarchicalLayer<W>
+where
+    W: for<'writer> MakeWriter<'writer> + 'static,
+{
+    const TRACING_IDENT: usize = 2;
+    HierarchicalLayer::new(TRACING_IDENT)
+        .with_indent_lines(true)
+        .with_writer(writer)
+}
+
 fn main() {
     let args = env::args().map(|arg| {
         if arg == "-flavor" {
@@ -165,6 +176,7 @@ fn main() {
         cpu_features,
         output,
         emit,
+        btf,
         libs,
         optimize,
         export_symbols,
@@ -186,51 +198,38 @@ fn main() {
         error("no input files", clap::error::ErrorKind::TooFewValues);
     }
 
-    let env_log_level = match env::var("RUST_LOG") {
-        Ok(s) if !s.is_empty() => match s.parse::<LevelFilter>() {
-            Ok(l) => Some(l),
-            Err(e) => error(
-                &format!("invalid RUST_LOG value: {e}"),
-                clap::error::ErrorKind::InvalidValue,
-            ),
-        },
-        _ => None,
-    };
-    let log_level = log_level.or(env_log_level).unwrap_or(LevelFilter::Warn);
-    if let Some(log_file) = log_file {
-        let log_file = match OpenOptions::new().create(true).append(true).open(log_file) {
-            Ok(f) => {
-                // Use dup2 to duplicate stderr fd to the log file fd
-                let result = unsafe { dup2(f.as_raw_fd(), std::io::stderr().as_raw_fd()) };
-
-                if result == -1 {
-                    error(
-                        &format!(
-                            "failed to duplicate stderr: {}",
-                            std::io::Error::last_os_error()
-                        ),
-                        clap::error::ErrorKind::Io,
-                    )
-                }
-                f
-            }
-            Err(e) => {
-                error(
-                    &format!("failed to open log file: {e:?}"),
-                    clap::error::ErrorKind::Io,
+    // Configure tracing.
+    if let Some(log_level) = log_level {
+        let subscriber_registry = tracing_subscriber::registry()
+            .with(EnvFilter::from_default_env().add_directive(log_level.into()));
+        let (subscriber, _guard): (
+            Box<dyn Subscriber + Send + Sync + 'static>,
+            Option<WorkerGuard>,
+        ) = match log_file {
+            Some(log_file) => {
+                let file_appender = tracing_appender::rolling::never(
+                    log_file.parent().unwrap_or_else(|| {
+                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
+                    }),
+                    log_file.file_name().unwrap_or_else(|| {
+                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
+                    }),
                 );
+                let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+                let subscriber = subscriber_registry
+                    .with(tracing_layer(io::stdout))
+                    .with(tracing_layer(non_blocking));
+
+                (Box::new(subscriber), Some(_guard))
+            }
+            None => {
+                let subscriber = subscriber_registry.with(tracing_layer(io::stderr));
+                (Box::new(subscriber), None)
             }
         };
-        WriteLogger::init(log_level, Config::default(), log_file).unwrap();
-    } else if TermLogger::init(
-        log_level,
-        Config::default(),
-        TerminalMode::Mixed,
-        ColorChoice::Auto,
-    )
-    .is_err()
-    {
-        SimpleLogger::init(log_level, Config::default()).unwrap();
+        if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+            error(&e.to_string(), clap::error::ErrorKind::Format);
+        }
     }
 
     info!(
@@ -255,15 +254,24 @@ fn main() {
         .map(Into::into)
         .collect();
 
+    let output_type = match *emit.as_slice() {
+        [] => unreachable!("emit has a default value"),
+        [CliOutputType(output_type), ..] => output_type,
+    };
+    let optimize = match *optimize.as_slice() {
+        [] => unreachable!("emit has a default value"),
+        [.., CliOptLevel(optimize)] => optimize,
+    };
+
     let mut linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
         inputs,
         output,
-        output_type: emit.0,
+        output_type,
         libs,
-        optimize: optimize.last().unwrap().0,
+        optimize,
         export_symbols,
         unroll_loops,
         ignore_inline_never,
@@ -271,6 +279,7 @@ fn main() {
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
+        btf,
     });
 
     if let Err(e) = linker.link() {

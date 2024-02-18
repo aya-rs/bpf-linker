@@ -5,6 +5,7 @@ use std::{
     fs::File,
     io,
     io::{Read, Seek},
+    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     ptr, str,
     str::FromStr,
@@ -21,8 +22,8 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMModuleRef},
     target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
 };
-use log::{debug, error, info, warn};
 use thiserror::Error;
+use tracing::{debug, error, info, warn};
 
 use crate::llvm;
 
@@ -208,7 +209,7 @@ pub struct LinkerOptions {
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
     /// support function calls.
     pub ignore_inline_never: bool,
-    /// Write the linked module IR before generating code.
+    /// Write the linked module IR before and after optimization.
     pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<String>,
@@ -218,6 +219,8 @@ pub struct LinkerOptions {
     /// those is commonly needed when LLVM does not manage to expand memory
     /// intrinsics to a sequence of loads and stores.
     pub disable_memory_builtins: bool,
+    /// Emit BTF information
+    pub btf: bool,
 }
 
 /// BPF Linker
@@ -246,7 +249,22 @@ impl Linker {
         self.llvm_init();
         self.link_modules()?;
         self.create_target_machine()?;
+        if let Some(path) = &self.options.dump_module {
+            std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
+        }
+        if let Some(path) = &self.options.dump_module {
+            // dump IR before optimization
+            let path = path.join("pre-opt.ll");
+            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            self.write_ir(&path)?;
+        };
         self.optimize()?;
+        if let Some(path) = &self.options.dump_module {
+            // dump IR before optimization
+            let path = path.join("post-opt.ll");
+            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            self.write_ir(&path)?;
+        };
         self.codegen()?;
         Ok(())
     }
@@ -310,12 +328,6 @@ impl Linker {
                     }
                 }
             }
-        }
-
-        if let Some(path) = &self.options.dump_module {
-            // dump IR for the final linked module for debugging purposes
-            let path = CString::new(path.as_os_str().to_str().unwrap()).unwrap();
-            self.write_ir(&path)?;
         }
 
         Ok(())
@@ -437,6 +449,16 @@ impl Linker {
         );
         // run optimizations. Will optionally remove noinline attributes, intern all non exported
         // programs and maps and remove dead code.
+
+        if self.options.btf {
+            // if we want to emit BTF, we need to sanitize the debug information
+            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+        } else {
+            // if we don't need BTF emission, we can strip DI
+            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            debug!("Stripping DI, changed={}", ok);
+        }
+
         unsafe {
             llvm::optimize(
                 self.target_machine,
@@ -446,12 +468,13 @@ impl Linker {
                 &self.options.export_symbols,
             )
         }
-        .map_err(LinkerError::OptimizeError)
+        .map_err(LinkerError::OptimizeError)?;
+
+        Ok(())
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
         let output = CString::new(self.options.output.as_os_str().to_str().unwrap()).unwrap();
-
         match self.options.output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
             OutputType::LlvmAssembly => self.write_ir(&output),
