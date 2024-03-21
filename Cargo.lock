@@ -73,9 +73,9 @@ checksum = "d67af77d68a931ecd5cbd8a3b5987d63a1d1d1278f7f6a60ae33db485cdebb69"
 
 [[package]]
 name = "aya-rustc-llvm-proxy"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6e7d10ef4dc7f1b3e2d87fd7baf496d50481d578025ac682b3951d4813b1bdb"
+checksum = "09de71afbd6668d1e10f1895f967d5a2c02b2e6db01ea4ac9677c29e22dac548"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -85,6 +85,7 @@ dependencies = [
  "once_cell",
  "prettyplease",
  "quote",
+ "rustversion",
  "syn",
 ]
 
