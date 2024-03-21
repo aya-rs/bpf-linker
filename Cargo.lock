@@ -103,7 +103,7 @@ checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
 
 [[package]]
 name = "bpf-linker"
-version = "0.9.11"
+version = "0.9.12"
 dependencies = [
  "ar",
  "aya-rustc-llvm-proxy",
