@@ -3,12 +3,11 @@ use std::marker::PhantomData;
 use llvm_sys::{
     core::{
         LLVMGetFirstBasicBlock, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias,
-        LLVMGetFirstInstruction, LLVMGetFirstNamedMetadata, LLVMGetLastBasicBlock,
-        LLVMGetLastFunction, LLVMGetLastGlobal, LLVMGetLastGlobalAlias, LLVMGetLastInstruction,
-        LLVMGetLastNamedMetadata, LLVMGetNextBasicBlock, LLVMGetNextFunction, LLVMGetNextGlobal,
-        LLVMGetNextGlobalAlias, LLVMGetNextInstruction, LLVMGetNextNamedMetadata,
+        LLVMGetFirstInstruction, LLVMGetLastBasicBlock, LLVMGetLastFunction, LLVMGetLastGlobal,
+        LLVMGetLastGlobalAlias, LLVMGetLastInstruction, LLVMGetNextBasicBlock, LLVMGetNextFunction,
+        LLVMGetNextGlobal, LLVMGetNextGlobalAlias, LLVMGetNextInstruction,
     },
-    prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMNamedMDNodeRef, LLVMValueRef},
+    prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef},
 };
 
 macro_rules! llvm_iterator {
@@ -111,15 +110,4 @@ llvm_iterator!(
     LLVMGetFirstInstruction,
     LLVMGetLastInstruction,
     LLVMGetNextInstruction
-);
-
-llvm_iterator!(
-    IterModuleNamedMDNode,
-    NamedMDNodeIter,
-    LLVMModuleRef,
-    named_metadata_iter,
-    LLVMNamedMDNodeRef,
-    LLVMGetFirstNamedMetadata,
-    LLVMGetLastNamedMetadata,
-    LLVMGetNextNamedMetadata
 );
