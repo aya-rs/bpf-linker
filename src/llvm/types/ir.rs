@@ -112,7 +112,7 @@ pub enum Metadata<'ctx> {
     DICompositeType(DICompositeType<'ctx>),
     DIDerivedType(DIDerivedType<'ctx>),
     DISubprogram(DISubprogram<'ctx>),
-    Other(LLVMValueRef),
+    Other(#[allow(dead_code)] LLVMValueRef),
 }
 
 impl<'ctx> Metadata<'ctx> {
