@@ -3,13 +3,19 @@
 #[cfg(feature = "rust-llvm")]
 extern crate aya_rustc_llvm_proxy;
 
-use std::{env, fs, io, path::PathBuf, str::FromStr};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
-use clap::Parser;
+use clap::{
+    builder::{PathBufValueParser, TypedValueParser as _},
+    Parser,
+};
 use thiserror::Error;
-use tracing::{info, Level, Subscriber};
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing::{info, Level};
 use tracing_subscriber::{fmt::MakeWriter, prelude::*, EnvFilter};
 use tracing_tree::HierarchicalLayer;
 
@@ -59,6 +65,20 @@ impl FromStr for CliOutputType {
     }
 }
 
+fn parent_and_file_name(p: PathBuf) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let mut comps = p.components();
+    let file_name = comps
+        .next_back()
+        .map(|p| match p {
+            std::path::Component::Normal(p) => Ok(p),
+            p => Err(anyhow::anyhow!("unexpected path component {:?}", p)),
+        })
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("unexpected empty path"))?;
+    let parent = comps.as_path();
+    Ok((parent.to_path_buf(), Path::new(file_name).to_path_buf()))
+}
+
 #[derive(Debug, Parser)]
 struct CommandLine {
     /// LLVM target triple. When not provided, the target is inferred from the inputs
@@ -100,8 +120,12 @@ struct CommandLine {
     export_symbols: Option<PathBuf>,
 
     /// Output logs to the given `path`
-    #[clap(long, value_name = "path")]
-    log_file: Option<PathBuf>,
+    #[clap(
+        long,
+        value_name = "path",
+        value_parser = PathBufValueParser::new().try_map(parent_and_file_name),
+    )]
+    log_file: Option<(PathBuf, PathBuf)>,
 
     /// Set the log level. If not specified, no logging is used. Can be one of
     /// `error`, `warn`, `info`, `debug`, `trace`.
@@ -135,6 +159,7 @@ struct CommandLine {
     disable_memory_builtins: bool,
 
     /// Input files. Can be object files or static libraries
+    #[clap(required = true)]
     inputs: Vec<PathBuf>,
 
     /// Comma separated list of symbols to export. See also `--export-symbols`
@@ -161,8 +186,7 @@ where
         .with_indent_lines(true)
         .with_writer(writer)
 }
-
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args = env::args().map(|arg| {
         if arg == "-flavor" {
             "--flavor".to_string()
@@ -192,57 +216,40 @@ fn main() {
         export,
         fatal_errors,
         _debug,
-    } = Parser::parse_from(args);
-
-    if inputs.is_empty() {
-        error("no input files", clap::error::ErrorKind::TooFewValues);
-    }
+    } = Parser::try_parse_from(args)?;
 
     // Configure tracing.
-    if let Some(log_level) = log_level {
-        let subscriber_registry = tracing_subscriber::registry()
-            .with(EnvFilter::from_default_env().add_directive(log_level.into()));
-        let (subscriber, _guard): (
-            Box<dyn Subscriber + Send + Sync + 'static>,
-            Option<WorkerGuard>,
-        ) = match log_file {
-            Some(log_file) => {
-                let file_appender = tracing_appender::rolling::never(
-                    log_file.parent().unwrap_or_else(|| {
-                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
-                    }),
-                    log_file.file_name().unwrap_or_else(|| {
-                        error("invalid log_file", clap::error::ErrorKind::InvalidValue)
-                    }),
-                );
-                let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let _guard = {
+        let filter = EnvFilter::from_default_env();
+        let filter = match log_level {
+            None => filter,
+            Some(log_level) => filter.add_directive(log_level.into()),
+        };
+        let subscriber_registry = tracing_subscriber::registry().with(filter);
+        let (subscriber, guard) = match log_file {
+            Some((parent, file_name)) => {
+                let file_appender = tracing_appender::rolling::never(parent, file_name);
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
                 let subscriber = subscriber_registry
                     .with(tracing_layer(io::stdout))
                     .with(tracing_layer(non_blocking));
-
-                (Box::new(subscriber), Some(_guard))
+                (either::Left(subscriber), Some(guard))
             }
             None => {
                 let subscriber = subscriber_registry.with(tracing_layer(io::stderr));
-                (Box::new(subscriber), None)
+                (either::Right(subscriber), None)
             }
         };
-        if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-            error(&e.to_string(), clap::error::ErrorKind::Format);
-        }
-    }
+        either::for_both!(subscriber, s => tracing::subscriber::set_global_default(s))?;
+        guard
+    };
 
     info!(
         "command line: {:?}",
         env::args().collect::<Vec<_>>().join(" ")
     );
 
-    let export_symbols = export_symbols
-        .map(fs::read_to_string)
-        .transpose()
-        .unwrap_or_else(|e| {
-            error(&e.to_string(), clap::error::ErrorKind::Io);
-        });
+    let export_symbols = export_symbols.map(fs::read_to_string).transpose()?;
 
     // TODO: the data is owned by this call frame; we could make this zero-alloc.
     let export_symbols = export_symbols
@@ -282,20 +289,15 @@ fn main() {
         btf,
     });
 
-    if let Err(e) = linker.link() {
-        error(&e.to_string(), clap::error::ErrorKind::Io);
-    }
+    linker.link()?;
 
     if fatal_errors && linker.has_errors() {
-        error(
-            "LLVM issued diagnostic with error severity",
-            clap::error::ErrorKind::Io,
-        );
+        return Err(anyhow::anyhow!(
+            "LLVM issued diagnostic with error severity"
+        ));
     }
-}
 
-fn error(desc: &str, kind: clap::error::ErrorKind) -> ! {
-    clap::Error::raw(kind, desc.to_string()).exit();
+    Ok(())
 }
 
 #[cfg(test)]
