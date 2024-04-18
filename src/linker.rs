@@ -522,8 +522,8 @@ impl Linker {
             args.extend([
                 "--unroll-runtime".into(),
                 "--unroll-runtime-multi-exit".into(),
-                format!("--unroll-max-upperbound={}", std::u32::MAX).into(),
-                format!("--unroll-threshold={}", std::u32::MAX).into(),
+                format!("--unroll-max-upperbound={}", u32::MAX).into(),
+                format!("--unroll-threshold={}", u32::MAX).into(),
             ]);
         }
         if !self.options.disable_expand_memcpy_in_order {
