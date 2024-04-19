@@ -55,7 +55,10 @@ jobs:
         rust:
           - stable
           - beta
-          - nightly
+          # TODO: unpin nightly. There was a regression in
+          # https://github.com/rust-lang/rust/compare/1cec373f6...becebb315 that causes
+          # tests/btf/assembly/anon_struct_c.rs to fail to link.
+          - nightly-2024-04-16
         llvm:
           - 18
           - source
