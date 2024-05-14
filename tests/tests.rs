@@ -120,14 +120,18 @@ fn compile_test() {
         .expect("could not determine the root directory of the project");
     let root_dir = Path::new(&root_dir);
     let directory = root_dir.join("target/sysroot");
-    let () = rustc_build_sysroot::SysrootBuilder::new(&directory, target)
+    match rustc_build_sysroot::SysrootBuilder::new(&directory, target)
         .build_mode(rustc_build_sysroot::BuildMode::Build)
         .sysroot_config(rustc_build_sysroot::SysrootConfig::NoStd)
         // to be able to thoroughly test DI we need to build sysroot with debuginfo
         // this is necessary to compile rust core with DI
         .rustflag("-Cdebuginfo=2")
         .build_from_source(&rustc_src)
-        .expect("failed to build sysroot");
+        .expect("failed to build sysroot")
+    {
+        rustc_build_sysroot::SysrootStatus::AlreadyCached => {}
+        rustc_build_sysroot::SysrootStatus::SysrootBuilt => {}
+    }
 
     build_bitcode(root_dir.join("tests/c"), root_dir.join("target/bitcode"));
 
