@@ -77,7 +77,7 @@ To emit [BTF debug information](https://www.kernel.org/doc/html/next/bpf/btf.htm
 set the following rustflags:
 
 ```
--C debuginfo=1 -C link-arg=--btf
+-C debuginfo=2 -C link-arg=--btf
 ```
 
 These flags will work only for the eBPF targets (`bpfeb-unknown-none`,
