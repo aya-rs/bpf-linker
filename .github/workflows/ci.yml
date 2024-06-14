@@ -47,8 +47,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-  build:
-    runs-on: ubuntu-22.04
+  # A simple, native build on Ubuntu.
+  build-linux-native:
     strategy:
       fail-fast: false
       matrix:
@@ -61,8 +61,8 @@ jobs:
           - nightly-2024-04-16
         llvm:
           - 18
-          - source
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+    name: native rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+    runs-on: ubuntu-22.04
     needs: llvm
 
     env:
@@ -71,7 +71,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust ${{ matrix.rust }}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt -y install \
+            build-essential \
+            curl \
+            libzstd-dev \
+            sudo \
+            wget \
+            zlib1g-dev \
+            zstd
+
+      - name: Install Rust ${{ matrix.target.rust }}
         if: matrix.rust != 'nightly'
         uses: dtolnay/rust-toolchain@master
         with:
@@ -85,6 +98,16 @@ jobs:
           components: rust-src
           # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
           targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
+
+      - name: Install bpftool
+        if: matrix.rust == 'nightly'
+        shell: bash
+        env:
+          BPFTOOL_VERSION: 7.3.0
+        run: |
+          wget "https://github.com/libbpf/bpftool/releases/download/v${BPFTOOL_VERSION}/bpftool-v${BPFTOOL_VERSION}-amd64.tar.gz"
+          sudo tar xpf "bpftool-v${BPFTOOL_VERSION}-amd64.tar.gz" -C /usr/bin
+          sudo chmod +x /usr/bin/bpftool
 
       - uses: Swatinem/rust-cache@v2
 
@@ -106,6 +129,7 @@ jobs:
         # [0] https://github.com/actions/runner-images/blob/ubuntu22/20230724.1/images/linux/Ubuntu2204-Readme.md
         #
         # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
+        shell: bash
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -115,25 +139,27 @@ jobs:
 
       - name: Install LLVM
         if: matrix.llvm != 'source'
+        shell: bash
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev
+          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
           echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
         if: matrix.llvm == 'source'
         uses: actions/cache/restore@v4
         with:
-          path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          path: ${{ github.workspace }}/llvm-install
+          key: ${{ needs.llvm.outputs['cache-key-llvm-x86_64-unknown-linux-musl'] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
         if: matrix.llvm == 'source'
+        shell: bash
         run: |
           set -euxo pipefail
           echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
@@ -144,6 +170,7 @@ jobs:
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
       - name: Bust llvm-sys cache
+        shell: bash
         run: |
           set -euxo pipefail
           cargo clean -p llvm-sys
@@ -152,25 +179,26 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
-        run: cargo hack check --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack check --feature-powerset
 
       - name: Build
-        run: cargo hack build --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack build --feature-powerset
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack test --feature-powerset
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
         with:
-          repository: aya-rs/aya
+          repository: vadorovsky/aya
           path: aya
+          ref: integration-tests-linker 
           submodules: recursive
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features llvm-sys/force-dynamic
+        run: cargo install --path . --no-default-features        
 
       # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
       - name: Download debian kernels
@@ -178,7 +206,7 @@ jobs:
         working-directory: aya
         run: |
           set -euxo pipefail
-          mkdir -p test/.tmp/debian-kernels/arm64
+          mkdir -p test/.tmp/debian-kernels/arm64            
           printf '%s\0' \
             linux-image-6.1.0-15-cloud-arm64-unsigned_6.1.66-1_arm64.deb \
           | xargs -0 -t -P0 -I {} wget -nd -nv -P test/.tmp/debian-kernels/arm64 ftp://ftp.us.debian.org/debian/pool/main/l/linux/{}
@@ -210,3 +238,284 @@ jobs:
           set -euxo pipefail
           sudo apt install -y locate qemu-system-{arm,x86}
           find test/.tmp -name 'vmlinuz-*' | RUSTFLAGS=-Cdebuginfo=line-directives-only xargs -t cargo xtask integration-test vm
+
+  # A cross build on Gentoo with musl-llvm profile (a combo which @vadorovsky
+  # finds as the most painless for cross build environments with static linking 😉).
+  # We use only our LLVM builds here. It's mostly for us to ensure that we can
+  # build binstall tarballs.
+  build-linux-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+        target:
+          - target: aarch64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains-cross-arm64
+            sysroot: /usr/aarch64-gentoo-linux-musl
+            rustflags: "-C linker=clang -C link-arg=-fuse-ld=lld \
+              -C link-arg=--target=aarch64-gentoo-linux-musl \
+              -C link-arg=--sysroot=/usr/aarch64-gentoo-linux-musl \
+              -L /usr/aarch64-gentoo-linux-musl/lib \
+              -L /usr/aarch64-gentoo-linux-musl/usr/lib \
+              -L /usr/aarch64-gentoo-linux-musl/usr/lib/clang/17/lib \
+              -l static=c++abi"
+          - target: x86_64-unknown-linux-musl
+            container: gitlab.com/vadorovsky/gentoo-musl-llvm:stage4-amd64-toolchains
+            sysroot: /
+            rustflags: "-C linker=clang -C link-arg=-fuse-ld=lld \
+              -L /lib -L /usr/lib -L /usr/lib/clang/17/lib \
+              -l static=c++abi"
+    name: cross rustc=${{ matrix.rust }} target=${{ matrix.target.target }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.target.container }}
+    needs: llvm
+
+    env:
+      RUST_BACKTRACE: full
+
+    steps:
+      - name: Save space
+        run: |
+          rm -rf /__t/{CodeQL,PyPy,Python,Ruby,go}
+
+      - uses: actions/checkout@v4
+
+      - name: Add system LLVM toolchain (clang, lld) to PATH
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "/usr/lib/llvm/17/bin" >> $GITHUB_PATH
+
+      # NOTE(vadorovsky): In Gentoo, /usr/lib/libc++{.a,so} are ldscripts.
+      # However, Rust expects an actual static library there. A long-term
+      # solution would be teaching build.rs in llvm-sys to detect that, but for
+      # now let's just move the static lib to the expected location.
+      - name: Move libc++ static lib to libc++.a
+        shell: bash
+        run: |
+          mv ${{ matrix.target.sysroot }}/usr/lib/libc++_static.a ${{ matrix.target.sysroot }}/usr/lib/libc++.a
+
+      - name: Install Rust ${{ matrix.target.rust }}
+        if: matrix.rust != 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust == 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rust-src
+          # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
+          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Setup Rust target
+        run: |
+          rustup +${{ matrix.rust }} target add ${{ matrix.target.target }}
+
+      - name: Check (default features, no system LLVM)
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: cargo check --target ${{ matrix.target.target }}
+
+      - name: Build (default features, no system LLVM)
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: cargo build --target ${{ matrix.target.target }}
+
+      - name: Restore LLVM
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.GITHUB_WORKSPACE }}/llvm-install
+          key: ${{ needs.llvm.outputs[format('cache-key-llvm-{0}', matrix.target.target)] }}
+          fail-on-cache-miss: true
+
+      - name: Add our LLVM build to PATH && LD_LIBRARY_PATH
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pwd
+          echo "${{ env.GITHUB_WORKSPACE }}/llvm-install/bin" >> $GITHUB_PATH
+          # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
+          # doesn't affect behavior, but greatly reduces disk usage.
+          echo "LD_LIBRARY_PATH=${{ env.GITHUB_WORKSPACE }}/llvm-install/lib" >> $GITHUB_ENV
+
+      # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
+      # flags may be incorrect when the cache is reused across LLVM versions.
+      - name: Bust llvm-sys cache
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo clean -p llvm-sys
+          cargo clean -p llvm-sys --release
+
+      - name: Install cargo-hack
+        run: |
+          cargo install cargo-hack
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: |
+          cargo hack check --feature-powerset --target ${{ matrix.target.target }}
+
+      - name: Build
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: cargo hack build --feature-powerset --target ${{ matrix.target.target }}
+
+      - name: Test
+        if: matrix.rust == 'nightly'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: cargo test --no-default-features --features llvm-sys/force-static --target ${{ matrix.target.target }}
+
+      - uses: actions/checkout@v4
+        if: matrix.rust == 'nightly'
+        with:
+          repository: vadorovsky/aya
+          path: aya
+          ref: integration-tests-linker 
+          submodules: recursive
+
+      - name: Install
+        if: matrix.rust == 'nightly'
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: cargo install --path . --no-default-features --features llvm-sys/force-static --target ${{ matrix.target.target }}
+
+      - name: Save some space
+        run: |
+          rm -rf /usr/aarch64-gentoo-linux-musl
+
+      # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
+      - name: Download debian kernels
+        if: matrix.rust == 'nightly' && matrix.target.target == 'x86_64-unknown-linux-musl'
+        working-directory: aya
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p test/.tmp/debian-kernels/amd64
+          printf '%s\0' \
+            linux-image-6.1.0-15-cloud-amd64-unsigned_6.1.66-1_amd64.deb \
+          | xargs -0 -t -P0 -I {} wget -nd -nv -P test/.tmp/debian-kernels/amd64 ftp://ftp.us.debian.org/debian/pool/main/l/linux/{}
+
+      # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
+      - name: Extract debian kernels
+        if: matrix.rust == 'nightly' && matrix.target.target == 'x86_64-unknown-linux-musl'
+        working-directory: aya
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pushd test/.tmp
+          find . -name '*.deb' -print0 | while IFS= read -r -d $'\0' debfile; do
+            ar x "$debfile"
+            tar xf data.tar.* --wildcards '*vmlinuz*'
+          done
+
+      - name: Run aya integration tests
+        if: matrix.rust == 'nightly' && matrix.target.target == 'x86_64-unknown-linux-musl'
+        working-directory: aya
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ matrix.target.rustflags }}
+        run: |
+          set -euxo pipefail
+          find test/.tmp -name 'vmlinuz-*' | RUSTFLAGS=-Cdebuginfo=line-directives-only xargs -t cargo xtask integration-test vm
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+        target:
+          - target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+    name: rustc=${{ matrix.rust }} target=${{ matrix.target.target }}
+    runs-on: macos-latest
+    needs: llvm
+
+    env:
+      RUST_BACKTRACE: full
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          brew install llvm
+          echo /usr/local/opt/llvm/bin/ >> $GITHUB_PATH
+
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust != 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Install Rust ${{ matrix.rust }}
+        if: matrix.rust == 'nightly'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rust-src
+          # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
+          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check (default features, no system LLVM)
+        run: cargo check
+
+      - name: Build (default features, no system LLVM)
+        run: cargo build
+
+      - name: Restore LLVM
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/llvm-install
+          key: ${{ needs.llvm.outputs[format('cache-key-llvm-{0}', matrix.target.target)] }}
+          fail-on-cache-miss: true
+
+      - name: Add LLVM to PATH && LD_LIBRARY_PATH
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
+          # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
+          # doesn't affect behavior, but greatly reduces disk usage.
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
+
+      # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
+      # flags may be incorrect when the cache is reused across LLVM versions.
+      - name: Bust llvm-sys cache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo clean -p llvm-sys
+          cargo clean -p llvm-sys --release
+
+      - uses: taiki-e/install-action@cargo-hack
+
+      - name: Check
+        run: cargo hack check --feature-powerset
+
+      - name: Build
+        run: cargo hack build --feature-powerset
+
+      - name: Test
+        if: matrix.rust == 'nightly'
+        run: cargo hack test --feature-powerset

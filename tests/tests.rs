@@ -1,10 +1,14 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs,
+    fs::{self, File},
+    io::Write,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
 };
+
+use regex::Regex;
 
 fn find_binary(binary_re_str: &str) -> PathBuf {
     let binary_re = regex::Regex::new(binary_re_str).unwrap();
@@ -20,7 +24,69 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
     sysroot: Option<&Path>,
     cfg: Option<F>,
 ) {
-    let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
+    // Check if we are running tests for a cross environment. We do it by
+    // checking the path of our executable (the first argument) and trying to
+    // extract the target triple from it. Then we check whether the
+    // architecture from the triple refers to a foreign architecture.
+    // running tests for a non-host target.
+    let pattern = Regex::new(r"/target/(.*?)/debug/deps").unwrap();
+    let cmd = env::args().next().unwrap();
+    let target_triple = pattern
+        .captures(&cmd)
+        .and_then(|caps| caps.get(1))
+        .map(|r#match| r#match.as_str().to_string());
+    let arch = String::from_utf8_lossy(&Command::new("uname").arg("-m").output().unwrap().stdout)
+        .trim()
+        .to_string();
+
+    let bpf_linker_exe = match target_triple {
+        Some(target_triple) => {
+            if target_triple.starts_with(&arch) {
+                env!("CARGO_BIN_EXE_bpf-linker")
+            } else {
+                // For foreign targets, we need to point to a correct bpf-linker binary and
+                // wrap it in QEMU.
+                let bpf_linker_exe = format!(
+                    "{}/target/{target_triple}/debug/bpf-linker",
+                    env!("CARGO_MANIFEST_DIR")
+                );
+                let qemu_exe = match target_triple.as_str() {
+                    "aarch64-unknown-linux-gnu" | "aarch64-unknown-linux-musl" => "qemu-aarch64",
+                    "riscv64gc-unknown-linux-gnu" | "riscv64gc-unknown-linux-musl" => {
+                        "qemu-riscv64"
+                    }
+                    "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl" => "qemu-x86_64",
+                    _ => {
+                        panic!("Unsupported target triple: {target_triple}")
+                    }
+                };
+
+                // Create a wrapper script which runs bpf-linker with qemu.
+                //
+                // Unfortunately, passing
+                // `qemu-aarch64 ./target/aarch64-uknown-linux-musl/debug/bpf-linker`
+                // (or any multiple arguments) as `linker` in RUSTFLAGS doesn't work.
+                let script_path = Path::new("/tmp/qemu_bpf_linker_wrapper.sh");
+                let script_content = format!(
+                    r#"#!/bin/bash
+
+{qemu_exe} "{bpf_linker_exe}" "$@"
+"#
+                );
+                let mut file = File::create(script_path).unwrap();
+                file.write_all(script_content.as_bytes()).unwrap();
+                let metadata = file.metadata().unwrap();
+                let mut permissions = metadata.permissions();
+                permissions.set_mode(0o755);
+                file.set_permissions(permissions).unwrap();
+
+                script_path.to_str().unwrap()
+            }
+        }
+        None => env!("CARGO_BIN_EXE_bpf-linker"),
+    };
+
+    let mut target_rustcflags = format!("-C linker={bpf_linker_exe}");
     if let Some(sysroot) = sysroot {
         let sysroot = sysroot.to_str().unwrap();
         target_rustcflags += &format!(" --sysroot {sysroot}");
@@ -141,6 +207,9 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+    // TODO(vadorovsky): Make our own BTF dump tooling as part of aya-tool and
+    // use it here to make BTF tests possible on macOS.
+    #[cfg(not(target_os = "macos"))]
     run_mode(
         target,
         "assembly",
