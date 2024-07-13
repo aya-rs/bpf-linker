@@ -12,6 +12,7 @@ use std::{
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
+    error::ErrorKind,
     Parser,
 };
 use thiserror::Error;
@@ -80,6 +81,7 @@ fn parent_and_file_name(p: PathBuf) -> anyhow::Result<(PathBuf, PathBuf)> {
 }
 
 #[derive(Debug, Parser)]
+#[command(version)]
 struct CommandLine {
     /// LLVM target triple. When not provided, the target is inferred from the inputs
     #[clap(long)]
@@ -216,7 +218,16 @@ fn main() -> anyhow::Result<()> {
         export,
         fatal_errors,
         _debug,
-    } = Parser::try_parse_from(args)?;
+    } = match Parser::try_parse_from(args) {
+        Ok(command_line) => command_line,
+        Err(err) => match err.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                print!("{err}");
+                return Ok(());
+            }
+            _ => return Err(err.into()),
+        },
+    };
 
     // Configure tracing.
     let _guard = {
