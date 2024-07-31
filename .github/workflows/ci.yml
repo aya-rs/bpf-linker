@@ -121,7 +121,7 @@ jobs:
           echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev
+          sudo apt -y install llvm-${{ matrix.llvm }}
           echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
@@ -152,14 +152,14 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
-        run: cargo hack check --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack check --feature-powerset
 
       - name: Build
-        run: cargo hack build --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack build --feature-powerset
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack test --feature-powerset
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
