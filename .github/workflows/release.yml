@@ -3,27 +3,22 @@ name: Release
 on:
   release:
     types: [published]
+    
+env:
+  LLVM_SHA: 0b5eb7ba7bd796fb39c8bb6acd9ef6c140f28b65
+  LLVM_TARGET: x86_64-unknown-linux-musl
 
 jobs:
-  llvm:
-    uses: ./.github/workflows/llvm.yml
-
   upload-bins:
     # TODO: Build for macos someday.
     runs-on: ubuntu-22.04
-    needs: llvm
     steps:
-      - name: Restore LLVM
-        uses: actions/cache/restore@v4
-        with:
-          path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
-          fail-on-cache-miss: true
-
-      - name: Add LLVM to PATH
+      - name: Install LLVM
         run: |
-          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
-          echo "$PATH"
+          set -euxo pipefail
+          wget https://ci-artifacts.rust-lang.org/rustc-builds/${{ env.LLVM_SHA }}/rust-dev-nightly-${{ env.LLVM_TARGET }}.tar.xz
+          tar -xpf rust-dev-nightly-${{ env.LLVM_TARGET }}.tar.xz --strip -C /opt
+          echo /opt/rust-dev/bin >> $GITHUB_PATH
 
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
