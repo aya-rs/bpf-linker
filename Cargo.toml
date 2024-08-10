@@ -54,3 +54,4 @@ debug = true
 
 [patch.crates-io]
 compiletest_rs = { git = "https://github.com/Manishearth/compiletest-rs.git" }
+llvm-sys = { git = "https://gitlab.com/vadorovsky/llvm-sys.rs.git", branch = "fix-musl" }
