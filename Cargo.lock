@@ -81,7 +81,7 @@ dependencies = [
  "cargo_metadata",
  "libc",
  "libloading",
- "llvm-sys 191.0.0-rc1",
+ "llvm-sys",
  "once_cell",
  "prettyplease",
  "quote",
@@ -112,7 +112,7 @@ dependencies = [
  "compiletest_rs",
  "gimli",
  "libc",
- "llvm-sys 180.0.0",
+ "llvm-sys",
  "log",
  "regex",
  "rustc-build-sysroot",
@@ -444,20 +444,6 @@ name = "linux-raw-sys"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
-
-[[package]]
-name = "llvm-sys"
-version = "180.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "778fa5fa02e32728e718f11eec147e6f134137399ab02fd2c13d32476337affa"
-dependencies = [
- "anyhow",
- "cc",
- "lazy_static",
- "libc",
- "regex-lite",
- "semver",
-]
 
 [[package]]
 name = "llvm-sys"

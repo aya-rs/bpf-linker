@@ -55,12 +55,9 @@ jobs:
         rust:
           - stable
           - beta
-          # TODO: unpin nightly. There was a regression in
-          # https://github.com/rust-lang/rust/compare/1cec373f6...becebb315 that causes
-          # tests/btf/assembly/anon_struct_c.rs to fail to link.
-          - nightly-2024-04-16
+          - nightly
         llvm:
-          - 18
+          - 19
           - source
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
     needs: llvm
@@ -121,7 +118,20 @@ jobs:
           echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev
+          # TODO(vadorovsky): Remove the requirement of libpolly.
+          #
+          # Packages from apt.llvm.org are being built all at once, with one
+          # cmake build with superset of options, then different binaries and
+          # libraries are being included in different packages.
+          #
+          # That results in `llvm-config --libname --link-static` mentioning
+          # libpolly, even if it's not installed. The output of that command is
+          # being used in build.rs of llvm-sys, so building llvm-sys on such
+          # system is complaining about lack of libpolly.
+          #
+          # Hopefully that nightmare goes away once we switch to binstalls and
+          # ditch the system LLVM option.
+          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
           echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
@@ -152,14 +162,14 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
-        run: cargo hack check --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack check --feature-powerset
 
       - name: Build
-        run: cargo hack build --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack build --feature-powerset
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset --features llvm-sys/force-dynamic
+        run: cargo hack test --feature-powerset
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
@@ -170,7 +180,7 @@ jobs:
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features llvm-sys/force-dynamic
+        run: cargo install --path . --no-default-features
 
       # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
       - name: Download debian kernels
