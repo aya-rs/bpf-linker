@@ -49,6 +49,8 @@ jobs:
 
   build:
     runs-on: ubuntu-22.04
+    container:
+      image: alpine:3.20
     strategy:
       fail-fast: false
       matrix:
@@ -56,10 +58,9 @@ jobs:
           - stable
           - beta
           - nightly
-        llvm:
-          - 19
-          - source
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+        target:
+          - x86_64-unknown-linux-musl
+    name: rustc=${{ matrix.rust }} target=${{ matrix.target }}
     needs: llvm
 
     env:
@@ -67,6 +68,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          apk update
+          apk add bash bpftool clang curl git libgcc libstdc++-dev musl-dev tar
 
       - name: Install Rust ${{ matrix.rust }}
         if: matrix.rust != 'nightly'
@@ -81,7 +88,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: rust-src
           # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
-          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
 
@@ -91,51 +98,26 @@ jobs:
       - name: Build (default features, no system LLVM)
         run: cargo build
 
-      - name: Install dependencies
-        if: matrix.rust == 'nightly'
-        # ubuntu-22.04 comes with clang 14[0] which doesn't include support for signed and 64bit
-        # enum values which was added in clang 15[1].
-        #
-        # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
-        #
-        # llvm provides llvm-objcopy which is used to build the BTF relocation tests.
-        #
-        # [0] https://github.com/actions/runner-images/blob/ubuntu22/20230724.1/images/linux/Ubuntu2204-Readme.md
-        #
-        # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
-        run: |
-          set -euxo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt update
-          sudo apt -y install clang gcc-multilib
-
-      - name: Install LLVM
-        if: matrix.llvm != 'source'
-        run: |
-          set -euxo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
-
-          sudo apt update
-          # TODO(vadorovsky): Remove the requirement of libpolly.
-          #
-          # Packages from apt.llvm.org are being built all at once, with one
-          # cmake build with superset of options, then different binaries and
-          # libraries are being included in different packages.
-          #
-          # That results in `llvm-config --libname --link-static` mentioning
-          # libpolly, even if it's not installed. The output of that command is
-          # being used in build.rs of llvm-sys, so building llvm-sys on such
-          # system is complaining about lack of libpolly.
-          #
-          # Hopefully that nightmare goes away once we switch to binstalls and
-          # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+      # - name: Install dependencies
+      #   if: matrix.rust == 'nightly'
+      #   # ubuntu-22.04 comes with clang 14[0] which doesn't include support for signed and 64bit
+      #   # enum values which was added in clang 15[1].
+      #   #
+      #   # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
+      #   #
+      #   # llvm provides llvm-objcopy which is used to build the BTF relocation tests.
+      #   #
+      #   # [0] https://github.com/actions/runner-images/blob/ubuntu22/20230724.1/images/linux/Ubuntu2204-Readme.md
+      #   #
+      #   # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
+      #   run: |
+      #     set -euxo pipefail
+      #     wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+      #     echo deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main | sudo tee /etc/apt/sources.list.d/llvm.list
+      #     sudo apt update
+      #     sudo apt -y install clang gcc-multilib
 
       - name: Restore LLVM
-        if: matrix.llvm == 'source'
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
@@ -143,13 +125,16 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
-        if: matrix.llvm == 'source'
         run: |
           set -euxo pipefail
-          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
+          # `${{ github.workspace }}` doesn't tell the truth when running inside
+          # containers. See https://github.com/actions/runner/issues/2058
+          # None of the workarounds works here, so let's just hard-code the full
+          # path of the decompressed cache...
+          echo "/__w/bpf-linker/bpf-linker/llvm-install/bin" >> $GITHUB_PATH
           # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
           # doesn't affect behavior, but greatly reduces disk usage.
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/__w/bpf-linker/bpf-linker/llvm-install/lib" >> $GITHUB_ENV
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
@@ -169,7 +154,7 @@ jobs:
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset
+        run: cargo hack test --feature-powerset --exclude-features default,rust-llvm
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
@@ -210,6 +195,7 @@ jobs:
         working-directory: aya
         run: |
           set -euxo pipefail
+          apk add dpkg
           find test/.tmp -name '*.deb' -print0 | xargs -t -0 -I {} \
             sh -c "dpkg --fsys-tarfile {} | tar -C test/.tmp --wildcards --extract '*vmlinuz*' --file -"
 
@@ -218,5 +204,9 @@ jobs:
         working-directory: aya
         run: |
           set -euxo pipefail
-          sudo apt install -y locate qemu-system-{arm,x86}
+          sudo apk add findutils-locate qemu-system-{arm,x86}
           find test/.tmp -name 'vmlinuz-*' | RUSTFLAGS=-Cdebuginfo=line-directives-only xargs -t cargo xtask integration-test vm
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
