@@ -18,7 +18,7 @@ edition = "2021"
 [dependencies]
 # cli deps
 anyhow = "1.0.86"
-clap = { version = "4.5.15", features = ["derive"] }
+clap = { version = "4.5.16", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
@@ -27,7 +27,7 @@ tracing-tree = "0.4"
 ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.3", optional = true }
 gimli = { version = "0.31.0" }
-libc = { version = "0.2.155" }
+libc = { version = "0.2.158" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "191.0.0-rc1" }
 log = { version = "0.4.22" }
 thiserror = { version = "1.0.63" }
@@ -37,7 +37,7 @@ tracing = "0.1"
 compiletest_rs = { version = "0.10.1" }
 regex = { version = "1.10.6", default-features = false }
 rustc-build-sysroot = { version = "0.5.3", default-features = false }
-which = { version = "6.0.2", default-features = false, features = ["regex"] }
+which = { version = "6.0.3", default-features = false, features = ["regex"] }
 
 [[bin]]
 name = "bpf-linker"
