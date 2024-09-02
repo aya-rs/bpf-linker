@@ -233,7 +233,7 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
-    has_errors: bool,
+    diagnostic_handler: DiagnosticHandler,
 }
 
 impl Linker {
@@ -244,7 +244,7 @@ impl Linker {
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
-            has_errors: false,
+            diagnostic_handler: DiagnosticHandler::new(),
         }
     }
 
@@ -274,7 +274,7 @@ impl Linker {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.has_errors
+        self.diagnostic_handler.has_errors
     }
 
     fn link_modules(&mut self) -> Result<(), LinkerError> {
@@ -541,8 +541,8 @@ impl Linker {
             self.context = LLVMContextCreate();
             LLVMContextSetDiagnosticHandler(
                 self.context,
-                Some(llvm::diagnostic_handler::<Self>),
-                self as *mut _ as _,
+                Some(llvm::diagnostic_handler::<DiagnosticHandler>),
+                &mut self.diagnostic_handler as *mut _ as _,
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
@@ -555,7 +555,33 @@ impl Linker {
     }
 }
 
-impl llvm::LLVMDiagnosticHandler for Linker {
+impl Drop for Linker {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.target_machine.is_null() {
+                LLVMDisposeTargetMachine(self.target_machine);
+            }
+            if !self.module.is_null() {
+                LLVMDisposeModule(self.module);
+            }
+            if !self.context.is_null() {
+                LLVMContextDispose(self.context);
+            }
+        }
+    }
+}
+
+pub struct DiagnosticHandler {
+    pub(crate) has_errors: bool,
+}
+
+impl DiagnosticHandler {
+    pub fn new() -> Self {
+        Self { has_errors: false }
+    }
+}
+
+impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     fn handle_diagnostic(&mut self, severity: llvm_sys::LLVMDiagnosticSeverity, message: &str) {
         // TODO(https://reviews.llvm.org/D155894): Remove this when LLVM no longer emits these
         // errors.
@@ -582,22 +608,6 @@ impl llvm::LLVMDiagnosticHandler for Linker {
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSWarning => warn!("llvm: {}", message),
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSRemark => debug!("remark: {}", message),
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSNote => debug!("note: {}", message),
-        }
-    }
-}
-
-impl Drop for Linker {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.target_machine.is_null() {
-                LLVMDisposeTargetMachine(self.target_machine);
-            }
-            if !self.module.is_null() {
-                LLVMDisposeModule(self.module);
-            }
-            if !self.context.is_null() {
-                LLVMContextDispose(self.context);
-            }
         }
     }
 }
