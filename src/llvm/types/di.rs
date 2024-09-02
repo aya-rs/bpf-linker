@@ -11,9 +11,9 @@ use llvm_sys::{
     debuginfo::{
         LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
         LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+        LLVMDisposeDIBuilder, LLVMGetDINodeTag,
     },
-    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
+    prelude::{LLVMDIBuilderRef, LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
@@ -23,6 +23,8 @@ use crate::llvm::{
         LLVMTypeWrapper,
     },
 };
+
+use super::ir::Context;
 
 /// Returns a DWARF tag for the given debug info node.
 ///
@@ -37,6 +39,32 @@ use crate::llvm::{
 /// doesn't perform any validation checks.
 unsafe fn di_node_tag(metadata_ref: LLVMMetadataRef) -> DwTag {
     DwTag(LLVMGetDINodeTag(metadata_ref))
+}
+
+pub struct DIBuilder<'ctx> {
+    di_builder_ref: LLVMDIBuilderRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl<'ctx> Drop for DIBuilder<'ctx> {
+    fn drop(&mut self) {
+        unsafe { LLVMDisposeDIBuilder(self.di_builder_ref) }
+    }
+}
+
+impl<'ctx> LLVMTypeWrapper for DIBuilder<'ctx> {
+    type Target = LLVMDIBuilderRef;
+
+    unsafe fn from_ptr(di_builder_ref: Self::Target) -> Self {
+        Self {
+            di_builder_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    fn as_ptr(&self) -> Self::Target {
+        self.di_builder_ref
+    }
 }
 
 /// Represents a source code file in debug infomation.
@@ -224,7 +252,7 @@ impl<'ctx> DIDerivedType<'ctx> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+    pub fn replace_name(&mut self, context: &Context, name: &str) -> Result<(), NulError> {
         super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
     }
 
@@ -335,7 +363,7 @@ impl<'ctx> DICompositeType<'ctx> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+    pub fn replace_name(&mut self, context: &Context, name: &str) -> Result<(), NulError> {
         super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
     }
 
@@ -427,7 +455,7 @@ impl<'ctx> DISubprogram<'ctx> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub fn replace_name(&mut self, context: LLVMContextRef, name: &str) -> Result<(), NulError> {
+    pub fn replace_name(&mut self, context: &Context, name: &str) -> Result<(), NulError> {
         super::ir::replace_name(
             self.value_ref,
             context,

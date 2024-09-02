@@ -9,7 +9,7 @@ use std::{
     str::FromStr,
 };
 
-use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+use bpf_linker::{llvm::types::ir::Context, Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
     error::ErrorKind,
@@ -281,24 +281,30 @@ fn main() -> anyhow::Result<()> {
         [.., CliOptLevel(optimize)] => optimize,
     };
 
-    let mut linker = Linker::new(LinkerOptions {
-        target,
-        cpu,
-        cpu_features,
-        inputs,
-        output,
-        output_type,
-        libs,
-        optimize,
-        export_symbols,
-        unroll_loops,
-        ignore_inline_never,
-        dump_module,
-        llvm_args,
-        disable_expand_memcpy_in_order,
-        disable_memory_builtins,
-        btf,
-    });
+    let mut context = Context::new();
+    let module = context.create_module(output.file_stem().unwrap().to_str().unwrap());
+    let mut linker = Linker::new(
+        LinkerOptions {
+            target,
+            cpu,
+            cpu_features,
+            inputs,
+            output,
+            output_type,
+            libs,
+            optimize,
+            export_symbols,
+            unroll_loops,
+            ignore_inline_never,
+            dump_module,
+            llvm_args,
+            disable_expand_memcpy_in_order,
+            disable_memory_builtins,
+            btf,
+        },
+        context,
+        module,
+    )?;
 
     linker.link()?;
 

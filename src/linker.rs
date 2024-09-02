@@ -3,29 +3,31 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
-    io,
-    io::{Read, Seek},
+    io::{self, Read, Seek},
+    mem::ManuallyDrop,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    ptr, str,
+    str,
     str::FromStr,
 };
 
 use ar::Archive;
 use llvm_sys::{
     bit_writer::LLVMWriteBitcodeToFile,
-    core::{
-        LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler, LLVMDisposeModule,
-        LLVMGetTarget,
-    },
     error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
-    prelude::{LLVMContextRef, LLVMModuleRef},
-    target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
+    target_machine::LLVMCodeGenFileType,
 };
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::llvm;
+use crate::llvm::{
+    self,
+    types::{
+        ir::{Context, Module},
+        target::{Target, TargetMachine},
+        LLVMTypeWrapper,
+    },
+};
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -224,31 +226,95 @@ pub struct LinkerOptions {
 }
 
 /// BPF Linker
-pub struct Linker {
-    options: LinkerOptions,
-    context: LLVMContextRef,
-    module: LLVMModuleRef,
-    target_machine: LLVMTargetMachineRef,
+pub struct Linker<'ctx> {
+    pub(crate) options: LinkerOptions,
+    pub(crate) context: ManuallyDrop<Context>,
+    pub(crate) module: ManuallyDrop<Module<'ctx>>,
     diagnostic_handler: DiagnosticHandler,
 }
 
-impl Linker {
-    /// Create a new linker instance with the given options.
-    pub fn new(options: LinkerOptions) -> Self {
-        Linker {
-            options,
-            context: ptr::null_mut(),
-            module: ptr::null_mut(),
-            target_machine: ptr::null_mut(),
-            diagnostic_handler: DiagnosticHandler::new(),
+fn create_target_machine(
+    options: &LinkerOptions,
+    module: &Module,
+) -> Result<TargetMachine, LinkerError> {
+    let LinkerOptions {
+        target,
+        cpu,
+        cpu_features,
+        ..
+    } = options;
+    // Here's how the output target is selected:
+    //
+    // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
+    //      the input modules are already configured for the correct output target
+    //
+    // 2) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
+    //      the input modules are configured for the *host* target, and the output target
+    //      is configured with the `--target` linker argument
+    //
+    // 3) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker
+    //      the input modules are configured for the *host* target, the output target isn't
+    //      set via `--target`, so default to `bpf` (bpfel or bpfeb depending on the host
+    //      endianness)
+    let (triple, target) = match target {
+        // case 1
+        Some(triple) => {
+            let c_triple = CString::new(triple.as_str()).unwrap();
+            (triple.as_str(), Target::from_triple(&c_triple).unwrap())
         }
+        None => {
+            let c_triple = module.target_triple();
+            let triple = c_triple.unwrap().to_str().unwrap();
+            if triple.starts_with("bpf") {
+                // case 2
+                (triple, module.target().unwrap())
+            } else {
+                // case 3.
+                info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
+                let triple = "bpf";
+                let c_triple = CString::new(triple).unwrap();
+                (triple, Target::from_triple(&c_triple).unwrap())
+            }
+        }
+    };
+    // let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.to_owned()))?;
+
+    debug!(
+        "creating target machine: triple: {} cpu: {} features: {}",
+        triple, cpu, cpu_features,
+    );
+
+    let target_machine = target
+        .create_target_machine(triple, &cpu.to_str(), &cpu_features)
+        .ok_or(LinkerError::InvalidTarget(triple.to_owned()))?;
+
+    Ok(target_machine)
+}
+
+impl<'ctx> Linker<'ctx> {
+    /// Create a new linker instance with the given options.
+    pub fn new(
+        options: LinkerOptions,
+        mut context: Context,
+        module: Module<'ctx>,
+    ) -> Result<Self, LinkerError> {
+        let mut diagnostic_handler = DiagnosticHandler::new();
+
+        context.set_diagnostic_handler(&mut diagnostic_handler);
+
+        Ok(Linker {
+            options,
+            context: ManuallyDrop::new(context),
+            module: ManuallyDrop::new(module),
+            diagnostic_handler: DiagnosticHandler::new(),
+        })
     }
 
     /// Link and generate the output code.
     pub fn link(&mut self) -> Result<(), LinkerError> {
         self.llvm_init();
         self.link_modules()?;
-        self.create_target_machine()?;
+        let mut target_machine = create_target_machine(&self.options, &self.module)?;
         if let Some(path) = &self.options.dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
         }
@@ -258,14 +324,14 @@ impl Linker {
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
-        self.optimize()?;
+        self.optimize(&mut target_machine)?;
         if let Some(path) = &self.options.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
-        self.codegen()?;
+        self.codegen(&target_machine)?;
         Ok(())
     }
 
@@ -352,7 +418,7 @@ impl Linker {
         use InputType::*;
         let bitcode = match in_type {
             Bitcode => data,
-            Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
+            Elf => match unsafe { llvm::find_embedded_bitcode(&self.context, &data) } {
                 Ok(Some(bitcode)) => bitcode,
                 Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
                 Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
@@ -365,77 +431,14 @@ impl Linker {
             Archive => panic!("nested archives not supported duh"),
         };
 
-        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
+        if unsafe { !llvm::link_bitcode_buffer(&self.context, &self.module, &bitcode) } {
             return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 
         Ok(())
     }
 
-    fn create_target_machine(&mut self) -> Result<(), LinkerError> {
-        let Self {
-            options:
-                LinkerOptions {
-                    target,
-                    cpu,
-                    cpu_features,
-                    ..
-                },
-            module,
-            target_machine,
-            ..
-        } = self;
-        // Here's how the output target is selected:
-        //
-        // 1) rustc with builtin BPF support: cargo build --target=bpf[el|eb]-unknown-none
-        //      the input modules are already configured for the correct output target
-        //
-        // 2) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker -C link-arg=--target=bpf[el|eb]
-        //      the input modules are configured for the *host* target, and the output target
-        //      is configured with the `--target` linker argument
-        //
-        // 3) rustc with no BPF support: cargo rustc -- -C linker-flavor=bpf-linker -C linker=bpf-linker
-        //      the input modules are configured for the *host* target, the output target isn't
-        //      set via `--target`, so default to `bpf` (bpfel or bpfeb depending on the host
-        //      endianness)
-        let (triple, target) = match target {
-            // case 1
-            Some(triple) => {
-                let c_triple = CString::new(triple.as_str()).unwrap();
-                (triple.as_str(), unsafe {
-                    llvm::target_from_triple(&c_triple)
-                })
-            }
-            None => {
-                let c_triple = unsafe { LLVMGetTarget(*module) };
-                let triple = unsafe { CStr::from_ptr(c_triple) }.to_str().unwrap();
-                if triple.starts_with("bpf") {
-                    // case 2
-                    (triple, unsafe { llvm::target_from_module(*module) })
-                } else {
-                    // case 3.
-                    info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
-                    let triple = "bpf";
-                    let c_triple = CString::new(triple).unwrap();
-                    (triple, unsafe { llvm::target_from_triple(&c_triple) })
-                }
-            }
-        };
-        let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.to_owned()))?;
-
-        debug!(
-            "creating target machine: triple: {} cpu: {} features: {}",
-            triple, cpu, cpu_features,
-        );
-
-        *target_machine =
-            unsafe { llvm::create_target_machine(target, triple, cpu.to_str(), cpu_features) }
-                .ok_or_else(|| LinkerError::InvalidTarget(triple.to_owned()))?;
-
-        Ok(())
-    }
-
-    fn optimize(&mut self) -> Result<(), LinkerError> {
+    fn optimize(&mut self, target_machine: &mut TargetMachine) -> Result<(), LinkerError> {
         if !self.options.disable_memory_builtins {
             self.options.export_symbols.extend(
                 ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
@@ -452,41 +455,53 @@ impl Linker {
 
         if self.options.btf {
             // if we want to emit BTF, we need to sanitize the debug information
-            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            self.sanitize_di();
         } else {
             // if we don't need BTF emission, we can strip DI
-            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            let ok = self.module.strip_debug_into();
             debug!("Stripping DI, changed={}", ok);
         }
 
+        debug!("before optimize");
         unsafe {
             llvm::optimize(
-                self.target_machine,
-                self.module,
+                target_machine,
+                &mut self.module,
                 self.options.optimize,
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
             )
         }
         .map_err(LinkerError::OptimizeError)?;
+        debug!("after optimize");
 
         Ok(())
     }
 
-    fn codegen(&mut self) -> Result<(), LinkerError> {
+    fn codegen(&mut self, target_machine: &TargetMachine) -> Result<(), LinkerError> {
         let output = CString::new(self.options.output.as_os_str().to_str().unwrap()).unwrap();
         match self.options.output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
             OutputType::LlvmAssembly => self.write_ir(&output),
-            OutputType::Assembly => self.emit(&output, LLVMCodeGenFileType::LLVMAssemblyFile),
-            OutputType::Object => self.emit(&output, LLVMCodeGenFileType::LLVMObjectFile),
+            OutputType::Assembly => {
+                debug!("emitting assembly");
+                self.emit(
+                    target_machine,
+                    &output,
+                    LLVMCodeGenFileType::LLVMAssemblyFile,
+                )
+            }
+            OutputType::Object => {
+                debug!("emitting object");
+                self.emit(target_machine, &output, LLVMCodeGenFileType::LLVMObjectFile)
+            }
         }
     }
 
     fn write_bitcode(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing bitcode to {:?}", output);
 
-        if unsafe { LLVMWriteBitcodeToFile(self.module, output.as_ptr()) } == 1 {
+        if unsafe { LLVMWriteBitcodeToFile(self.module.as_ptr(), output.as_ptr()) } == 1 {
             return Err(LinkerError::WriteBitcodeError);
         }
 
@@ -496,14 +511,32 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, output) }.map_err(LinkerError::WriteIRError)
+        unsafe { llvm::write_ir(self.module.as_ptr(), output) }.map_err(LinkerError::WriteIRError)
     }
 
-    fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
+    fn emit(
+        &mut self,
+        target_machine: &TargetMachine,
+        output: &CStr,
+        output_type: LLVMCodeGenFileType,
+    ) -> Result<(), LinkerError> {
         info!("emitting {:?} to {:?}", output_type, output);
 
-        unsafe { llvm::codegen(self.target_machine, self.module, output, output_type) }
-            .map_err(LinkerError::EmitCodeError)
+        debug!("to the moon");
+
+        unsafe {
+            llvm::codegen(
+                target_machine.as_ptr(),
+                self.module.as_ptr(),
+                output,
+                output_type,
+            )
+        }
+        .map_err(LinkerError::EmitCodeError)?;
+
+        debug!("wao");
+
+        Ok(())
     }
 
     fn llvm_init(&mut self) {
@@ -533,37 +566,27 @@ impl Linker {
         info!("LLVM command line: {:?}", args);
         unsafe {
             llvm::init(&args, "BPF linker");
+        }
 
-            self.context = LLVMContextCreate();
-            LLVMContextSetDiagnosticHandler(
-                self.context,
-                Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-                &mut self.diagnostic_handler as *mut _ as _,
-            );
+        // self.context = LLVMContextCreate();
+        // LLVMContextSetDiagnosticHandler(
+        //     self.context,
+        //     Some(llvm::diagnostic_handler::<DiagnosticHandler>),
+        //     &mut self.diagnostic_handler as *mut _ as _,
+        // );
+
+        unsafe {
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
-            self.module = llvm::create_module(
-                self.options.output.file_stem().unwrap().to_str().unwrap(),
-                self.context,
-            )
-            .unwrap();
         }
     }
 }
 
-impl Drop for Linker {
+impl<'ctx> Drop for Linker<'ctx> {
     fn drop(&mut self) {
-        unsafe {
-            if !self.target_machine.is_null() {
-                LLVMDisposeTargetMachine(self.target_machine);
-            }
-            if !self.module.is_null() {
-                LLVMDisposeModule(self.module);
-            }
-            if !self.context.is_null() {
-                LLVMContextDispose(self.context);
-            }
-        }
+        // Ensure that `context` and `module` are dropped in correct order.
+        unsafe { ManuallyDrop::drop(&mut self.module) };
+        unsafe { ManuallyDrop::drop(&mut self.context) };
     }
 }
 

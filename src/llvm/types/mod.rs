@@ -1,5 +1,6 @@
 pub mod di;
 pub mod ir;
+pub mod target;
 
 pub trait LLVMTypeWrapper {
     type Target: ?Sized;
