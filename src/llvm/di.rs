@@ -26,7 +26,6 @@ pub struct DISanitizer {
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
-    item_stack: Vec<Item>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types: Vec<String>,
 }
@@ -66,7 +65,6 @@ impl DISanitizer {
             module,
             builder: unsafe { LLVMCreateDIBuilder(module) },
             visited_nodes: HashSet::new(),
-            item_stack: Vec::new(),
             replace_operands: HashMap::new(),
             skipped_types: Vec::new(),
         }
@@ -249,8 +247,6 @@ impl DISanitizer {
             return;
         }
 
-        self.item_stack.push(item.clone());
-
         if let Value::MDNode(mdnode) = value.clone() {
             self.visit_mdnode(mdnode)
         }
@@ -285,8 +281,6 @@ impl DISanitizer {
                 }
             }
         }
-
-        let _ = self.item_stack.pop().unwrap();
     }
 
     pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
