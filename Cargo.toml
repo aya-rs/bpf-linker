@@ -17,8 +17,8 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-anyhow = "1.0.86"
-clap = { version = "4.5.16", features = ["derive"] }
+anyhow = "1.0.87"
+clap = { version = "4.5.17", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
