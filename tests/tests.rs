@@ -141,6 +141,12 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+
+    // bpftool doesn't work on macOS, skip the tests requiring it.
+    //
+    // TODO(vadorovsky): Make our own BTF dump tooling as part of aya-tool and
+    // use it here to make BTF tests possible on macOS.
+    #[cfg(not(target_os = "macos"))]
     run_mode(
         target,
         "assembly",

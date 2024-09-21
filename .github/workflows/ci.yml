@@ -48,8 +48,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
-    # We don't use ubuntu-latest because we care about the apt packages available.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,41 +56,67 @@ jobs:
           - stable
           - beta
           - nightly
-        llvm:
-          - 19
-          - source
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+        # We don't use ubuntu-latest because we care about the apt packages available.
+        target:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            target-llvm: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+            target-llvm: x86_64-apple-darwin
+          # We use the GNU builds of LLVM both for GNU and musl builds of
+          # bpf-linker - it doesn't affect the type of libc being picked by
+          # Cargo and musl Rust toolchains come with their own copies of
+          # libc.a.
+          - os: ubuntu-22.04
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user
+            target: aarch64-unknown-linux-gnu
+            target-llvm: aarch64-linux-gnu
+          - os: ubuntu-22.04
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross musl-dev qemu-user
+            target: aarch64-unknown-linux-musl
+            target-llvm: aarch64-linux-gnu
+          - os: ubuntu-22.04
+            packages: gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libc6-dev-riscv64-cross qemu-user
+            target: riscv64gc-unknown-linux-gnu
+            target-llvm: riscv64-linux-gnu
+          - os: ubuntu-22.04
+            packages:
+            target: x86_64-unknown-linux-gnu
+            target-llvm: x86_64-linux-gnu
+          - os: ubuntu-22.04
+            packages:
+            target: x86_64-unknown-linux-musl
+            target-llvm: x86_64-linux-gnu
+    name: rustc=${{ matrix.rust }} target=${{ matrix.target.target }}
     needs: llvm
 
     env:
+      BPF_LINKER_LLVM_LIBDIR: ${{ github.workspace }}/llvm-install
+      CARGO_BUILD_TARGET: ${{ matrix.target.target }}
+      # We use the GNU sysroot as an LD path both for GNU and musl builds of
+      # bpf-linker - the user-space emulator and the path are used only for
+      # executing `llvm-config` and test binaries.
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/riscv64-linux-gnu
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/riscv64-linux-gnu
       RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust ${{ matrix.rust }}
-        if: matrix.rust != 'nightly'
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
-
-      - name: Install Rust ${{ matrix.rust }}
-        if: matrix.rust == 'nightly'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
           components: rust-src
+          targets: ${{ matrix.target.target }}
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check (default features, no system LLVM)
-        run: cargo check
-
-      - name: Build (default features, no system LLVM)
-        run: cargo build
-
-      - name: Install prerequisites
-        if: matrix.rust == 'nightly'
+      - name: Install dependencies
+        if: runner.os == 'Linux'
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
         #
@@ -103,49 +128,29 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt update
-          sudo apt -y install gcc-multilib
+          sudo apt -y install ${{ matrix.target.packages }}
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
-      - name: Install LLVM
-        if: matrix.llvm != 'source'
+      - name: Install dependencies
+        if: runner.os == 'macOS'
+        # We need system-wide LLVM only for FileCheck.
         run: |
           set -euxo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
+          brew install llvm
+          echo $(brew --prefix)/opt/llvm/bin >> $GITHUB_PATH
 
-          sudo apt update
-          # TODO(vadorovsky): Remove the requirement of libpolly.
-          #
-          # Packages from apt.llvm.org are being built all at once, with one
-          # cmake build with superset of options, then different binaries and
-          # libraries are being included in different packages.
-          #
-          # That results in `llvm-config --libname --link-static` mentioning
-          # libpolly, even if it's not installed. The output of that command is
-          # being used in build.rs of llvm-sys, so building llvm-sys on such
-          # system is complaining about lack of libpolly.
-          #
-          # Hopefully that nightmare goes away once we switch to binstalls and
-          # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+      - name: Check (default features, no system LLVM)
+        run: cargo check
+
+      - name: Build (default features, no system LLVM)
+        run: cargo build
 
       - name: Restore LLVM
-        if: matrix.llvm == 'source'
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target.target-llvm)] }}
           fail-on-cache-miss: true
-
-      - name: Add LLVM to PATH && LD_LIBRARY_PATH
-        if: matrix.llvm == 'source'
-        run: |
-          set -euxo pipefail
-          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
-          # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
-          # doesn't affect behavior, but greatly reduces disk usage.
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/llvm-install/lib" >> $GITHUB_ENV
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
