@@ -425,7 +425,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -448,8 +448,7 @@ checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
 [[package]]
 name = "llvm-sys"
 version = "191.0.0-rc1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc981f56df5430a462d0f7676913fe9e8e4c8cc4df02e3157a6e3d808f7ae443"
+source = "git+https://gitlab.com/vadorovsky/llvm-sys.rs.git?branch=cross-build#5ab38f1c1eadab8012727bce36d01c4d168fa928"
 dependencies = [
  "anyhow",
  "cc",
@@ -457,6 +456,7 @@ dependencies = [
  "libc",
  "regex-lite",
  "semver",
+ "which",
 ]
 
 [[package]]
