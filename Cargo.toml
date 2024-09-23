@@ -17,8 +17,8 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-anyhow = "1.0.87"
-clap = { version = "4.5.17", features = ["derive"] }
+anyhow = "1.0.89"
+clap = { version = "4.5.18", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
@@ -30,7 +30,7 @@ gimli = { version = "0.31.0" }
 libc = { version = "0.2.158" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "191.0.0-rc1" }
 log = { version = "0.4.22" }
-thiserror = { version = "1.0.63" }
+thiserror = { version = "1.0.64" }
 tracing = "0.1"
 
 [dev-dependencies]
