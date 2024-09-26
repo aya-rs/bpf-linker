@@ -28,7 +28,7 @@ ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.3", optional = true }
 gimli = { version = "0.31.0" }
 libc = { version = "0.2.158" }
-llvm-sys = { features = ["disable-alltargets-init"], version = "191.0.0-rc1" }
+llvm-sys = { features = ["disable-alltargets-init", "no-llvm-linking"], version = "191.0.0" }
 log = { version = "0.4.22" }
 thiserror = { version = "1.0.63" }
 tracing = "0.1"
@@ -54,4 +54,3 @@ debug = true
 
 [patch.crates-io]
 compiletest_rs = { git = "https://github.com/Manishearth/compiletest-rs.git" }
-llvm-sys = { git = "https://gitlab.com/vadorovsky/llvm-sys.rs.git", branch = "cross-build" }

@@ -99,7 +99,6 @@ jobs:
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
       CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/riscv64-linux-gnu
       CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/riscv64-linux-gnu
-      LLVM_SYS_CROSS_LD_PREFIX: /usr/${{ matrix.target.target-llvm }}
       RUST_BACKTRACE: full
 
     steps:
@@ -160,6 +159,11 @@ jobs:
         run: |
           set -euxo pipefail
           echo "LLVM_SYS_191_PREFIX=${{ github.workspace }}/llvm-install" >> $GITHUB_ENV
+          rustflags="-L ${{ github.workspace }}/llvm-install/lib "
+          rustflags+=$(find lib/ -type f -name "*.a" -printf '%f\n' | \
+            sed -e 's/^lib//' -e 's/\.a$//' | \
+            sed 's/^/-l /' | paste -sd ' ')
+          echo "RUSTFLAGS=$rustflags" >> $GITHUB_ENV
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
