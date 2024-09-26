@@ -81,8 +81,6 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           components: rust-src
-          # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
-          targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-musl
 
       - uses: Swatinem/rust-cache@v2
 
@@ -180,41 +178,7 @@ jobs:
         if: matrix.rust == 'nightly'
         run: cargo install --path . --no-default-features
 
-      # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
-      - name: Download debian kernels
-        if: matrix.rust == 'nightly' && runner.arch == 'ARM64'
-        working-directory: aya
-        run: |
-          set -euxo pipefail
-          mkdir -p test/.tmp/debian-kernels/arm64
-          printf '%s\0' \
-            linux-image-6.1.0-16-cloud-arm64-unsigned_6.1.67-1_arm64.deb \
-          | xargs -0 -t -P0 -I {} wget -nd -nv -P test/.tmp/debian-kernels/arm64 ftp://ftp.us.debian.org/debian/pool/main/l/linux/{}
-
-      # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
-      - name: Download debian kernels
-        if: matrix.rust == 'nightly' && runner.arch == 'X64'
-        working-directory: aya
-        run: |
-          set -euxo pipefail
-          mkdir -p test/.tmp/debian-kernels/amd64
-          printf '%s\0' \
-            linux-image-6.1.0-16-cloud-amd64-unsigned_6.1.67-1_amd64.deb \
-          | xargs -0 -t -P0 -I {} wget -nd -nv -P test/.tmp/debian-kernels/amd64 ftp://ftp.us.debian.org/debian/pool/main/l/linux/{}
-
-      # TODO: Remove this and run the integration tests on the local machine when they pass on 5.15.
-      - name: Extract debian kernels
-        if: matrix.rust == 'nightly'
-        working-directory: aya
-        run: |
-          set -euxo pipefail
-          find test/.tmp -name '*.deb' -print0 | xargs -t -0 -I {} \
-            sh -c "dpkg --fsys-tarfile {} | tar -C test/.tmp --wildcards --extract '*vmlinuz*' --file -"
-
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
         working-directory: aya
-        run: |
-          set -euxo pipefail
-          sudo apt install -y locate qemu-system-{arm,x86}
-          find test/.tmp -name 'vmlinuz-*' | RUSTFLAGS=-Cdebuginfo=line-directives-only xargs -t cargo xtask integration-test vm
+        run: cargo xtask integration-test local
