@@ -1,7 +1,9 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs,
+    fs::{self, remove_file, File},
+    io::Write,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -20,7 +22,45 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
     sysroot: Option<&Path>,
     cfg: Option<F>,
 ) {
-    let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
+    let bpf_linker_exe = env!("CARGO_BIN_EXE_bpf-linker");
+    let bpf_linker = match env::var_os("BPF_LINKER_QEMU") {
+        // If we are running tests in a user-space emulator, we need to run
+        // bpf-linker in it as well.
+        Some(qemu) => {
+            // Create a wrapper script which runs bpf-linker with qemu.
+            //
+            // Unfortunately, passing
+            // `-C linker='qemu-aarch64 ./target/aarch64-uknown-linux-musl/debug/bpf-linker'`
+            // doesn't work, `compiletest_rs::Config` is going to split this
+            // argument because of a whitespace.
+            let script_path = Path::new("/tmp/qemu_bpf_linker_wrapper.sh");
+            if script_path.exists() {
+                remove_file(script_path).expect("Could not remove the QEMU wrapper file");
+            }
+            // It's an environment variable set by us. Safe to assume it's UTF-8.
+            let qemu = qemu.to_string_lossy();
+            let script_content = format!(
+                r#"#!/bin/bash
+{qemu} "{bpf_linker_exe}" "$@"
+"#
+            );
+            let mut file =
+                File::create(script_path).expect("Failed to create the QEMU wrapper file");
+            file.write_all(script_content.as_bytes())
+                .expect("Failed to write to the QEMU wrapper file");
+            let metadata = file
+                .metadata()
+                .expect("Failed to retrieve the metadata of the QEMU wrapper file");
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            file.set_permissions(permissions)
+                .expect("Failed to set permissions of the QEMU wrapper file");
+
+            script_path.to_str().unwrap()
+        }
+        None => env!("CARGO_BIN_EXE_bpf-linker"),
+    };
+    let mut target_rustcflags = format!("-C linker={}", bpf_linker);
     if let Some(sysroot) = sysroot {
         let sysroot = sysroot.to_str().unwrap();
         target_rustcflags += &format!(" --sysroot {sysroot}");
@@ -136,6 +176,8 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+
+    #[cfg(not(target_os = "macos"))]
     run_mode(
         target,
         "assembly",

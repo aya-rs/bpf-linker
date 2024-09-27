@@ -33,6 +33,9 @@ log = { version = "0.4.22" }
 thiserror = { version = "1.0.64" }
 tracing = "0.1"
 
+[build-dependencies]
+target-lexicon = { workspace = true }
+
 [dev-dependencies]
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.0", default-features = false }
@@ -54,3 +57,22 @@ debug = true
 
 [patch.crates-io]
 compiletest_rs = { git = "https://github.com/Manishearth/compiletest-rs.git" }
+
+[workspace]
+members = [
+    "xtask",
+]
+
+[workspace.package]
+version = "0.9.13"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aya-rs/bpf-linker"
+edition = "2021"
+
+[workspace.dependencies]
+anyhow = "1.0.89"
+clap = { version = "4.5", features = ["derive"] }
+target-lexicon = "0.12"
+thiserror = { version = "1.0.64" }
+uuid = { version = "1.10", features = ["v4"] }
+which = "6.0"
