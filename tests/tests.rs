@@ -1,7 +1,9 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs,
+    fs::{self, File},
+    io::Write,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -20,7 +22,37 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
     sysroot: Option<&Path>,
     cfg: Option<F>,
 ) {
-    let mut target_rustcflags = format!("-C linker={}", env!("CARGO_BIN_EXE_bpf-linker"));
+    let bpf_linker_exe = env!("CARGO_BIN_EXE_bpf-linker");
+    let bpf_linker = match env::var_os("BPF_LINKER_QEMU") {
+        // If we are running tests in a user-space emulator, we need to run
+        // bpf-linker in it as well.
+        Some(qemu) => {
+            // Create a wrapper script which runs bpf-linker with qemu.
+            //
+            // Unfortunately, passing
+            // `-C linker='qemu-aarch64 ./target/aarch64-uknown-linux-musl/debug/bpf-linker'`
+            // doesn't work, `compiletest_rs::Config` is going to split this
+            // argument because of a whitespace.
+            let script_path = Path::new("/tmp/qemu_bpf_linker_wrapper.sh");
+            // It's an environment variable set by us. Safe to assume it's UTF-8.
+            let qemu = qemu.to_string_lossy();
+            let script_content = format!(
+                r#"#!/bin/bash
+{qemu} "{bpf_linker_exe}" "$@"
+"#
+            );
+            let mut file = File::create(script_path).unwrap();
+            file.write_all(script_content.as_bytes()).unwrap();
+            let metadata = file.metadata().unwrap();
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            file.set_permissions(permissions).unwrap();
+
+            script_path.to_str().unwrap()
+        }
+        None => env!("CARGO_BIN_EXE_bpf-linker"),
+    };
+    let mut target_rustcflags = format!("-C linker={}", bpf_linker);
     if let Some(sysroot) = sysroot {
         let sysroot = sysroot.to_str().unwrap();
         target_rustcflags += &format!(" --sysroot {sysroot}");
@@ -93,6 +125,11 @@ where
     }
 }
 
+// bpftool doesn't work on macOS, skip the tests requiring it.
+//
+// TODO(vadorovsky): Make our own BTF dump tooling as part of aya-tool and
+// use it here to make BTF tests possible on macOS.
+#[cfg(not(target_os = "macos"))]
 fn btf_dump(src: &Path, dst: &Path) {
     let dst = std::fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
@@ -136,6 +173,8 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+
+    #[cfg(not(target_os = "macos"))]
     run_mode(
         target,
         "assembly",

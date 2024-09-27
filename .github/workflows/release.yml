@@ -9,15 +9,63 @@ jobs:
     uses: ./.github/workflows/llvm.yml
 
   upload-bins:
-    # TODO: Build for macos someday.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            target: aarch64-apple-darwin
+            target-llvm: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+            target-llvm: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+            target: aarch64-unknown-linux-gnu
+            target-llvm: aarch64-linux-gnu
+          - os: ubuntu-22.04
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+            target: aarch64-unknown-linux-musl
+            target-llvm: aarch64-linux-gnu
+          - os: ubuntu-22.04
+            packages: gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libc6-dev-riscv64-cross
+            target: riscv64-unknown-linux-gnu
+            target-llvm: riscv64-linux-gnu
+          - os: ubuntu-22.04
+            packages:
+            target: x86_64-unknown-linux-gnu
+            target-llvm: x86_64-linux-gnu
+          - os: ubuntu-22.04
+            packages:
+            target: x86_64-unknown-linux-musl
+            target-llvm: x86_64-linux-gnu
     needs: llvm
+
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+      # We use the GNU sysroot as an LD path both for GNU and musl builds of
+      # bpf-linker - the user-space emulator and the path are used only for
+      # executing `llvm-config` and test binaries.
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+      LLVM_SYS_CROSS_LD_PREFIX: /usr/${{ matrix.target-llvm }}
+      RUST_BACKTRACE: full
+
     steps:
+      - name: Install Tools
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          sudo apt update
+          sudo apt -y install ${{ matrix.packages }}
+
       - name: Restore LLVM
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target-llvm)] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH

@@ -1,0 +1,30 @@
+FROM docker.io/debian:bookworm
+
+ENV PATH="/root/.cargo/bin:/usr/lib/llvm-15/bin:${PATH}"
+
+# Even though we are using clang as a C compiler, we need the libgcc_s and
+# libstdc++.
+RUN dpkg --add-architecture arm64 \
+    && apt update \
+    && apt install -y \
+        build-essential \
+        clang-15 \
+        cmake \
+        curl \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        libc6-dev-arm64-cross \
+        libzstd-dev \
+        libzstd-dev:arm64 \
+        lld-15 \
+        ninja-build \
+        qemu-user \
+        zlib1g-dev \
+        zlib1g-dev:arm64 \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && rustup toolchain install stable --component rust-src \
+    && rustup toolchain install nightly --component rust-src \
+    && rustup target add aarch64-unknown-linux-gnu \
+    && rustup +nightly target add aarch64-unknown-linux-gnu \
+    && cargo install btfdump \
+    && rm -rf /var/lib/apt/lists/*

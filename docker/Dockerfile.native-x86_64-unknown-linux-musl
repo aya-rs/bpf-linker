@@ -1,0 +1,28 @@
+FROM docker.io/gentoo/stage3:musl-llvm
+
+ENV PATH="/root/.cargo/bin:/usr/lib/llvm/18/bin:${PATH}"
+# Enable static libraries for installed packages (zstd, zlib etc.).
+ENV USE="static-libs"
+
+# Install llvm-libgcc, which is a drop-in replacement for libgcc_s runtime
+# library. It's needed by Rust binaries provided by rustup[0][1].
+#
+# [0] https://github.com/rust-lang/rust/issues/119504
+# [1] https://github.com/rust-lang/rustup/issues/2213#issuecomment-1888615413
+RUN emerge --sync --quiet \
+    && emerge \
+        app-arch/zstd \
+        app-eselect/eselect-repository \
+        dev-vcs/git \
+        sys-libs/zlib \
+    && eselect repository add vadorovsky git https://gitlab.com/vadorovsky/overlay \
+    && emerge --sync --quiet \
+    && emerge sys-libs/llvm-libgcc \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && rustup toolchain install stable --component rust-src \
+    && rustup toolchain install nightly --component rust-src \
+    && cargo install btfdump \
+    && rm -rf \
+        /var/cache/binpkgs/* \
+        /var/cache/distfiles/* \
+        /var/tmp/portage/*

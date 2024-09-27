@@ -1,0 +1,76 @@
+FROM docker.io/gentoo/stage3:musl-llvm
+
+ENV PATH="/root/.cargo/bin:/usr/lib/llvm/18/bin:${PATH}"
+# Install only aarch64 user-space wrapper when installing app-emulation/qemu.
+ENV QEMU_USER_TARGETS="aarch64"
+# Enable static libraries for installed packages (zstd, zlib etc.).
+ENV USE="static-libs"
+
+# Use clang-musl-overlay patches[0], needed for QEMU to build successfully.
+#
+# Install llvm-libgcc, which is a drop-in replacement for libgcc_s runtime
+# library. It's needed by Rust binaries provided by rustup[1][2]. It's provided
+# in vadorovsky's private overlay.
+#
+# Create a cross sysroot using crossdev[3], which also creates wrappers for:
+# - clang, which can be used for compiling C/C++ projects without doing the
+#   whole dance with `--target` and `--sysroot` arguments.
+# - emerge, which let you install packages in the cross sysroot.
+#
+# Unpack the stage3 tarball into that sysroot to avoiding compilation of the
+# whole base system from scratch. Otherwise,
+# `emerge-aarch64-unknown-linux-musl @system` would take an eternity to run on
+# free GitHub runners.
+#
+# Patch the clang config to use libc++ and libunwind, before the necessary fix
+# in crossdev gets merged[4].
+#
+# [0] https://github.com/clang-musl-overlay/gentoo-patchset
+# [1] https://github.com/rust-lang/rust/issues/119504
+# [2] https://github.com/rust-lang/rustup/issues/2213#issuecomment-1888615413
+# [3] https://wiki.gentoo.org/wiki/Crossdev
+# [4] https://github.com/gentoo/crossdev/pull/23
+RUN emerge --sync --quiet \
+    && emerge \
+        app-eselect/eselect-repository \
+        dev-vcs/git \
+        sys-devel/crossdev \
+    && eselect repository add vadorovsky git \
+        https://gitlab.com/vadorovsky/overlay \
+    && git clone --depth 1 \
+        https://github.com/clang-musl-overlay/gentoo-patchset \
+        /etc/portage/patches \
+    && emerge --sync --quiet \
+    && emerge \
+        app-emulation/qemu \
+        sys-libs/llvm-libgcc \
+    && eselect repository create crossdev \
+    && crossdev --llvm --target aarch64-unknown-linux-musl \
+    && curl -L "https://ftp-osl.osuosl.org/pub/gentoo/releases/arm64/autobuilds/current-stage3-arm64-musl-llvm/$(\
+        curl -L "https://ftp-osl.osuosl.org/pub/gentoo/releases/arm64/autobuilds/current-stage3-arm64-musl-llvm/latest-stage3-arm64-musl-llvm.txt" | \
+        grep tar.xz | cut -d ' ' -f 1)" | \
+        tar -xJpf - -C /usr/aarch64-unknown-linux-musl --exclude=dev --skip-old-files \
+    && ln -s \
+        /etc/portage/repos.conf \
+        /usr/aarch64-unknown-linux-musl/etc/portage/repos.conf \
+    && PORTAGE_CONFIGROOT=/usr/aarch64-unknown-linux-musl eselect profile set \
+        default/linux/arm64/23.0/musl/llvm \
+    && sed -i -e "s/--unwindlib=none/--unwindlib=libunwind/" \
+        /etc/clang/cross/aarch64-unknown-linux-musl.cfg \
+    && echo "--stdlib=libc++" >> \
+        /etc/clang/cross/aarch64-unknown-linux-musl.cfg \
+    && aarch64-unknown-linux-musl-emerge --sync --quiet \
+    && aarch64-unknown-linux-musl-emerge \
+        app-arch/zstd \
+        sys-libs/llvm-libgcc \
+        sys-libs/zlib \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && rustup toolchain install stable --component rust-src \
+    && rustup toolchain install nightly --component rust-src \
+    && rustup target add aarch64-unknown-linux-musl \
+    && rustup +nightly target add aarch64-unknown-linux-musl \
+    && cargo install btfdump \
+    && rm -rf \
+        /var/cache/binpkgs/* \
+        /var/cache/distfiles/* \
+        /var/tmp/portage/*

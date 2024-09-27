@@ -1,0 +1,19 @@
+FROM docker.io/debian:bookworm
+
+ENV PATH="/root/.cargo/bin:/usr/lib/llvm-15/bin:${PATH}"
+
+RUN apt update \
+    && apt install -y \
+        build-essential \
+        clang-15 \
+        cmake \
+        curl \
+        libzstd-dev \
+        lld-15 \
+        ninja-build \
+        zlib1g-dev \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && rustup toolchain install stable --component rust-src \
+    && rustup toolchain install nightly --component rust-src \
+    && cargo install btfdump \
+    && rm -rf /var/lib/apt/lists/*
