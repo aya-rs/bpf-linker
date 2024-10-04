@@ -1,0 +1,37 @@
+FROM docker.io/gentoo/stage3:musl-llvm
+
+ARG BASE_URL="https://ftp-osl.osuosl.org/pub/gentoo/releases/arm64/autobuilds/current-stage3-arm64-musl-llvm"
+ARG GENTOO_ARCH="arm64"
+ARG TRIPLE="aarch64-gentoo-linux-musl"
+
+# Install llvm-libgcc, which is a drop-in replacement for libgcc_s runtime
+# library, both on the main system and in the cross sysroot. It's needed by
+# Rust binaries provided by rustup[0][1].
+#
+# Create a cross sysroot using crossdev[2], which also creates wrappers for:
+# - clang, which can be used for compiling C/C++ projects without doing the
+#   whole dance with `--target` and `--sysroot` arguments.
+# - emerge, which let you install packages in the cross sysroot.
+#
+# Unpack the stage3 tarball into that sysroot to avoiding compilation of the
+# whole toolchain (clang, compiler-rt, libunwind) from scratch.
+#
+# [0] https://github.com/rust-lang/rust/issues/119504
+# [1] https://github.com/rust-lang/rustup/issues/2213#issuecomment-1888615413
+# [2] https://wiki.gentoo.org/wiki/Crossdev
+RUN emerge --sync --quiet && \
+    emerge \
+        app-eselect/eselect-repository \
+        dev-vcs/git && \
+        sys-devel/crossdev && \
+    eselect repository create crossdev && \
+    crossdev --llvm --target ${TRIPLE} && \
+    curl -L "$BASE_URL/$(curl -L "$BASE_URL/latest-stage3-arm64-musl-llvm.txt" | \
+        grep tar.xz | cut -d ' ' -f 1)" | \
+        tar -xJpf - -C /usr/aarch64-gentoo-linux-musl --exclude=dev --skip-old-files && \
+    ${TRIPLE}-emerge --sync --quiet && \
+    ${TRIPLE}-emerge sys-libs/llvm-libgcc \
+    rm -rf \
+        /var/cache/binpkgs/* \
+        /var/cache/distfiles/* \
+        /var/tmp/portage/*
