@@ -93,6 +93,11 @@ where
     }
 }
 
+// bpftool doesn't work on macOS, skip the tests requiring it.
+//
+// TODO(vadorovsky): Make our own BTF dump tooling as part of aya-tool and
+// use it here to make BTF tests possible on macOS.
+#[cfg(not(target_os = "macos"))]
 fn btf_dump(src: &Path, dst: &Path) {
     let dst = std::fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
@@ -141,6 +146,8 @@ fn compile_test() {
         Some(&directory),
         None::<fn(&mut compiletest_rs::Config)>,
     );
+
+    #[cfg(not(target_os = "macos"))]
     run_mode(
         target,
         "assembly",
