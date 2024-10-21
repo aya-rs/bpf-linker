@@ -29,6 +29,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-// CHECK: [16] STRUCT '(anon)' size=8 vlen=2
-// CHECK-NEXT: 'ayy' type_id=17 bits_offset=0
-// CHECK-NEXT: 'lmao' type_id=17 bits_offset=32
+// CHECK: <STRUCT> '<anon>' sz:8 n:2
+// CHECK-NEXT: 'ayy' off:0 --> [17]
+// CHECK-NEXT: 'lmao' off:32 --> [17]

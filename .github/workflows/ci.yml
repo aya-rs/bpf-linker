@@ -90,6 +90,10 @@ jobs:
       - name: Build (default features, no system LLVM)
         run: cargo build
 
+      - name: Install btfdump
+        if: matrix.rust == 'nightly'
+        run: cargo install btfdump
+
       - name: Install prerequisites
         if: matrix.rust == 'nightly'
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
