@@ -37,5 +37,5 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-// CHECK: [9] TYPEDEF 'incognito' type_id=10
-// CHECK: [10] STRUCT '(anon)' size=4 vlen=1
+// CHECK: <TYPEDEF> 'incognito' --> [10]
+// CHECK: <STRUCT> '<anon>' sz:4 n:1

@@ -96,17 +96,12 @@ where
 fn btf_dump(src: &Path, dst: &Path) {
     let dst = std::fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
-    let mut bpftool = Command::new("bpftool");
-    bpftool
-        .arg("btf")
-        .arg("dump")
-        .arg("file")
-        .arg(src)
-        .stdout(dst);
-    let status = bpftool
+    let mut btf = Command::new("btf");
+    btf.arg("dump").arg(src).stdout(dst);
+    let status = btf
         .status()
-        .unwrap_or_else(|err| panic!("could not run {bpftool:?}: {err}",));
-    assert_eq!(status.code(), Some(0), "{bpftool:?} failed");
+        .unwrap_or_else(|err| panic!("could not run {btf:?}: {err}",));
+    assert_eq!(status.code(), Some(0), "{btf:?} failed");
 }
 
 #[test]

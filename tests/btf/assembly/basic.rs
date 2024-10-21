@@ -14,5 +14,5 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-// We check the BTF dump out of bpftool
-// CHECK: FUNC 'connect' type_id=1 linkage=global
+// We check the BTF dump out of btfdump
+// CHECK: <FUNC> 'connect' --> global

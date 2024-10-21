@@ -35,16 +35,16 @@ fn inline_function_2(v: u8) -> u8 {
 }
 
 // #[no_mangle] functions keep linkage=global
-// CHECK: FUNC 'local_no_mangle' type_id={{[0-9]+}} linkage=global
+// CHECK: <FUNC> 'local_no_mangle' --> global [{{[0-9]+}}
 
 // check that parameter names are preserved
-// CHECK: FUNC_PROTO
+// CHECK: <FUNC_PROTO>
 // CHECK-NEXT: _arg1
 // CHECK-NEXT: _arg2
 
 // public functions get static linkage
-// CHECK: FUNC '{{.*}}local_public{{.*}}' type_id={{[0-9]+}} linkage=static
-// CHECK: FUNC '{{.*}}dep_public_symbol{{.*}}' type_id={{[0-9]+}} linkage=static
+// CHECK: <FUNC> '{{.*}}local_public{{.*}}' --> static
+// CHECK: <FUNC> '{{.*}}dep_public_symbol{{.*}}' --> static
 
 // #[no_mangle] is honored for dep functions
-// CHECK: FUNC 'dep_no_mangle' type_id={{[0-9]+}} linkage=global
+// CHECK: <FUNC> 'dep_no_mangle' --> global
