@@ -3,16 +3,53 @@ name: LLVM
 on:
   workflow_call:
     outputs:
-      cache-key:
-        value: ${{ jobs.llvm.outputs.cache-key }}
+      cache-key-aarch64-apple-darwin:
+        value: ${{ jobs.llvm.outputs.cache-key-aarch64-apple-darwin }}
+      cache-key-x86_64-apple-darwin:
+        value: ${{ jobs.llvm.outputs.cache-key-x86_64-apple-darwin }}
+      cache-key-aarch64-unknown-linux-gnu:
+        value: ${{ jobs.llvm.outputs.cache-key-aarch64-unknown-linux-gnu }}
+      cache-key-aarch64-unknown-linux-musl:
+        value: ${{ jobs.llvm.outputs.cache-key-aarch64-unknown-linux-musl }}
+      cache-key-riscv64gc-unknown-linux-gnu:
+        value: ${{ jobs.llvm.outputs.cache-key-riscv64gc-unknown-linux-gnu }}
+      cache-key-x86_64-unknown-linux-gnu:
+        value: ${{ jobs.llvm.outputs.cache-key-x86_64-unknown-linux-gnu }}
+      cache-key-x86_64-unknown-linux-musl:
+        value: ${{ jobs.llvm.outputs.cache-key-x86_64-unknown-linux-musl }}
 
 jobs:
   llvm:
-    runs-on: ubuntu-22.04
-    name: llvm
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+          - os: ubuntu-22.04
+            target: riscv64gc-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+    name: llvm ${{ matrix.target }}
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.cache-key }}
+      cache-key-aarch64-apple-darwin: ${{ steps.cache-key.outputs.cache-key-aarch64-apple-darwin }}
+      cache-key-x86_64-apple-darwin: ${{ steps.cache-key.outputs.cache-key-x86_64-apple-darwin }}
+      cache-key-aarch64-unknown-linux-gnu: ${{ steps.cache-key.outputs.cache-key-aarch64-unknown-linux-gnu }}
+      cache-key-aarch64-unknown-linux-musl: ${{ steps.cache-key.outputs.cache-key-aarch64-unknown-linux-musl }}
+      cache-key-riscv64gc-unknown-linux-gnu: ${{ steps.cache-key.outputs.cache-key-riscv64gc-unknown-linux-gnu }}
+      cache-key-x86_64-unknown-linux-gnu: ${{ steps.cache-key.outputs.cache-key-x86_64-unknown-linux-gnu }}
+      cache-key-x86_64-unknown-linux-musl: ${{ steps.cache-key.outputs.cache-key-x86_64-unknown-linux-musl }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: ls-remote
         run: |
           set -euxo pipefail
@@ -20,82 +57,65 @@ jobs:
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
       - id: cache-key
-        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+        run: echo "cache-key-${{ matrix.target }}=llvm-${{ matrix.target }}-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
 
       - name: Cache
         id: cache-llvm
         uses: actions/cache@v4
         with:
           path: llvm-install
-          key: ${{ steps.cache-key.outputs.cache-key }}
+          key: ${{ steps.cache-key.outputs[format('cache-key-{0}', matrix.target)] }}
           lookup-only: true
 
-      - name: Install Tools
+      - name: Free disk space
+        if: steps.cache-llvm.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          sudo apt -y remove \
+            azure-cli \
+            '^aspnetcore-.*' \
+            '^dotnet-.*' \
+            firefox \
+            '^google-cloud-.*' \
+            '^google-chrome-*' \
+            '^imagemagick.*' \
+            java-common \
+            kubectl \
+            '^libmagick.*' \
+            '^libmono.*' \
+            '^libnginx.*' \
+            '^microsoft-edge.*' \
+            '^mongodb-.*' \
+            mono-devel \
+            '^mysql-.*' \
+            '^php.*' \
+            powershell \
+            '^r-.*'
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/lib/jvm \
+            /usr/local/.ghcup \
+            /usr/local/aws* \
+            /usr/local/bin/{aliyun,azcopy,bicep,helm,minikube,oc,occopy,packer,pulumi*,stack,terraform} \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/share/{chromium,powershell,vcpkg} \
+            /usr/share/dotnet || true
+          sudo docker image prune --all --force || true
+
+      - name: Install dependencies
+        if: steps.cache-llvm.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          brew install cmake lld llvm ninja
+          echo $(brew --prefix)/opt/llvm/bin >> $GITHUB_PATH
+
+      - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-            gpg --dearmor - | \
-            sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-          echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | \
-            sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
-
-          sudo apt update
-          sudo apt -y install cmake ninja-build clang lld
-
-      - name: Checkout LLVM Source
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: aya-rs/llvm-project
-          ref: ${{ steps.ls-remote.outputs.sha }}
-          path: llvm-project
-
-      - name: Configure LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        run: |
-          set -euxo pipefail
-          cmake \
-            -S llvm-project/llvm \
-            -B llvm-build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/llvm-install" \
-            -DLLVM_BUILD_LLVM_DYLIB=ON \
-            -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_ENABLE_PROJECTS= \
-            -DLLVM_ENABLE_RUNTIMES= \
-            -DLLVM_INSTALL_UTILS=ON \
-            -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DLLVM_TARGETS_TO_BUILD=BPF \
-            -DLLVM_USE_LINKER=lld
-
-      - name: Install LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        env:
-          # Create symlinks rather than copies to conserve disk space. At the time of this writing,
-          # GitHub-hosted runners have 14GB of SSD space
-          # (https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources).
-          #
-          # Since the LLVM build creates a bunch of symlinks (and this setting does not turn those
-          # into symlinks-to-symlinks), use absolute symlinks so we can distinguish the two cases.
-          CMAKE_INSTALL_MODE: ABS_SYMLINK
-        run: cmake --build llvm-build --target install
-
-      - name: Rewrite LLVM Symlinks
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        # Move targets over the symlinks that point to them.
-        #
-        # This whole dance would be simpler if CMake supported CMAKE_INSTALL_MODE=MOVE.
-        run: |
-          set -euxo pipefail
-          find llvm-install -type l -execdir sh -eux -c '
-            for link in "$@"; do
-              target=$(readlink "$link")
-              case $target in
-                /*) mv "$target" "$link" ;;
-              esac
-            done
-          ' sh {} +
+          cargo xtask build-llvm \
+            --container-tag initial \
+            --llvm-install-dir "${{ github.workspace }}/llvm-install" \
+            --target "${{ matrix.target }}"

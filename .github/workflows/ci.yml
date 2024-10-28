@@ -48,8 +48,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
-    # We don't use ubuntu-latest because we care about the apt packages available.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,10 +56,30 @@ jobs:
           - stable
           - beta
           - nightly
-        llvm:
-          - 19
-          - source
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+        # We don't use ubuntu-latest because we care about the apt packages available.
+        target:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            build-type: native
+          - os: macos-13
+            target: x86_64-apple-darwin
+            build-type: native
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            build-type: cross
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            build-type: cross
+          - os: ubuntu-22.04
+            target: riscv64gc-unknown-linux-gnu
+            build-type: cross
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            build-type: native
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            build-type: cross
+    name: rustc=${{ matrix.rust }} target=${{ matrix.target.target }}
     needs: llvm
 
     env:
@@ -85,9 +104,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check (default features, no system LLVM)
+        if: matrix.build-type == 'native'
         run: cargo check
 
       - name: Build (default features, no system LLVM)
+        if: matrix.build-type == 'native'
         run: cargo build
 
       - name: Install btfdump
@@ -95,11 +116,13 @@ jobs:
         run: cargo install btfdump
 
       - name: Install prerequisites
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && startsWith(matrix.target.target, 'x86_64')
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
         #
         # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
+        #
+        # libelf is a dependency of libbpf.
         #
         # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
         #
@@ -107,39 +130,22 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt update
-          sudo apt -y install gcc-multilib
+          sudo apt -y install gcc-multilib libelf-dev
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
-      - name: Install LLVM
-        if: matrix.llvm != 'source'
+      - name: Install prerequisites
+        if: runner.os == 'macOS'
+        # We need system-wide LLVM only for FileCheck.
         run: |
           set -euxo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
-
-          sudo apt update
-          # TODO(vadorovsky): Remove the requirement of libpolly.
-          #
-          # Packages from apt.llvm.org are being built all at once, with one
-          # cmake build with superset of options, then different binaries and
-          # libraries are being included in different packages.
-          #
-          # That results in `llvm-config --libname --link-static` mentioning
-          # libpolly, even if it's not installed. The output of that command is
-          # being used in build.rs of llvm-sys, so building llvm-sys on such
-          # system is complaining about lack of libpolly.
-          #
-          # Hopefully that nightmare goes away once we switch to binstalls and
-          # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+          brew install llvm
+          echo $(brew --prefix)/opt/llvm/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
-        if: matrix.llvm == 'source'
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target.target)] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
@@ -160,16 +166,50 @@ jobs:
           cargo clean -p llvm-sys --release
 
       - uses: taiki-e/install-action@cargo-hack
+        if: matrix.build-type == 'native'
+
+      # Run cargo commands with `cargo hack` for native targets.
+      # Run cargo commands with `xtask` for all targets.
 
       - name: Check
+        if: matrix.build-type == 'native'
         run: cargo hack check --feature-powerset
 
+      - name: Check (xtask)
+        run: |
+          cargo xtask check \
+            --container-engine podman \
+            --container-tag initial \
+            --llvm-install-dir "${{ github.workspace }}/llvm-install" \
+            --pull always \
+            --target ${{ matrix.target.target }}
+
       - name: Build
+        if: matrix.build-type == 'native'
         run: cargo hack build --feature-powerset
 
+      - name: Build (xtask)
+        run: |
+          cargo xtask build \
+            --container-engine podman \
+            --container-tag initial \
+            --llvm-install-dir "${{ github.workspace }}/llvm-install" \
+            --pull always \
+            --target ${{ matrix.target.target }}
+
       - name: Test
-        if: matrix.rust == 'nightly'
+        if: matrix.build-type == 'native' && matrix.rust == 'nightly'
         run: cargo hack test --feature-powerset
+
+      - name: Test (xtask)
+        if: matrix.rust == 'nightly'
+        run: |
+          cargo xtask test \
+            --container-engine podman \
+            --container-tag initial \
+            --llvm-install-dir "${{ github.workspace }}/llvm-install" \
+            --pull always \
+            --target ${{ matrix.target.target }}
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
@@ -179,10 +219,16 @@ jobs:
           submodules: recursive
 
       - name: Install
-        if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && matrix.target.target == 'x86_64-unknown-linux-musl'
+        run: |
+          cargo xtask install \
+            --container-engine podman \
+            --container-tag initial \
+            --llvm-install-dir "${{ github.workspace }}/llvm-install" \
+            --pull always \
+            --target ${{ matrix.target.target }}
 
       - name: Run aya integration tests
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && matrix.target.target == 'x86_64-unknown-linux-musl'
         working-directory: aya
         run: cargo xtask integration-test local
