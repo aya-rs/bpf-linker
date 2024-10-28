@@ -88,7 +88,7 @@ When compiling an eBPF crate directly with `cargo +nightly build`, they can be
 defined through the `RUSTFLAGS` environment variable:
 
 ```sh
-RUSTFLAGS="-C debuginfo=1 -C link-arg=--btf" cargo +nightly build --target=bpfel-unknown-none -Z build-std=core --release
+RUSTFLAGS="-C debuginfo=2 -C link-arg=--btf" cargo +nightly build --target=bpfel-unknown-none -Z build-std=core --release
 ```
 
 To avoid specifying them manually, you can put them in `.cargo/config.toml`:
@@ -96,7 +96,7 @@ To avoid specifying them manually, you can put them in `.cargo/config.toml`:
 ```toml
 [build]
 target = "bpfel-unknown-none"
-rustflags = "-C debuginfo=1 -C link-arg=--btf"
+rustflags = "-C debuginfo=2 -C link-arg=--btf"
 
 [unstable]
 build-std = ["core"]
