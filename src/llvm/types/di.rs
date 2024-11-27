@@ -11,14 +11,17 @@ use llvm_sys::{
     debuginfo::{
         LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
         LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+        LLVMGetDINodeTag, LLVMGetMetadataKind, LLVMMetadataKind,
     },
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
     mdstring_to_str,
-    types::ir::{MDNode, Metadata},
+    types::{
+        ir::{MDNode, Metadata},
+        LLVMTypeError, LLVMTypeWrapper,
+    },
 };
 
 /// Returns a DWARF tag for the given debug info node.
@@ -41,26 +44,33 @@ unsafe fn di_node_tag(metadata_ref: LLVMMetadataRef) -> DwTag {
 /// A `DIFile` debug info node, which represents a given file, is referenced by
 /// other debug info nodes which belong to the file.
 pub struct DIFile<'ctx> {
-    pub(super) metadata_ref: LLVMMetadataRef,
+    metadata_ref: LLVMMetadataRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIFile<'ctx> {
-    /// Constructs a new [`DIFile`] from the given `metadata`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `metadata` corresponds to a valid
-    /// instance of [LLVM `DIFile`](https://llvm.org/doxygen/classllvm_1_1DIFile.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(metadata_ref: LLVMMetadataRef) -> Self {
-        Self {
+impl<'ctx> LLVMTypeWrapper for DIFile<'ctx> {
+    type Target = LLVMMetadataRef;
+
+    fn from_ptr(metadata_ref: Self::Target) -> Result<Self, LLVMTypeError> {
+        if metadata_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_kind = unsafe { LLVMGetMetadataKind(metadata_ref) };
+        if !matches!(metadata_kind, LLVMMetadataKind::LLVMDIFileMetadataKind) {
+            return Err(LLVMTypeError::InvalidPointerType("DIFile"));
+        }
+        Ok(Self {
             metadata_ref,
             _marker: PhantomData,
-        }
+        })
     }
 
+    fn as_ptr(&self) -> Self::Target {
+        self.metadata_ref
+    }
+}
+
+impl<'ctx> DIFile<'ctx> {
     pub fn filename(&self) -> Option<&CStr> {
         let mut len = 0;
         // `LLVMDIFileGetName` doesn't allocate any memory, it just returns
@@ -109,29 +119,52 @@ unsafe fn di_type_name<'a>(metadata_ref: LLVMMetadataRef) -> Option<&'a CStr> {
 
 /// Represents the debug information for a primitive type in LLVM IR.
 pub struct DIType<'ctx> {
-    pub(super) metadata_ref: LLVMMetadataRef,
-    pub(super) value_ref: LLVMValueRef,
+    metadata_ref: LLVMMetadataRef,
+    value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIType<'ctx> {
-    /// Constructs a new [`DIType`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `value` corresponds to a valid
-    /// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+impl<'ctx> LLVMTypeWrapper for DIType<'ctx> {
+    type Target = LLVMValueRef;
+
+    fn from_ptr(value_ref: Self::Target) -> Result<Self, LLVMTypeError> {
+        if value_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
         let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
-        Self {
-            metadata_ref,
-            value_ref,
-            _marker: PhantomData,
+        if metadata_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_kind = unsafe { LLVMGetMetadataKind(metadata_ref) };
+        // The children of `DIType` are:
+        //
+        // - `DIBasicType`
+        // - `DICompositeType`
+        // - `DIDerivedType`
+        // - `DIStringType`
+        // - `DISubroutimeType`
+        //
+        // https://llvm.org/doxygen/classllvm_1_1DIType.html
+        match metadata_kind {
+            LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
+            | LLVMMetadataKind::LLVMDICompositeTypeMetadataKind
+            | LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind
+            | LLVMMetadataKind::LLVMDIStringTypeMetadataKind
+            | LLVMMetadataKind::LLVMDISubroutineTypeMetadataKind => Ok(Self {
+                metadata_ref,
+                value_ref,
+                _marker: PhantomData,
+            }),
+            _ => Err(LLVMTypeError::InvalidPointerType("DIType")),
         }
     }
 
+    fn as_ptr(&self) -> Self::Target {
+        self.value_ref
+    }
+}
+
+impl<'ctx> DIType<'ctx> {
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
     pub fn offset_in_bits(&self) -> usize {
@@ -141,7 +174,7 @@ impl<'ctx> DIType<'ctx> {
 
 impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
     fn from(di_derived_type: DIDerivedType) -> Self {
-        unsafe { Self::from_value_ref(di_derived_type.value_ref) }
+        Self::from_ptr(di_derived_type.value_ref).unwrap()
     }
 }
 
@@ -165,29 +198,44 @@ pub struct DIDerivedType<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIDerivedType<'ctx> {
-    /// Constructs a new [`DIDerivedType`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DIDerivedType`](https://llvm.org/doxygen/classllvm_1_1DIDerivedType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = LLVMValueAsMetadata(value_ref);
-        Self {
+impl<'ctx> LLVMTypeWrapper for DIDerivedType<'ctx> {
+    type Target = LLVMValueRef;
+
+    fn from_ptr(value_ref: Self::Target) -> Result<Self, LLVMTypeError> {
+        if value_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+        if metadata_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_kind = unsafe { LLVMGetMetadataKind(metadata_ref) };
+        if !matches!(
+            metadata_kind,
+            LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind,
+        ) {
+            return Err(LLVMTypeError::InvalidPointerType("DIDerivedType"));
+        }
+        Ok(Self {
             metadata_ref,
             value_ref,
             _marker: PhantomData,
-        }
+        })
     }
 
+    fn as_ptr(&self) -> Self::Target {
+        self.value_ref
+    }
+}
+
+impl<'ctx> DIDerivedType<'ctx> {
     /// Returns the base type of this derived type.
     pub fn base_type(&self) -> Metadata {
         unsafe {
             let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
-            Metadata::from_value_ref(value)
+            // PANICS: We are sure that the pointer type is correct. There is
+            // no need to leak the error.
+            Metadata::from_value_ref(value).unwrap()
         }
     }
 
@@ -226,24 +274,37 @@ pub struct DICompositeType<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DICompositeType<'ctx> {
-    /// Constructs a new [`DICompositeType`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DICompositeType`](https://llvm.org/doxygen/classllvm_1_1DICompositeType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = LLVMValueAsMetadata(value_ref);
-        Self {
+impl<'ctx> LLVMTypeWrapper for DICompositeType<'ctx> {
+    type Target = LLVMValueRef;
+
+    fn from_ptr(value_ref: Self::Target) -> Result<Self, LLVMTypeError> {
+        if value_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+        if metadata_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_kind = unsafe { LLVMGetMetadataKind(metadata_ref) };
+        if !matches!(
+            metadata_kind,
+            LLVMMetadataKind::LLVMDICompositeTypeMetadataKind,
+        ) {
+            return Err(LLVMTypeError::InvalidPointerType("DICompositeType"));
+        }
+        Ok(Self {
             metadata_ref,
             value_ref,
             _marker: PhantomData,
-        }
+        })
     }
 
+    fn as_ptr(&self) -> Self::Target {
+        self.value_ref
+    }
+}
+
+impl<'ctx> DICompositeType<'ctx> {
     /// Returns an iterator over elements (struct fields, enum variants, etc.)
     /// of the composite type.
     pub fn elements(&self) -> impl Iterator<Item = Metadata> {
@@ -253,8 +314,11 @@ impl<'ctx> DICompositeType<'ctx> {
             .map(|elements| unsafe { LLVMGetNumOperands(elements.as_ptr()) })
             .unwrap_or(0);
 
-        (0..operands)
-            .map(move |i| unsafe { Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)) })
+        (0..operands).map(move |i| unsafe {
+            // PANICS: We are sure that the pointer type is correct. There is
+            // no need to leak the error.
+            Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)).unwrap()
+        })
     }
 
     /// Returns the name of the composite type.
@@ -266,7 +330,9 @@ impl<'ctx> DICompositeType<'ctx> {
     pub fn file(&self) -> DIFile {
         unsafe {
             let metadata = LLVMDIScopeGetFile(self.metadata_ref);
-            DIFile::from_metadata_ref(metadata)
+            // PANICS: We are sure that the pointer type is correct. There is
+            // no need to leak the error.
+            DIFile::from_ptr(metadata).unwrap()
         }
     }
 
@@ -289,7 +355,7 @@ impl<'ctx> DICompositeType<'ctx> {
             LLVMReplaceMDNodeOperandWith(
                 self.value_ref,
                 DICompositeTypeOperand::Elements as u32,
-                LLVMValueAsMetadata(mdnode.value_ref),
+                LLVMValueAsMetadata(mdnode.as_ptr()),
             )
         }
     }
@@ -324,26 +390,40 @@ enum DISubprogramOperand {
 
 /// Represents the debug information for a subprogram (function) in LLVM IR.
 pub struct DISubprogram<'ctx> {
-    pub value_ref: LLVMValueRef,
+    value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DISubprogram<'ctx> {
-    /// Constructs a new [`DISubprogram`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DISubprogram`](https://llvm.org/doxygen/classllvm_1_1DISubprogram.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        DISubprogram {
+impl<'ctx> LLVMTypeWrapper for DISubprogram<'ctx> {
+    type Target = LLVMValueRef;
+
+    fn from_ptr(value_ref: Self::Target) -> Result<Self, LLVMTypeError> {
+        if value_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+        if metadata_ref.is_null() {
+            return Err(LLVMTypeError::NullPointer);
+        }
+        let metadata_kind = unsafe { LLVMGetMetadataKind(metadata_ref) };
+        if !matches!(
+            metadata_kind,
+            LLVMMetadataKind::LLVMDISubprogramMetadataKind,
+        ) {
+            return Err(LLVMTypeError::InvalidPointerType("DISubprogram"));
+        }
+        Ok(DISubprogram {
             value_ref,
             _marker: PhantomData,
-        }
+        })
     }
 
+    fn as_ptr(&self) -> Self::Target {
+        self.value_ref
+    }
+}
+
+impl<'ctx> DISubprogram<'ctx> {
     /// Returns the name of the subprogram.
     pub fn name(&self) -> Option<&str> {
         let operand = unsafe { LLVMGetOperand(self.value_ref, DISubprogramOperand::Name as u32) };

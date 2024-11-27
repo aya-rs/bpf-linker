@@ -1,6 +1,6 @@
 mod di;
 mod iter;
-mod types;
+pub mod types;
 
 use std::{
     borrow::Cow,
