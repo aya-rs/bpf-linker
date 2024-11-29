@@ -45,7 +45,7 @@ pub struct DIFile<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIFile<'ctx> {
+impl DIFile<'_> {
     /// Constructs a new [`DIFile`] from the given `metadata`.
     ///
     /// # Safety
@@ -114,7 +114,7 @@ pub struct DIType<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIType<'ctx> {
+impl DIType<'_> {
     /// Constructs a new [`DIType`] from the given `value`.
     ///
     /// # Safety
@@ -165,7 +165,7 @@ pub struct DIDerivedType<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DIDerivedType<'ctx> {
+impl DIDerivedType<'_> {
     /// Constructs a new [`DIDerivedType`] from the given `value`.
     ///
     /// # Safety
@@ -226,7 +226,7 @@ pub struct DICompositeType<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DICompositeType<'ctx> {
+impl DICompositeType<'_> {
     /// Constructs a new [`DICompositeType`] from the given `value`.
     ///
     /// # Safety
@@ -328,7 +328,7 @@ pub struct DISubprogram<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> DISubprogram<'ctx> {
+impl DISubprogram<'_> {
     /// Constructs a new [`DISubprogram`] from the given `value`.
     ///
     /// # Safety

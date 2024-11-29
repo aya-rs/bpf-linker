@@ -45,7 +45,7 @@ pub enum Value<'ctx> {
     Other(LLVMValueRef),
 }
 
-impl<'ctx> std::fmt::Debug for Value<'ctx> {
+impl std::fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value_to_string = |value| {
             Message {
@@ -74,7 +74,7 @@ impl<'ctx> std::fmt::Debug for Value<'ctx> {
     }
 }
 
-impl<'ctx> Value<'ctx> {
+impl Value<'_> {
     pub fn new(value: LLVMValueRef) -> Self {
         if unsafe { !LLVMIsAMDNode(value).is_null() } {
             let mdnode = unsafe { MDNode::from_value_ref(value) };
@@ -115,7 +115,7 @@ pub enum Metadata<'ctx> {
     Other(#[allow(dead_code)] LLVMValueRef),
 }
 
-impl<'ctx> Metadata<'ctx> {
+impl Metadata<'_> {
     /// Constructs a new [`Metadata`] from the given `value`.
     ///
     /// # Safety
@@ -193,7 +193,7 @@ pub struct MDNode<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ctx> MDNode<'ctx> {
+impl MDNode<'_> {
     /// Constructs a new [`MDNode`] from the given `metadata`.
     ///
     /// # Safety
