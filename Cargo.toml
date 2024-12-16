@@ -30,7 +30,7 @@ gimli = { version = "0.31.1" }
 libc = { version = "0.2.168" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "191.0.0" }
 log = { version = "0.4.22" }
-thiserror = { version = "2.0.6" }
+thiserror = { version = "2.0.7" }
 tracing = "0.1"
 
 [dev-dependencies]
