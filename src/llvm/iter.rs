@@ -3,55 +3,92 @@ use std::marker::PhantomData;
 use llvm_sys::{
     core::{
         LLVMGetFirstBasicBlock, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias,
-        LLVMGetFirstInstruction, LLVMGetLastBasicBlock, LLVMGetLastFunction, LLVMGetLastGlobal,
-        LLVMGetLastGlobalAlias, LLVMGetLastInstruction, LLVMGetNextBasicBlock, LLVMGetNextFunction,
-        LLVMGetNextGlobal, LLVMGetNextGlobalAlias, LLVMGetNextInstruction,
+        LLVMGetFirstInstruction, LLVMGetNextBasicBlock, LLVMGetNextFunction, LLVMGetNextGlobal,
+        LLVMGetNextGlobalAlias, LLVMGetNextInstruction, LLVMGetPreviousBasicBlock,
+        LLVMGetPreviousFunction, LLVMGetPreviousGlobal, LLVMGetPreviousGlobalAlias,
+        LLVMGetPreviousInstruction,
     },
-    prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef},
+    LLVMBasicBlock, LLVMValue,
+};
+
+use crate::llvm::types::ir::{
+    BasicBlock, Function, GlobalAlias, GlobalVariable, Instruction, Module,
 };
 
 macro_rules! llvm_iterator {
-    ($trait_name:ident, $iterator_name:ident, $iterable:ty, $method_name:ident, $item_ty:ty, $first:expr, $last:expr, $next:expr $(,)?) => {
+    (
+        $trait_name:ident,
+        $iterator_name:ident,
+        $iterable:ident,
+        $method_name:ident,
+        $ptr_ty:ty,
+        $item_ty:ident,
+        $first:expr,
+        $last:expr,
+        $next:expr,
+        $prev:expr $(,)?
+    ) => {
         pub trait $trait_name {
             fn $method_name(&self) -> $iterator_name;
         }
 
-        pub struct $iterator_name<'a> {
-            lifetime: PhantomData<&'a $iterable>,
-            next: $item_ty,
-            last: $item_ty,
+        pub struct $iterator_name<'ctx> {
+            lifetime: PhantomData<&'ctx $iterable<'ctx>>,
+            current: Option<::std::ptr::NonNull<$ptr_ty>>,
         }
 
-        impl $trait_name for $iterable {
+        impl $trait_name for $iterable<'_> {
             fn $method_name(&self) -> $iterator_name {
-                let first = unsafe { $first(*self) };
-                let last = unsafe { $last(*self) };
-                assert_eq!(first.is_null(), last.is_null());
+                #[allow(unused_imports)]
+                use $crate::llvm::types::LLVMTypeWrapper as _;
+
+                let first = unsafe { $first(self.as_ptr()) };
+                let first = ::std::ptr::NonNull::new(first);
+
                 $iterator_name {
                     lifetime: PhantomData,
-                    next: first,
-                    last,
+                    current: first,
                 }
             }
         }
 
-        impl<'a> Iterator for $iterator_name<'a> {
-            type Item = $item_ty;
+        impl<'ctx> Iterator for $iterator_name<'ctx> {
+            type Item = $item_ty<'ctx>;
 
             fn next(&mut self) -> Option<Self::Item> {
-                let Self {
-                    lifetime: _,
-                    next,
-                    last,
-                } = self;
-                if next.is_null() {
-                    return None;
+                #[allow(unused_imports)]
+                use $crate::llvm::types::LLVMTypeWrapper as _;
+
+                if let Some(item) = self.current {
+                    let next = unsafe { $next(item.as_ptr()) };
+                    let next = std::ptr::NonNull::new(next);
+                    self.current = next;
+
+                    let item = $item_ty::from_ptr(item).unwrap();
+
+                    Some(item)
+                } else {
+                    None
                 }
-                let last = *next == *last;
-                let item = *next;
-                *next = unsafe { $next(*next) };
-                assert_eq!(next.is_null(), last);
-                Some(item)
+            }
+        }
+
+        impl<'ctx> DoubleEndedIterator for $iterator_name<'ctx> {
+            fn next_back(&mut self) -> Option<Self::Item> {
+                #[allow(unused_imports)]
+                use $crate::llvm::types::LLVMTypeWrapper as _;
+
+                if let Some(item) = self.current {
+                    let prev = unsafe { $prev(item.as_ptr()) };
+                    let prev = std::ptr::NonNull::new(prev);
+                    self.current = prev;
+
+                    let item = $item_ty::from_ptr(item).unwrap();
+
+                    Some(item)
+                } else {
+                    None
+                }
             }
         }
     };
@@ -60,54 +97,64 @@ macro_rules! llvm_iterator {
 llvm_iterator! {
     IterModuleGlobals,
     GlobalsIter,
-    LLVMModuleRef,
+    Module,
     globals_iter,
-    LLVMValueRef,
+    LLVMValue,
+    GlobalVariable,
     LLVMGetFirstGlobal,
     LLVMGetLastGlobal,
     LLVMGetNextGlobal,
+    LLVMGetPreviousGlobal,
 }
 
 llvm_iterator! {
     IterModuleGlobalAliases,
     GlobalAliasesIter,
-    LLVMModuleRef,
+    Module,
     global_aliases_iter,
-    LLVMValueRef,
+    LLVMValue,
+    GlobalAlias,
     LLVMGetFirstGlobalAlias,
     LLVMGetLastGlobalAlias,
     LLVMGetNextGlobalAlias,
+    LLVMGetPreviousGlobalAlias,
 }
 
 llvm_iterator! {
     IterModuleFunctions,
     FunctionsIter,
-    LLVMModuleRef,
+    Module,
     functions_iter,
-    LLVMValueRef,
+    LLVMValue,
+    Function,
     LLVMGetFirstFunction,
     LLVMGetLastFunction,
     LLVMGetNextFunction,
+    LLVMGetPreviousFunction,
 }
 
 llvm_iterator!(
     IterBasicBlocks,
     BasicBlockIter,
-    LLVMValueRef,
-    basic_blocks_iter,
-    LLVMBasicBlockRef,
+    Function,
+    basic_blocks,
+    LLVMBasicBlock,
+    BasicBlock,
     LLVMGetFirstBasicBlock,
     LLVMGetLastBasicBlock,
-    LLVMGetNextBasicBlock
+    LLVMGetNextBasicBlock,
+    LLVMGetPreviousBasicBlock,
 );
 
 llvm_iterator!(
     IterInstructions,
     InstructionsIter,
-    LLVMBasicBlockRef,
+    BasicBlock,
     instructions_iter,
-    LLVMValueRef,
+    LLVMValue,
+    Instruction,
     LLVMGetFirstInstruction,
     LLVMGetLastInstruction,
-    LLVMGetNextInstruction
+    LLVMGetNextInstruction,
+    LLVMGetPreviousInstruction
 );

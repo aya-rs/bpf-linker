@@ -3,18 +3,24 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     ffi::c_char,
     hash::Hasher,
-    ptr,
+    ptr::{self, NonNull},
 };
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
-use super::types::{
-    di::DIType,
-    ir::{Function, MDNode, Metadata, Value},
+use crate::llvm::{
+    iter::*,
+    types::{
+        di::{DISubprogram, DIType},
+        ir::{
+            Argument, Function, GlobalAlias, GlobalVariable, Instruction, MDNode, Metadata, Module,
+            Value,
+        },
+        LLVMTypeError, LLVMTypeWrapper,
+    },
 };
-use crate::llvm::{iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found accross kernel versions to ensure
@@ -23,7 +29,6 @@ const MAX_KSYM_NAME_LEN: usize = 128;
 
 pub struct DISanitizer {
     context: LLVMContextRef,
-    module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
@@ -59,11 +64,11 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
 }
 
 impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
+    pub fn new(context: LLVMContextRef, module: &Module<'_>) -> Self {
+        let builder = unsafe { LLVMCreateDIBuilder(module.as_ptr()) };
         DISanitizer {
             context,
-            module,
-            builder: unsafe { LLVMCreateDIBuilder(module) },
+            builder,
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types: Vec::new(),
@@ -227,7 +232,7 @@ impl DISanitizer {
             // An operand with no value is valid and means that the operand is
             // not set
             (v, Item::Operand { .. }) if v.is_null() => return,
-            (v, _) if !v.is_null() => Value::new(v),
+            (v, _) if !v.is_null() => Value::from_ptr(NonNull::new(v).unwrap()).unwrap(),
             // All other items should have values
             (_, item) => panic!("{item:?} has no value"),
         };
@@ -283,16 +288,18 @@ impl DISanitizer {
         }
     }
 
-    pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
-        let module = self.module;
+    pub fn run(
+        mut self,
+        module: &mut Module<'_>,
+        exported_symbols: &HashSet<Cow<'static, str>>,
+    ) -> Result<(), LLVMTypeError> {
+        self.replace_operands = self.fix_subprogram_linkage(module, exported_symbols)?;
 
-        self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
-
-        for value in module.globals_iter() {
-            self.visit_item(Item::GlobalVariable(value));
+        for global in module.globals_iter() {
+            self.visit_item(Item::GlobalVariable(global));
         }
-        for value in module.global_aliases_iter() {
-            self.visit_item(Item::GlobalAlias(value));
+        for alias in module.global_aliases_iter() {
+            self.visit_item(Item::GlobalAlias(alias));
         }
 
         for function in module.functions_iter() {
@@ -307,6 +314,8 @@ impl DISanitizer {
         }
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
+
+        Ok(())
     }
 
     // Make it so that only exported symbols (programs marked as #[no_mangle]) get BTF
@@ -324,16 +333,13 @@ impl DISanitizer {
     // See tests/btf/assembly/exported-symbols.rs .
     fn fix_subprogram_linkage(
         &mut self,
+        module: &mut Module<'_>,
         export_symbols: &HashSet<Cow<'static, str>>,
-    ) -> HashMap<u64, LLVMMetadataRef> {
+    ) -> Result<HashMap<u64, LLVMMetadataRef>, LLVMTypeError> {
         let mut replace = HashMap::new();
 
-        for mut function in self
-            .module
-            .functions_iter()
-            .map(|value| unsafe { Function::from_value_ref(value) })
-        {
-            if export_symbols.contains(function.name()) {
+        for mut function in module.functions_iter() {
+            if export_symbols.contains(&function.name()) {
                 continue;
             }
 
@@ -370,7 +376,10 @@ impl DISanitizer {
                 // replace retained nodes manually below.
                 LLVMDIBuilderFinalizeSubprogram(self.builder, new_program);
 
-                DISubprogram::from_value_ref(LLVMMetadataAsValue(self.context, new_program))
+                let new_program = LLVMMetadataAsValue(self.context, new_program);
+                let new_program =
+                    NonNull::new(new_program).expect("new program should not be null");
+                DISubprogram::from_ptr(new_program)?
             };
 
             // Point the function to the new subprogram.
@@ -396,23 +405,23 @@ impl DISanitizer {
                 unsafe { LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0) };
             subprogram.set_retained_nodes(empty_node);
 
-            let ret = replace.insert(subprogram.value_ref as u64, unsafe {
-                LLVMValueAsMetadata(new_program.value_ref)
+            let ret = replace.insert(subprogram.as_ptr() as u64, unsafe {
+                LLVMValueAsMetadata(new_program.as_ptr())
             });
             assert!(ret.is_none());
         }
 
-        replace
+        Ok(replace)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Item {
-    GlobalVariable(LLVMValueRef),
-    GlobalAlias(LLVMValueRef),
-    Function(LLVMValueRef),
-    FunctionParam(LLVMValueRef),
-    Instruction(LLVMValueRef),
+enum Item<'ctx> {
+    GlobalVariable(GlobalVariable<'ctx>),
+    GlobalAlias(GlobalAlias<'ctx>),
+    Function(Function<'ctx>),
+    FunctionParam(Argument<'ctx>),
+    Instruction(Instruction<'ctx>),
     Operand(Operand),
     MetadataEntry(LLVMValueRef, u32, usize),
 }
@@ -437,16 +446,16 @@ impl Operand {
     }
 }
 
-impl Item {
+impl Item<'_> {
     fn value_ref(&self) -> LLVMValueRef {
         match self {
-            Item::GlobalVariable(value)
-            | Item::GlobalAlias(value)
-            | Item::Function(value)
-            | Item::FunctionParam(value)
-            | Item::Instruction(value)
-            | Item::Operand(Operand { value, .. })
-            | Item::MetadataEntry(value, _, _) => *value,
+            Item::GlobalVariable(global) => global.as_ptr(),
+            Item::GlobalAlias(global) => global.as_ptr(),
+            Item::Function(function) => function.as_ptr(),
+            Item::FunctionParam(function_param) => function_param.as_ptr(),
+            Item::Instruction(instruction) => instruction.as_ptr(),
+            Item::Operand(Operand { value, .. }) => *value,
+            Item::MetadataEntry(value, _, _) => *value,
         }
     }
 
