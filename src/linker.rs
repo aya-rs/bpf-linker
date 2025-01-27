@@ -5,7 +5,6 @@ use std::{
     fs::File,
     io,
     io::{Read, Seek},
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     ptr, str,
     str::FromStr,
@@ -255,14 +254,14 @@ impl Linker {
         if let Some(path) = &self.options.dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let path = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
             self.write_ir(&path)?;
         };
         self.optimize()?;
         if let Some(path) = &self.options.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let path = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
             self.write_ir(&path)?;
         };
         self.codegen()?;
