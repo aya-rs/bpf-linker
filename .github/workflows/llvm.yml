@@ -16,7 +16,7 @@ jobs:
       - id: ls-remote
         run: |
           set -euxo pipefail
-          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/19.1-2024-09-17 | cut -f1)
+          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/20.1-2025-02-13 | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
       - id: cache-key

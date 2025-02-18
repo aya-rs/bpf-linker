@@ -58,7 +58,7 @@ jobs:
           - beta
           - nightly
         llvm:
-          - 19
+          - 20
           - source
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
     needs: llvm
