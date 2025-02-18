@@ -100,7 +100,7 @@ fn btf_dump(src: &Path, dst: &Path) {
     btf.arg("dump").arg(src).stdout(dst);
     let status = btf
         .status()
-        .unwrap_or_else(|err| panic!("could not run {btf:?}: {err}",));
+        .unwrap_or_else(|err| panic!("could not run {btf:?}: {err}"));
     assert_eq!(status.code(), Some(0), "{btf:?} failed");
 }
 
