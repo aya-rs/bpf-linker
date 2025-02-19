@@ -28,11 +28,8 @@ static mut BAR: Bar<Foo<u32>> = Bar { x: Foo { x: 0 } };
 
 #[no_mangle]
 #[link_section = "uprobe/connect"]
-pub fn connect() {
-    let _ = my_function(1, 2);
-    let _ = my_function(3, 4);
-    let _ = my_function(5, 6);
-    let _ = my_function(7, 8);
+pub fn connect() -> u32 {
+    my_function(1, 2)
 }
 
 pub trait Add<Rhs = Self> {
