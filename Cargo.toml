@@ -17,8 +17,8 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-anyhow = "1.0.95"
-clap = { version = "4.5.30", features = ["derive"] }
+anyhow = "1.0.96"
+clap = { version = "4.5.31", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
@@ -27,9 +27,9 @@ tracing-tree = "0.4"
 ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.3", optional = true }
 gimli = { version = "0.31.1" }
-libc = { version = "0.2.169" }
+libc = { version = "0.2.170" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "191.0.0" }
-log = { version = "0.4.25" }
+log = { version = "0.4.26" }
 thiserror = { version = "2.0.11" }
 tracing = "0.1"
 
