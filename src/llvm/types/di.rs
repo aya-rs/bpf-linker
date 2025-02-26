@@ -11,7 +11,7 @@ use llvm_sys::{
     debuginfo::{
         LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
         LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+        LLVMDITypeGetSizeInBits, LLVMGetDINodeTag,
     },
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
@@ -307,6 +307,11 @@ impl DICompositeType<'_> {
     /// Returns a DWARF tag of the given composite type.
     pub fn tag(&self) -> DwTag {
         unsafe { di_node_tag(self.metadata_ref) }
+    }
+
+    /// Returns the size in bits of the composite type.
+    pub fn size_in_bits(&self) -> u64 {
+        unsafe { LLVMDITypeGetSizeInBits(LLVMValueAsMetadata(self.value_ref)) }
     }
 }
 

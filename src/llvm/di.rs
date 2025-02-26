@@ -6,7 +6,9 @@ use std::{
     ptr,
 };
 
-use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
+use gimli::{
+    DW_TAG_enumeration_type, DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part,
+};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
@@ -70,12 +72,50 @@ impl DISanitizer {
         }
     }
 
-    fn visit_mdnode(&mut self, mdnode: MDNode) {
-        match mdnode.try_into().expect("MDNode is not Metadata") {
+    fn visit_mdnode_item(&mut self, item: Item) {
+        // guardrail preventing to visit non mdnode items
+        if !item.is_mdnode() {
+            return;
+        }
+
+        let mdnode = item.as_mdnode();
+        match mdnode.clone().try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.tag() {
+                    DW_TAG_enumeration_type => {
+                        let name = di_composite_type
+                            .name()
+                            .map(|name| name.to_string_lossy().to_string());
+
+                        if let Some(name) = name {
+                            // we found the c_void enum
+                            if &name == "c_void" && di_composite_type.size_in_bits() == 8 {
+                                if let Item::Operand(mut operand) = item {
+                                    let new = "void";
+                                    // DWARF types: https://github.com/bminor/glibc/blob/2fe5e2af0995a6e6ee2c761e55e7596a3220d07c/sysdeps/generic/dwarf2.h#L375
+                                    let ty_void = unsafe {
+                                        LLVMDIBuilderCreateBasicType(
+                                            self.builder,
+                                            new.as_ptr() as *const c_char,
+                                            new.len(),
+                                            8,
+                                            // DWARF void
+                                            0,
+                                            0,
+                                        )
+                                    };
+                                    unsafe {
+                                        operand.replace(LLVMMetadataAsValue(self.context, ty_void));
+                                    }
+                                } else {
+                                    warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")
+                                }
+                            }
+                        }
+                    }
+
                     DW_TAG_structure_type => {
                         let names = match di_composite_type.name() {
                             Some(name) => {
@@ -247,8 +287,9 @@ impl DISanitizer {
             return;
         }
 
-        if let Value::MDNode(mdnode) = value.clone() {
-            self.visit_mdnode(mdnode)
+        // if our item is also a MDNode
+        if item.is_mdnode() {
+            self.visit_mdnode_item(item)
         }
 
         if let Some(operands) = value.operands() {
@@ -438,6 +479,14 @@ impl Operand {
 }
 
 impl Item {
+    fn is_mdnode(&self) -> bool {
+        unsafe { !LLVMIsAMDNode(self.value_ref()).is_null() }
+    }
+
+    fn as_mdnode(&self) -> MDNode<'_> {
+        unsafe { MDNode::from_value_ref(self.value_ref()) }
+    }
+
     fn value_ref(&self) -> LLVMValueRef {
         match self {
             Item::GlobalVariable(value)
