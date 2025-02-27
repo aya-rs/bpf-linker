@@ -97,7 +97,7 @@ impl DISanitizer {
                                             new.as_ptr() as *const c_char,
                                             new.len(),
                                             8,
-                                            // DWARF void
+                                            // DW_ATE_void
                                             0,
                                             0,
                                         )
