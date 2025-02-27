@@ -73,12 +73,10 @@ impl DISanitizer {
     }
 
     fn visit_mdnode_item(&mut self, item: Item) {
-        // guardrail preventing to visit non mdnode items
-        if !item.is_mdnode() {
+        let Some(mdnode) = item.as_mdnode() else {
             return;
-        }
+        };
 
-        let mdnode = item.as_mdnode();
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
@@ -479,8 +477,13 @@ impl Item {
         unsafe { !LLVMIsAMDNode(self.value_ref()).is_null() }
     }
 
-    fn as_mdnode(&self) -> MDNode<'_> {
-        unsafe { MDNode::from_value_ref(self.value_ref()) }
+    /// Returns the [Item] as [MDNode] only if [Item::is_mdnode] is `true` else `None`
+    fn as_mdnode(&self) -> Option<MDNode<'_>> {
+        if self.is_mdnode() {
+            Some(unsafe { MDNode::from_value_ref(self.value_ref()) })
+        } else {
+            None
+        }
     }
 
     fn value_ref(&self) -> LLVMValueRef {
