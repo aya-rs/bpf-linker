@@ -79,7 +79,7 @@ impl DISanitizer {
         }
 
         let mdnode = item.as_mdnode();
-        match mdnode.clone().try_into().expect("MDNode is not Metadata") {
+        match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
