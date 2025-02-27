@@ -85,13 +85,9 @@ impl DISanitizer {
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.tag() {
                     DW_TAG_enumeration_type => {
-                        let name = di_composite_type
-                            .name()
-                            .map(|name| name.to_string_lossy().to_string());
-
-                        if let Some(name) = name {
+                        if let Some(name) = di_composite_type.name() {
                             // we found the c_void enum
-                            if &name == "c_void" && di_composite_type.size_in_bits() == 8 {
+                            if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
                                 if let Item::Operand(mut operand) = item {
                                     let new = "void";
                                     // DWARF types: https://github.com/bminor/glibc/blob/2fe5e2af0995a6e6ee2c761e55e7596a3220d07c/sysdeps/generic/dwarf2.h#L375
