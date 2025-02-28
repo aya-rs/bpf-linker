@@ -510,7 +510,7 @@ impl Operand {
 }
 
 impl Item {
-    /// Returns the [Item] as [MDNode] only if [Item::is_mdnode] is `true` else `None`
+    /// Returns the [`Item`] as [`MDNode`] only if [Item::is_mdnode] is `true` else `None`.
     fn as_mdnode(&self) -> Option<MDNode<'_>> {
         let is_mdnode = unsafe { !LLVMIsAMDNode(self.value_ref()).is_null() };
         if is_mdnode {
