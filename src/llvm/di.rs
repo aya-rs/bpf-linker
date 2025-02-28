@@ -115,12 +115,12 @@ impl DISanitizer {
         }
     }
 
-    /// Get or cache a LLVM DIBasicType given a [DIBasicType]
+    /// Returns and caches a LLVM DIBasicType given a [`DIBasicType`].
     fn di_basic_type(&mut self, di_bt: DIBasicType) -> LLVMMetadataRef {
         *self
             .basic_types
             .entry(di_bt)
-            .or_insert(di_bt.llvm_create_basic_type(self.builder))
+            .or_insert_with(|| di_bt.llvm_create_basic_type(self.builder))
     }
 
     fn visit_mdnode_item(&mut self, item: Item) {
@@ -141,8 +141,7 @@ impl DISanitizer {
                                 if let Item::Operand(_) = item {
                                     // get LLVM void DIBasicType
                                     let void_bt = self.di_basic_type(DIBasicType::Void);
-                                    let _ =
-                                        self.replace_operands.entry(value_id).or_insert(void_bt);
+                                    let _ = self.replace_operands.insert(value_id, void_bt);
                                 } else {
                                     // c_void enum is not an Item::Operand so we cannot replace it
                                     warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")
