@@ -522,7 +522,7 @@ impl DISanitizer {
                     false
                 })
                 .collect();
-                
+
             if enum_types_len != new_enums.len() {
                 di_cu.replace_enum_types(self.builder, new_enums);
             }
