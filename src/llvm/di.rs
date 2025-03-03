@@ -13,7 +13,7 @@ use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
 use super::types::{
-    di::DIType,
+    di::{DICompileUnit, DICompositeType, DIType},
     ir::{Function, MDNode, Metadata, Value},
 };
 use crate::llvm::{iter::*, types::di::DISubprogram};
@@ -25,7 +25,7 @@ const MAX_KSYM_NAME_LEN: usize = 128;
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
 enum DIBasicType {
-    Void,
+    I8,
 }
 
 impl DIBasicType {
@@ -45,21 +45,21 @@ impl DIBasicType {
 
     fn name(&self) -> &'static str {
         match self {
-            Self::Void => "void",
+            Self::I8 => "i8",
         }
     }
 
     fn size_in_bits(&self) -> u64 {
         match self {
-            Self::Void => 8,
+            Self::I8 => 8,
         }
     }
 
     // DWARF encoding https://github.com/bminor/glibc/blob/2fe5e2af0995a6e6ee2c761e55e7596a3220d07c/sysdeps/generic/dwarf2.h#L375
     fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
         match self {
-            // DW_ATE_void
-            Self::Void => 0x0,
+            // DW_ATE_signed
+            Self::I8 => 0x5,
         }
     }
 }
@@ -137,11 +137,10 @@ impl DISanitizer {
                         if let Some(name) = di_composite_type.name() {
                             // we found the c_void enum
                             if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
-                                let value_id = item.value_id();
-                                if let Item::Operand(_) = item {
-                                    // get LLVM void DIBasicType
-                                    let void_bt = self.di_basic_type(DIBasicType::Void);
-                                    let _ = self.replace_operands.insert(value_id, void_bt);
+                                if let Item::Operand(mut op) = item {
+                                    // get i8 DIBasicType
+                                    let i8_bt = self.di_basic_type(DIBasicType::I8);
+                                    op.replace(unsafe { LLVMMetadataAsValue(self.context, i8_bt) })
                                 } else {
                                     // c_void enum is not an Item::Operand so we cannot replace it
                                     warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")
@@ -149,7 +148,6 @@ impl DISanitizer {
                             }
                         }
                     }
-
                     DW_TAG_structure_type => {
                         let names = match di_composite_type.name() {
                             Some(name) => {
@@ -306,14 +304,6 @@ impl DISanitizer {
             (_, item) => panic!("{item:?} has no value"),
         };
 
-        let first_visit = self.visited_nodes.insert(value_id);
-        if !first_visit {
-            trace!("already visited");
-            return;
-        }
-
-        self.visit_mdnode_item(item.clone());
-
         if let Item::Operand(operand) = &mut item {
             // When we have an operand to replace, we must do so regardless of whether we've already
             // seen its value or not, since the same value can appear as an operand in multiple
@@ -322,6 +312,14 @@ impl DISanitizer {
                 operand.replace(unsafe { LLVMMetadataAsValue(self.context, *new_metadata) })
             }
         }
+
+        let first_visit = self.visited_nodes.insert(value_id);
+        if !first_visit {
+            trace!("already visited");
+            return;
+        }
+
+        self.visit_mdnode_item(item.clone());
 
         if let Some(operands) = value.operands() {
             for (index, operand) in operands.enumerate() {
@@ -377,6 +375,8 @@ impl DISanitizer {
                 self.skipped_types.join(", ")
             );
         }
+
+        self.fix_di_compile_units();
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
@@ -475,6 +475,58 @@ impl DISanitizer {
         }
 
         replace
+    }
+
+    fn di_compile_units(&self) -> Vec<DICompileUnit> {
+        let compile_unit_name = c"llvm.dbg.cu";
+
+        // Get the number of DICompileUnit.
+        let num_di_cu =
+            unsafe { LLVMGetNamedMetadataNumOperands(self.module, compile_unit_name.as_ptr()) };
+
+        // Create a vector to hold them all.
+        let mut di_cus: Vec<LLVMValueRef> = vec![core::ptr::null_mut(); num_di_cu as usize];
+
+        unsafe {
+            LLVMGetNamedMetadataOperands(
+                self.module,
+                compile_unit_name.as_ptr(),
+                di_cus.as_mut_ptr(),
+            )
+        };
+
+        di_cus
+            .into_iter()
+            .map(|v| unsafe { DICompileUnit::from_value_ref(v) })
+            .collect()
+    }
+
+    // Removes `c_void` Rust enum from all DICompileUnit.
+    // After replacing `c_void` enum with a DIBasicType
+    // the DICompileUnit still references the `c_void` enum which
+    // triggers a casting assertion in LLVM.
+    fn fix_di_compile_units(&mut self) {
+        for mut di_cu in self.di_compile_units() {
+            let d = di_cu.clone();
+            let enum_types = d.enum_types();
+            let enum_types_len = enum_types.len();
+            let new_enums: Vec<DICompositeType> = enum_types
+                .into_iter()
+                .filter(|e| {
+                    if let Some(name) = e.name() {
+                        // we filter c_void Rust enum
+                        if c"c_void" == name && e.size_in_bits() == 8 {
+                            return true;
+                        }
+                    }
+                    false
+                })
+                .collect();
+                
+            if enum_types_len != new_enums.len() {
+                di_cu.replace_enum_types(self.builder, new_enums);
+            }
+        }
     }
 }
 

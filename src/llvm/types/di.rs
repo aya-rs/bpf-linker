@@ -9,11 +9,11 @@ use gimli::DwTag;
 use llvm_sys::{
     core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
-        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
-        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMDITypeGetSizeInBits, LLVMGetDINodeTag,
+        LLVMDIBuilderGetOrCreateTypeArray, LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile,
+        LLVMDISubprogramGetLine, LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName,
+        LLVMDITypeGetOffsetInBits, LLVMDITypeGetSizeInBits, LLVMGetDINodeTag,
     },
-    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
+    prelude::{LLVMContextRef, LLVMDIBuilderRef, LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
@@ -433,5 +433,72 @@ impl DISubprogram<'_> {
                 nodes,
             )
         };
+    }
+}
+
+/// Represents the operands for a [`DICompileUnit`]. The enum values correspond
+/// to the operand indices within metadata nodes.
+#[repr(u32)]
+enum DICompileUnitOperand {
+    EnumTypes = 4,
+}
+
+/// Represents the debug information for a compile unit in LLVM IR.
+#[derive(Clone)]
+pub struct DICompileUnit<'ctx> {
+    value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl DICompileUnit<'_> {
+    /// Constructs a new [`DICompileUnit`] from the given `value`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a valid
+    /// instance of [LLVM `DICompileUnit`](https://llvm.org/doxygen/classllvm_1_1DICompileUnit.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any valiation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn enum_types(&self) -> Vec<DICompositeType> {
+        let mut out = vec![];
+        let llvm_enum_types =
+            unsafe { LLVMGetOperand(self.value_ref, DICompileUnitOperand::EnumTypes as u32) };
+
+        if llvm_enum_types.is_null() {
+            return out;
+        }
+
+        let llvm_enum_types_len = unsafe { LLVMGetNumOperands(llvm_enum_types) };
+
+        (0..llvm_enum_types_len).for_each(|i| unsafe {
+            let enum_type = LLVMGetOperand(llvm_enum_types, i as u32);
+
+            out.push(DICompositeType::from_value_ref(enum_type))
+        });
+
+        out
+    }
+
+    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: Vec<DICompositeType>) {
+        let mut rep: Vec<LLVMMetadataRef> = rep.into_iter().map(|dct| dct.metadata_ref).collect();
+
+        unsafe {
+            // we create an array with our saved enums
+            let enum_array =
+                LLVMDIBuilderGetOrCreateTypeArray(builder, rep.as_mut_ptr(), rep.len());
+            // we replace the DICompileUnit enums
+            LLVMReplaceMDNodeOperandWith(
+                self.value_ref,
+                DICompileUnitOperand::EnumTypes as u32,
+                enum_array,
+            );
+        }
     }
 }
