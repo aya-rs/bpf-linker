@@ -482,7 +482,7 @@ impl DICompileUnit<'_> {
         })
     }
 
-    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: &Vec<DICompositeType>) {
+    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: &[DICompositeType]) {
         let mut rep: Vec<_> = rep.iter().map(|dct| dct.metadata_ref).collect();
 
         unsafe {

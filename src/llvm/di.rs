@@ -123,7 +123,7 @@ impl DISanitizer {
             .or_insert_with(|| di_bt.llvm_create_basic_type(self.builder))
     }
 
-    fn visit_mdnode_item(&mut self, item: Item) {
+    fn visit_mdnode_item(&mut self, item: &mut Item) {
         let Some(mdnode) = item.as_mdnode() else {
             return;
         };
@@ -137,7 +137,7 @@ impl DISanitizer {
                         if let Some(name) = di_composite_type.name() {
                             // we found the c_void enum
                             if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
-                                if let Item::Operand(mut op) = item {
+                                if let Item::Operand(ref mut op) = item {
                                     // get i8 DIBasicType
                                     let i8_bt = self.di_basic_type(DIBasicType::I8);
                                     op.replace(unsafe { LLVMMetadataAsValue(self.context, i8_bt) })
@@ -319,7 +319,7 @@ impl DISanitizer {
             return;
         }
 
-        self.visit_mdnode_item(item.clone());
+        self.visit_mdnode_item(&mut item);
 
         if let Some(operands) = value.operands() {
             for (index, operand) in operands.enumerate() {
