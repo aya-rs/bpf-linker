@@ -13,7 +13,7 @@ use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
 use super::types::{
-    di::{DICompileUnit, DICompositeType, DIType},
+    di::{DICompileUnit, DIType},
     ir::{Function, MDNode, Metadata, Value},
 };
 use crate::llvm::{iter::*, types::di::DISubprogram};
@@ -55,7 +55,7 @@ impl DIBasicType {
         }
     }
 
-    // DWARF encoding https://github.com/bminor/glibc/blob/2fe5e2af0995a6e6ee2c761e55e7596a3220d07c/sysdeps/generic/dwarf2.h#L375
+    // DWARF encoding https://llvm.org/docs/LangRef.html#dibasictype
     fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
         match self {
             // DW_ATE_signed
@@ -115,7 +115,7 @@ impl DISanitizer {
         }
     }
 
-    /// Returns and caches a LLVM DIBasicType given a [`DIBasicType`].
+    /// Returns a metadata ref given a [`DIBasicType`].
     fn di_basic_type(&mut self, di_bt: DIBasicType) -> LLVMMetadataRef {
         *self
             .basic_types
@@ -507,10 +507,10 @@ impl DISanitizer {
     // triggers a casting assertion in LLVM.
     fn fix_di_compile_units(&mut self) {
         for mut di_cu in self.di_compile_units() {
-            let d = di_cu.clone();
-            let enum_types = d.enum_types();
+            let tmp_cu = di_cu.clone();
+            let enum_types: Vec<_> = tmp_cu.enum_types().collect();
             let enum_types_len = enum_types.len();
-            let new_enums: Vec<DICompositeType> = enum_types
+            let new_enums: Vec<_> = enum_types
                 .into_iter()
                 .filter(|e| {
                     if let Some(name) = e.name() {
@@ -524,7 +524,7 @@ impl DISanitizer {
                 .collect();
 
             if enum_types_len != new_enums.len() {
-                di_cu.replace_enum_types(self.builder, new_enums);
+                di_cu.replace_enum_types(self.builder, &new_enums);
             }
         }
     }

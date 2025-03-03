@@ -451,7 +451,7 @@ pub struct DICompileUnit<'ctx> {
 }
 
 impl DICompileUnit<'_> {
-    /// Constructs a new [`DICompileUnit`] from the given `value`.
+    /// Constructs a new [`DICompileUnit`] from the given `value_ref`.
     ///
     /// # Safety
     ///
@@ -466,34 +466,28 @@ impl DICompileUnit<'_> {
         }
     }
 
-    pub fn enum_types(&self) -> Vec<DICompositeType> {
-        let mut out = vec![];
+    pub fn enum_types(&self) -> impl Iterator<Item = DICompositeType> {
         let llvm_enum_types =
             unsafe { LLVMGetOperand(self.value_ref, DICompileUnitOperand::EnumTypes as u32) };
 
-        if llvm_enum_types.is_null() {
-            return out;
-        }
+        let llvm_enum_types_len = if llvm_enum_types.is_null() {
+            0
+        } else {
+            unsafe { LLVMGetNumOperands(llvm_enum_types) }
+        };
 
-        let llvm_enum_types_len = unsafe { LLVMGetNumOperands(llvm_enum_types) };
-
-        (0..llvm_enum_types_len).for_each(|i| unsafe {
+        (0..llvm_enum_types_len).map(move |i| unsafe {
             let enum_type = LLVMGetOperand(llvm_enum_types, i as u32);
-
-            out.push(DICompositeType::from_value_ref(enum_type))
-        });
-
-        out
+            DICompositeType::from_value_ref(enum_type)
+        })
     }
 
-    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: Vec<DICompositeType>) {
-        let mut rep: Vec<LLVMMetadataRef> = rep.into_iter().map(|dct| dct.metadata_ref).collect();
+    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: &Vec<DICompositeType>) {
+        let mut rep: Vec<_> = rep.iter().map(|dct| dct.metadata_ref).collect();
 
         unsafe {
-            // we create an array with our saved enums
             let enum_array =
                 LLVMDIBuilderGetOrCreateTypeArray(builder, rep.as_mut_ptr(), rep.len());
-            // we replace the DICompileUnit enums
             LLVMReplaceMDNodeOperandWith(
                 self.value_ref,
                 DICompileUnitOperand::EnumTypes as u32,
