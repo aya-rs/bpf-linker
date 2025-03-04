@@ -13,7 +13,7 @@ use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
 use super::types::{
-    di::{DICompileUnit, DIType},
+    di::{DIBasicType, DIBasicTypeKind, DICompileUnit, DIType},
     ir::{Function, MDNode, Metadata, Value},
 };
 use crate::llvm::{iter::*, types::di::DISubprogram};
@@ -23,55 +23,14 @@ use crate::llvm::{iter::*, types::di::DISubprogram};
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
-enum DIBasicType {
-    I8,
-}
-
-impl DIBasicType {
-    fn llvm_create_basic_type(&self, builder: LLVMDIBuilderRef) -> LLVMMetadataRef {
-        let name = self.name();
-        unsafe {
-            LLVMDIBuilderCreateBasicType(
-                builder,
-                name.as_ptr() as *const _,
-                name.len(),
-                self.size_in_bits(),
-                self.dwarf_type_encoding(),
-                0,
-            )
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            Self::I8 => "i8",
-        }
-    }
-
-    fn size_in_bits(&self) -> u64 {
-        match self {
-            Self::I8 => 8,
-        }
-    }
-
-    // DWARF encoding https://llvm.org/docs/LangRef.html#dibasictype
-    fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
-        match self {
-            // DW_ATE_signed
-            Self::I8 => 0x5,
-        }
-    }
-}
-
-pub struct DISanitizer {
+pub struct DISanitizer<'ctx> {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types: Vec<String>,
-    basic_types: HashMap<DIBasicType, LLVMMetadataRef>,
+    basic_types: HashMap<DIBasicTypeKind, DIBasicType<'ctx>>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -102,8 +61,8 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
     n
 }
 
-impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
+impl<'ctx> DISanitizer<'_> {
+    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer<'ctx> {
         DISanitizer {
             context,
             module,
@@ -116,11 +75,10 @@ impl DISanitizer {
     }
 
     /// Returns a metadata ref given a [`DIBasicType`].
-    fn di_basic_type(&mut self, di_bt: DIBasicType) -> LLVMMetadataRef {
-        *self
-            .basic_types
+    fn di_basic_type(&'ctx mut self, di_bt: DIBasicTypeKind) -> &'ctx DIBasicType<'ctx> {
+        self.basic_types
             .entry(di_bt)
-            .or_insert_with(|| di_bt.llvm_create_basic_type(self.builder))
+            .or_insert_with(|| DIBasicType::llvm_create(self.context, self.builder, di_bt))
     }
 
     fn visit_mdnode_item(&mut self, item: &mut Item) {
@@ -139,8 +97,8 @@ impl DISanitizer {
                             if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
                                 if let Item::Operand(ref mut op) = item {
                                     // get i8 DIBasicType
-                                    let i8_bt = self.di_basic_type(DIBasicType::I8);
-                                    op.replace(unsafe { LLVMMetadataAsValue(self.context, i8_bt) })
+                                    let i8_bt = self.di_basic_type(DIBasicTypeKind::I8);
+                                    op.replace(i8_bt.value_ref);
                                 } else {
                                     // c_void enum is not an Item::Operand so we cannot replace it
                                     warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")

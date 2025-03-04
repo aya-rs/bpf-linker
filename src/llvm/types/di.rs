@@ -7,11 +7,15 @@ use std::{
 
 use gimli::DwTag;
 use llvm_sys::{
-    core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
+    core::{
+        LLVMGetNumOperands, LLVMGetOperand, LLVMMetadataAsValue, LLVMReplaceMDNodeOperandWith,
+        LLVMValueAsMetadata,
+    },
     debuginfo::{
-        LLVMDIBuilderGetOrCreateTypeArray, LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile,
-        LLVMDISubprogramGetLine, LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName,
-        LLVMDITypeGetOffsetInBits, LLVMDITypeGetSizeInBits, LLVMGetDINodeTag,
+        LLVMDIBuilderCreateBasicType, LLVMDIBuilderGetOrCreateTypeArray, LLVMDIFileGetFilename,
+        LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine, LLVMDITypeGetFlags,
+        LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMDITypeGetSizeInBits,
+        LLVMDWARFTypeEncoding, LLVMGetDINodeTag,
     },
     prelude::{LLVMContextRef, LLVMDIBuilderRef, LLVMMetadataRef, LLVMValueRef},
 };
@@ -494,5 +498,77 @@ impl DICompileUnit<'_> {
                 enum_array,
             );
         }
+    }
+}
+
+/// Represents [`DIBasicType`] kinds.
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+pub enum DIBasicTypeKind {
+    I8,
+}
+
+impl DIBasicTypeKind {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::I8 => "i8",
+        }
+    }
+
+    fn size_in_bits(&self) -> u64 {
+        match self {
+            Self::I8 => 8,
+        }
+    }
+
+    // DWARF encoding https://llvm.org/docs/LangRef.html#dibasictype
+    fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
+        match self {
+            // DW_ATE_signed
+            Self::I8 => 0x5,
+        }
+    }
+}
+
+/// Represents the debug information for a basic type in LLVM IR.
+pub struct DIBasicType<'ctx> {
+    pub value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl DIBasicType<'_> {
+    /// Constructs a new [`DIBasicType`] from the given `value_ref`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a valid
+    /// instance of [LLVM `DIBasicType`](https://llvm.org/doxygen/classllvm_1_1DIBasicType.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any valiation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Creates a new [`DIBasicType`] of `kind` given a `context` and a `builder`.
+    pub fn llvm_create(
+        ctx: LLVMContextRef,
+        builder: LLVMDIBuilderRef,
+        kind: DIBasicTypeKind,
+    ) -> Self {
+        let name = kind.name();
+        let metadata_ref = unsafe {
+            LLVMDIBuilderCreateBasicType(
+                builder,
+                name.as_ptr() as *const _,
+                name.len(),
+                kind.size_in_bits(),
+                kind.dwarf_type_encoding(),
+                0,
+            )
+        };
+
+        unsafe { Self::from_value_ref(LLVMMetadataAsValue(ctx, metadata_ref)) }
     }
 }
