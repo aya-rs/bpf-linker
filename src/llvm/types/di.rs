@@ -317,6 +317,11 @@ impl DICompositeType<'_> {
     pub fn size_in_bits(&self) -> u64 {
         unsafe { LLVMDITypeGetSizeInBits(LLVMValueAsMetadata(self.value_ref)) }
     }
+
+    /// Returns the [`DICompositeType`] LLVM value ref as a `u64`.
+    pub fn value_id(&self) -> u64 {
+        self.value_ref as u64
+    }
 }
 
 /// Represents the operands for a [`DISubprogram`]. The enum values correspond
@@ -531,7 +536,7 @@ impl DIBasicTypeKind {
 
 /// Represents the debug information for a basic type in LLVM IR.
 pub struct DIBasicType<'ctx> {
-    pub value_ref: LLVMValueRef,
+    pub(crate) value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
