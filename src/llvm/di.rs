@@ -463,21 +463,21 @@ impl<'ctx> DISanitizer<'_> {
             .collect()
     }
 
-    // Removes `c_void` Rust enum from all DICompileUnit.
-    // After replacing `c_void` enum with a DIBasicType
-    // the DICompileUnit still references the `c_void` enum which
-    // triggers a casting assertion in LLVM.
+    /// Removes `c_void` Rust enum from all [`DICompileUnit`]. After replacing
+    /// `c_void` enum with a [`DIBasicType`] the [`DICompileUnit`] still
+    /// references the `c_void` enum which triggers a casting assertion in LLVM.
     fn fix_di_compile_units(&mut self) {
         for mut di_cu in self.di_compile_units() {
             let tmp_cu = di_cu.clone();
-            let enum_types: Vec<_> = tmp_cu.enum_types().collect();
-            let enum_types_len = enum_types.len();
+            let enum_types = tmp_cu.enum_types();
+            let mut need_replace = false;
             let new_enums: Vec<_> = enum_types
                 .into_iter()
                 .filter(|e| {
                     if let Some(name) = e.name() {
                         // we filter c_void Rust enum
                         if c"c_void" == name && e.size_in_bits() == 8 {
+                            need_replace = true;
                             return self.replaced_enums.contains(&e.value_id());
                         }
                     }
@@ -485,8 +485,8 @@ impl<'ctx> DISanitizer<'_> {
                 })
                 .collect();
 
-            if enum_types_len != new_enums.len() {
-                di_cu.replace_enum_types(self.builder, &new_enums);
+            if need_replace {
+                di_cu.replace_enum_types(self.builder, new_enums);
             }
         }
     }

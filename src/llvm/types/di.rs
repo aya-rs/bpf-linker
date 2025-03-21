@@ -459,7 +459,7 @@ pub struct DICompileUnit<'ctx> {
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl DICompileUnit<'_> {
+impl<'ctx> DICompileUnit<'ctx> {
     /// Constructs a new [`DICompileUnit`] from the given `value_ref`.
     ///
     /// # Safety
@@ -491,8 +491,11 @@ impl DICompileUnit<'_> {
         })
     }
 
-    pub fn replace_enum_types(&mut self, builder: LLVMDIBuilderRef, rep: &[DICompositeType]) {
-        let mut rep: Vec<_> = rep.iter().map(|dct| dct.metadata_ref).collect();
+    pub fn replace_enum_types<I>(&mut self, builder: LLVMDIBuilderRef, rep: I)
+    where
+        I: IntoIterator<Item = DICompositeType<'ctx>>,
+    {
+        let mut rep: Vec<_> = rep.into_iter().map(|dct| dct.metadata_ref).collect();
 
         unsafe {
             let enum_array =
