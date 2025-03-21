@@ -225,7 +225,7 @@ enum DICompositeTypeOperand {
 /// Composite type is a kind of type that can include other types, such as
 /// structures, enums, unions, etc.
 pub struct DICompositeType<'ctx> {
-    metadata_ref: LLVMMetadataRef,
+    pub(crate) metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }

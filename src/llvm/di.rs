@@ -463,9 +463,10 @@ impl<'ctx> DISanitizer<'_> {
             .collect()
     }
 
-    /// Removes `c_void` Rust enum from all [`DICompileUnit`]. After replacing
-    /// `c_void` enum with a [`DIBasicType`] the [`DICompileUnit`] still
-    /// references the `c_void` enum which triggers a casting assertion in LLVM.
+    /// Removes replaced `c_void` Rust enum from all [`DICompileUnit`]. After
+    /// replacing `c_void` enum with a [`DIBasicType`] the [`DICompileUnit`] still
+    /// hold a reference to the enum and still believes it is a [`DICompositeType`]
+    /// which triggers a casting assertion in LLVM.
     fn fix_di_compile_units(&mut self) {
         for mut di_cu in self.di_compile_units() {
             let tmp_cu = di_cu.clone();
@@ -474,14 +475,14 @@ impl<'ctx> DISanitizer<'_> {
             let new_enums: Vec<_> = enum_types
                 .into_iter()
                 .filter(|e| {
-                    if let Some(name) = e.name() {
-                        // we filter c_void Rust enum
-                        if c"c_void" == name && e.size_in_bits() == 8 {
-                            need_replace = true;
-                            return self.replaced_enums.contains(&e.value_id());
-                        }
+                    let kind = unsafe { LLVMGetMetadataKind(e.metadata_ref) };
+
+                    if matches!(kind, LLVMMetadataKind::LLVMDIBasicTypeMetadataKind) {
+                        need_replace = true;
+                        return false;
                     }
-                    false
+
+                    true
                 })
                 .collect();
 
