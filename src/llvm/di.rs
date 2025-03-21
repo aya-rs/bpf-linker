@@ -29,7 +29,6 @@ pub struct DISanitizer<'ctx> {
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
-    replaced_enums: HashSet<u64>,
     skipped_types: Vec<String>,
     basic_types: HashMap<DIBasicTypeKind, DIBasicType<'ctx>>,
 }
@@ -70,7 +69,6 @@ impl<'ctx> DISanitizer<'_> {
             builder: unsafe { LLVMCreateDIBuilder(module) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
-            replaced_enums: HashSet::new(),
             skipped_types: Vec::new(),
             basic_types: HashMap::new(),
         }
@@ -97,12 +95,10 @@ impl<'ctx> DISanitizer<'_> {
                         if let Some(name) = di_composite_type.name() {
                             // we found the c_void enum
                             if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
-                                let value_id = di_composite_type.value_id();
                                 if let Item::Operand(ref mut op) = item {
                                     // get i8 DIBasicType
                                     let i8_bt = self.di_basic_type(DIBasicTypeKind::I8);
                                     op.replace(i8_bt.value_ref);
-                                    let _ = self.replaced_enums.insert(value_id);
                                 } else {
                                     // c_void enum is not an Item::Operand so we cannot replace it
                                     warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")
