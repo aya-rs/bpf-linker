@@ -4,7 +4,7 @@
 
 pub fn dep_public_symbol() -> u8 {
     // read_volatile stops LTO inlining the function in the calling crate
-    unsafe { core::ptr::read_volatile(0 as *const u8) }
+    unsafe { core::ptr::read_volatile(core::ptr::dangling()) }
 }
 
 #[no_mangle]
