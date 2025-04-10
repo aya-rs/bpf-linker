@@ -14,18 +14,15 @@ use std::{
 use ar::Archive;
 use llvm_sys::{
     bit_writer::LLVMWriteBitcodeToFile,
-    core::{
-        LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler, LLVMDisposeModule,
-        LLVMGetTarget,
-    },
+    core::{LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler, LLVMGetTarget},
     error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
-    prelude::{LLVMContextRef, LLVMModuleRef},
+    prelude::LLVMContextRef,
     target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
 };
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::llvm;
+use crate::llvm::{self, LLVMTypeError, LLVMTypeWrapper, Module};
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -77,6 +74,10 @@ pub enum LinkerError {
     /// The input object file does not have embedded bitcode.
     #[error("no bitcode section found in {0}")]
     MissingBitcodeSection(PathBuf),
+
+    /// Instantiating of an LLVM type failed.
+    #[error(transparent)]
+    LLVMType(#[from] LLVMTypeError),
 }
 
 /// BPF Cpu type
@@ -224,21 +225,26 @@ pub struct LinkerOptions {
 }
 
 /// BPF Linker
-pub struct Linker {
+pub struct Linker<'ctx> {
     options: LinkerOptions,
     context: LLVMContextRef,
-    module: LLVMModuleRef,
+    module: Module<'ctx>,
     target_machine: LLVMTargetMachineRef,
     diagnostic_handler: DiagnosticHandler,
 }
 
-impl Linker {
+impl Linker<'_> {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
+        let context = unsafe { LLVMContextCreate() };
+        let module = Module::new(
+            options.output.file_stem().unwrap().to_str().unwrap(),
+            context,
+        );
         Linker {
             options,
-            context: ptr::null_mut(),
-            module: ptr::null_mut(),
+            context,
+            module,
             target_machine: ptr::null_mut(),
             diagnostic_handler: DiagnosticHandler::new(),
         }
@@ -365,7 +371,7 @@ impl Linker {
             Archive => panic!("nested archives not supported duh"),
         };
 
-        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
+        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module.as_ptr(), &bitcode) } {
             return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 
@@ -407,11 +413,11 @@ impl Linker {
                 })
             }
             None => {
-                let c_triple = unsafe { LLVMGetTarget(*module) };
+                let c_triple = unsafe { LLVMGetTarget(module.as_ptr()) };
                 let triple = unsafe { CStr::from_ptr(c_triple) }.to_str().unwrap();
                 if triple.starts_with("bpf") {
                     // case 2
-                    (triple, unsafe { llvm::target_from_module(*module) })
+                    (triple, unsafe { llvm::target_from_module(module.as_ptr()) })
                 } else {
                     // case 3.
                     info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
@@ -452,17 +458,18 @@ impl Linker {
 
         if self.options.btf {
             // if we want to emit BTF, we need to sanitize the debug information
-            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            llvm::DISanitizer::new(self.context, &self.module)
+                .run(&mut self.module, &self.options.export_symbols)?;
         } else {
             // if we don't need BTF emission, we can strip DI
-            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            let ok = unsafe { llvm::strip_debug_info(self.module.as_ptr()) };
             debug!("Stripping DI, changed={}", ok);
         }
 
         unsafe {
             llvm::optimize(
                 self.target_machine,
-                self.module,
+                &mut self.module,
                 self.options.optimize,
                 self.options.ignore_inline_never,
                 &self.options.export_symbols,
@@ -486,7 +493,7 @@ impl Linker {
     fn write_bitcode(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing bitcode to {:?}", output);
 
-        if unsafe { LLVMWriteBitcodeToFile(self.module, output.as_ptr()) } == 1 {
+        if unsafe { LLVMWriteBitcodeToFile(self.module.as_ptr(), output.as_ptr()) } == 1 {
             return Err(LinkerError::WriteBitcodeError);
         }
 
@@ -496,14 +503,21 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, output) }.map_err(LinkerError::WriteIRError)
+        unsafe { llvm::write_ir(self.module.as_ptr(), output) }.map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
         info!("emitting {:?} to {:?}", output_type, output);
 
-        unsafe { llvm::codegen(self.target_machine, self.module, output, output_type) }
-            .map_err(LinkerError::EmitCodeError)
+        unsafe {
+            llvm::codegen(
+                self.target_machine,
+                self.module.as_ptr(),
+                output,
+                output_type,
+            )
+        }
+        .map_err(LinkerError::EmitCodeError)
     }
 
     fn llvm_init(&mut self) {
@@ -542,24 +556,23 @@ impl Linker {
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
-            self.module = llvm::create_module(
+            self.module = Module::new(
                 self.options.output.file_stem().unwrap().to_str().unwrap(),
                 self.context,
-            )
-            .unwrap();
+            );
         }
     }
 }
 
-impl Drop for Linker {
+impl Drop for Linker<'_> {
     fn drop(&mut self) {
         unsafe {
             if !self.target_machine.is_null() {
                 LLVMDisposeTargetMachine(self.target_machine);
             }
-            if !self.module.is_null() {
-                LLVMDisposeModule(self.module);
-            }
+            // if !self.module.is_null() {
+            //     LLVMDisposeModule(self.module);
+            // }
             if !self.context.is_null() {
                 LLVMContextDispose(self.context);
             }
