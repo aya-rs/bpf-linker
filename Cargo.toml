@@ -17,8 +17,8 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-anyhow = "1.0.97"
-clap = { version = "4.5.35", features = ["derive"] }
+anyhow = "1.0.98"
+clap = { version = "4.5.36", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
@@ -37,7 +37,7 @@ tracing = "0.1"
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.1", default-features = false }
 rustc-build-sysroot = { version = "0.5.4", default-features = false }
-which = { version = "7.0.2", default-features = false, features = ["regex"] }
+which = { version = "7.0.3", default-features = false, features = ["regex"] }
 
 [[bin]]
 name = "bpf-linker"
