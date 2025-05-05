@@ -1,0 +1,42 @@
+name: Free disk space
+description: Clean up the runner from unnecessary files and packages
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      run: |
+        set -euxo pipefail
+          sudo apt -y remove \
+            azure-cli \
+            '^aspnetcore-.*' \
+            '^dotnet-.*' \
+            firefox \
+            '^google-cloud-.*' \
+            '^google-chrome-*' \
+            '^imagemagick.*' \
+            java-common \
+            kubectl \
+            '^libmagick.*' \
+            '^libmono.*' \
+            '^libnginx.*' \
+            '^microsoft-edge.*' \
+            '^mongodb-.*' \
+            mono-devel \
+            '^mysql-.*' \
+            '^php.*' \
+            powershell \
+            '^r-.*'
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/lib/jvm \
+            /usr/local/.ghcup \
+            /usr/local/aws* \
+            /usr/local/bin/{aliyun,azcopy,bicep,helm,minikube,oc,occopy,packer,pulumi*,stack,terraform} \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/share/{chromium,powershell,vcpkg} \
+            /usr/share/dotnet || true
+          sudo docker image prune --all --force || true
