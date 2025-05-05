@@ -33,6 +33,9 @@ log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
 tracing = "0.1"
 
+[build-dependencies]
+target-lexicon = { version = "0.13.2", default-features = false }
+
 [dev-dependencies]
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.1", default-features = false }

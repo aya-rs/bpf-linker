@@ -9,15 +9,31 @@ jobs:
     uses: ./.github/workflows/llvm.yml
 
   upload-bins:
-    # TODO: Build for macos someday.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+          - os: ubuntu-22.04
+            target: riscv64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
     needs: llvm
+
+    env:
+      RUST_BACKTRACE: full
+
     steps:
       - name: Restore LLVM
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target-llvm)] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH
@@ -28,9 +44,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/upload-rust-binary-action@v1
-        with:
-          bin: bpf-linker
-          features: llvm-sys/force-static
+      - name: Build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BPF_LINKER_LLVM_PREFIX: "/llvm-install"
+        run: |
+          icedragon cargo \
+            --target ${{ matrix.target.target }} \
+            --volume "${{ github.workspace }}:/llvm-install" \
+            -- \
+            build \
+            --no-default-features --features llvm-sys/no-llvm-linking \
+            --release
+
+      - uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/${{ matrix.target }}/release/bpf-linker
+          asset_name: bpf-linker-${{ matrix.target }}
+          tag: ${{ github.ref }}

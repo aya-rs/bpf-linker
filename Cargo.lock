@@ -110,6 +110,7 @@ dependencies = [
  "log",
  "regex",
  "rustc-build-sysroot",
+ "target-lexicon",
  "thiserror 2.0.12",
  "tracing",
  "tracing-appender",
@@ -816,6 +817,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "target-lexicon"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e502f78cdbb8ba4718f566c418c52bc729126ffd16baee5baa718cf25dd5a69a"
 
 [[package]]
 name = "tempfile"
