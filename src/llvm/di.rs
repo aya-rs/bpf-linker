@@ -79,7 +79,7 @@ impl<'ctx> DISanitizer<'_> {
         }
     }
 
-    /// Returns a metadata ref given a [`DIBasicType`].
+    /// Returns a [`DIBasicType`] given a [`DIBasicTypeKind`].
     fn di_basic_type(&'ctx mut self, di_bt: DIBasicTypeKind) -> &'ctx DIBasicType<'ctx> {
         self.basic_types
             .entry(di_bt)
