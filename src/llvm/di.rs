@@ -61,6 +61,11 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
     n
 }
 
+/// [`LLVMGetMetadataKind`] wrapper
+fn kind(m: LLVMMetadataRef) -> LLVMMetadataKind {
+    unsafe { LLVMGetMetadataKind(m) }
+}
+
 impl<'ctx> DISanitizer<'_> {
     pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer<'ctx> {
         DISanitizer {
@@ -471,7 +476,7 @@ impl<'ctx> DISanitizer<'_> {
             let new_enums: Vec<_> = enum_types
                 .into_iter()
                 .filter(|e| {
-                    let kind = unsafe { LLVMGetMetadataKind(e.metadata_ref) };
+                    let kind = kind(e.metadata_ref);
 
                     if matches!(kind, LLVMMetadataKind::LLVMDIBasicTypeMetadataKind) {
                         need_replace = true;
