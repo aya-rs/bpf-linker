@@ -527,7 +527,7 @@ impl DIBasicTypeKind {
     fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
         match self {
             // DW_ATE_signed
-            Self::I8 => 0x5,
+            Self::I8 => gimli::DW_ATE_signed.0.into(),
         }
     }
 }
