@@ -17,13 +17,45 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 ## Installation
 
-The linker requires LLVM 19. It can use the same LLVM used by the rust compiler,
-or it can use an external LLVM installation.
+### cargo-binstall
 
-If your target is `aarch64-unknown-linux-gnu` (i.e. Linux on Apple Silicon) you 
-will have to use the *external LLVM* method.
+The recommended way is using cargo-binstall to fetch the ready to use,
+statically linked binary:
+
+```sh
+cargo binstall bpf-linker
+```
+
+### Manual download
+
+The same binaries can be manually downloaded from the GitHub releases.
+
+### cargo
+
+The linker can be installed with cargo and built from source. This method works
+only for x86_64 Linux hosts with glibc (`x86_64-unknown-linux-gnu`), but does
+not work with other architectures (e.g. aarch64) or with musl libc (any
+`*-*-linux-musl` target). See the [Building] section below for more
+explanation.
+
+```sh
+cargo install bpf-linker
+```
+
+## Building
+
+bpf-linker relies on the most recent LLVM release (currently 20.x), matching
+the one used by the nightly Rust compiler. Such recent versions are usually
+not packaged in Linux distributions. Furthermore, Rust and bpf-linker might
+occasionally need LLVM patches, which are not yet included in upstream releases.
+
+There are two methods of including LLVM in bpf-linker.
 
 ### Using LLVM provided by rustc
+
+Rust toolchains for the `x86_64-unknown-linux-gnu` target provide a local copy
+of a shared `libLLVM.so` library. rustc-llvm-proxy provides a possibility to
+link bpf-linker to that library.
 
 All you need to do is run:
 
@@ -31,22 +63,45 @@ All you need to do is run:
 cargo install bpf-linker
 ```
 
-### Using external LLVM
+However, this method does not work for any other target.
 
-On Debian based distributions you need to install the `llvm-19-dev`, `libclang-19-dev`
-and `libpolly-19-dev` packages. If your distro doesn't have them you can get them
-from the official LLVM repo at https://apt.llvm.org.
+### Using a locally built LLVM
 
-On rpm based distribution you need the `llvm-devel` and `clang-devel` packages.
-If your distro doesn't have them you can get them from Fedora Rawhide.
+Aya community hosts its own fork of LLVM, which usually is no different from
+the one hosted byi the Rust community, but occasionaly might contain our own
+patches.
 
-Once you have installed LLVM 19 you can install the linker running:
+Linux builds (of both LLVM and bpf-linker) are using the icedragon tool, which
+provides a containeried environment with all necessary dependencies.
+
+```sh
+cargo install icedragon
+```
+
+This repository provides a script to build a local copy of LLVM, with the
+following syntax.
+
+```sh
+./build-llvm.sh --install-dir <INSTALL_DIR> --target <TARGET>
+```
+
+Examples:
+
+```sh
+./build-llvm.sh --install-dir ~/llvm --target x86_64-unknown-linux-musl
+```
+```sh
+./build-llvm.sh --install-dir ~/llvm --target aarch64-unknown-linux-musl
+```
+```sh
+./build-llvm.sh --install-dir ~/llvm --target aarch64-apple-darwin
+```
+
+For Linux targets, it supports only musl libc (`*-*-linux-musl` targets).
 
 ```sh
 cargo install bpf-linker --no-default-features
 ```
-
-If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
 
 # Usage
 

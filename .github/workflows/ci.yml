@@ -48,8 +48,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
-    # We don't use ubuntu-latest because we care about the apt packages available.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,17 +56,36 @@ jobs:
           - stable
           - beta
           - nightly
-        llvm:
-          - 20
-          - source
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+        # We don't use ubuntu-latest because we care about the apt packages available.
+        target:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            build-type: native
+          - os: macos-13
+            target: x86_64-apple-darwin
+            build-type: native
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            build-type: cross
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            build-type: native
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            build-type: cross
+    name: rustc=${{ matrix.rust }} target=${{ matrix.target.target }}
     needs: llvm
 
     env:
       RUST_BACKTRACE: full
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
 
       - name: Install Rust ${{ matrix.rust }}
         if: matrix.rust != 'nightly'
@@ -85,21 +103,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check (default features, no system LLVM)
+        if: matrix.target.build-type == 'native'
         run: cargo check
 
       - name: Build (default features, no system LLVM)
+        if: matrix.target.build-type == 'native'
         run: cargo build
 
       - name: Install btfdump
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && matrix.target.build-type == 'native'
         run: cargo install btfdump
 
+      - name: Install icedragon
+        if: runner.os == 'Linux'
+        run: cargo install --git https://github.com/exein-io/icedragon --branch persistent-rustup
+
+      - name: Install btfdump
+        if: matrix.rust == 'nightly' && matrix.target.build-type == 'cross'
+        run: icedragon cargo -- install btfdump
+
       - name: Install prerequisites
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && startsWith(matrix.target.target, 'x86_64')
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
         #
         # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
+        #
+        # libelf is a dependency of libbpf.
         #
         # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
         #
@@ -107,43 +137,26 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt update
-          sudo apt -y install gcc-multilib
+          sudo apt -y install gcc-multilib libelf-dev
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
-      - name: Install LLVM
-        if: matrix.llvm != 'source'
+      - name: Install prerequisites
+        if: runner.os == 'macOS'
+        # We need system-wide LLVM only for FileCheck.
         run: |
           set -euxo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
-
-          sudo apt update
-          # TODO(vadorovsky): Remove the requirement of libpolly.
-          #
-          # Packages from apt.llvm.org are being built all at once, with one
-          # cmake build with superset of options, then different binaries and
-          # libraries are being included in different packages.
-          #
-          # That results in `llvm-config --libname --link-static` mentioning
-          # libpolly, even if it's not installed. The output of that command is
-          # being used in build.rs of llvm-sys, so building llvm-sys on such
-          # system is complaining about lack of libpolly.
-          #
-          # Hopefully that nightmare goes away once we switch to binstalls and
-          # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+          brew install llvm
+          echo $(brew --prefix)/opt/llvm/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
-        if: matrix.llvm == 'source'
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
+          key: ${{ needs.llvm.outputs[format('cache-key-{0}', matrix.target.target)] }}
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
-        if: matrix.llvm == 'source'
+        if: matrix.target.build-type == 'native'
         run: |
           set -euxo pipefail
           echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
@@ -160,16 +173,62 @@ jobs:
           cargo clean -p llvm-sys --release
 
       - uses: taiki-e/install-action@cargo-hack
+        if: matrix.target.build-type == 'native'
+
+      # Run cargo commands with `cargo hack` for native targets.
+      # Run cargo commands with `icedragon cargo` for cross targets. Running
+      # `cargo hack` wouldn't work, because cross builds need a custom LLVM
+      # build and can't use the rustc proxy, therefore `--feature-powerset`
+      # won't work.
 
       - name: Check
+        if: matrix.target.build-type == 'native'
         run: cargo hack check --feature-powerset
 
+      - name: Check
+        if: matrix.target.build-type == 'cross'
+        env:
+          BPF_LINKER_LLVM_PREFIX: "/llvm-install"
+        run: |
+          icedragon cargo \
+            --target ${{ matrix.target.target }} \
+            --volume "${{ github.workspace }}/llvm-install:/llvm-install" \
+            -- \
+            check \
+            --no-default-features --features llvm-sys/no-llvm-linking
+
       - name: Build
+        if: matrix.target.build-type == 'native'
         run: cargo hack build --feature-powerset
 
+      - name: Build
+        if: matrix.target.build-type == 'cross'
+        env:
+          BPF_LINKER_LLVM_PREFIX: "/llvm-install"
+        run: |
+          icedragon cargo \
+            --target ${{ matrix.target.target }} \
+            --volume "${{ github.workspace }}/llvm-install:/llvm-install" \
+            -- \
+            build \
+            --no-default-features --features llvm-sys/no-llvm-linking
+
       - name: Test
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && matrix.target.build-type == 'native'
         run: cargo hack test --feature-powerset
+
+      - name: Test
+        # We can run tests only for the x86_64-unknown-linux-musl cross target.
+        if: matrix.rust == 'nightly' && matrix.target.build-type == 'cross' && startsWith(matrix.target.target, 'x86_64')
+        env:
+          BPF_LINKER_LLVM_PREFIX: "/llvm-install"
+        run: |
+          icedragon cargo \
+            --target ${{ matrix.target.target }} \
+            --volume "${{ github.workspace }}/llvm-install:/llvm-install" \
+            -- \
+            test \
+            --no-default-features --features llvm-sys/no-llvm-linking
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
@@ -179,10 +238,24 @@ jobs:
           submodules: recursive
 
       - name: Install
-        if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && matrix.target.build-type == 'native' && startsWith(matrix.target.target, 'x86_64')
+        run: |
+          cargo install --path .
+
+      - name: Install
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && matrix.target.build-type == 'cross' && startsWith(matrix.target.target, 'x86_64')
+        env:
+          BPF_LINKER_LLVM_PREFIX: "/llvm-install"
+        run: |
+          icedragon cargo \
+            --target ${{ matrix.target.target }} \
+            --volume "${{ github.workspace }}/llvm-install:/llvm-install" \
+            --volume ~/.cargo:/install \
+            -- \
+            install --path . --root /install \
+            --no-default-features --features llvm-sys/no-llvm-linking
 
       - name: Run aya integration tests
-        if: matrix.rust == 'nightly'
+        if: matrix.rust == 'nightly' && runner.os == 'Linux' && startsWith(matrix.target.target, 'x86_64')
         working-directory: aya
         run: cargo xtask integration-test local
