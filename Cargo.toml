@@ -26,8 +26,8 @@ tracing-tree = "0.4"
 # lib deps
 ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.4", optional = true }
-gimli = { version = "0.31.1" }
-libc = { version = "0.2.172" }
+gimli = { version = "0.32.0" }
+libc = { version = "0.2.173" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "201.0.0-rc1" }
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
