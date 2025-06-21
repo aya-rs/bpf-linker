@@ -471,24 +471,16 @@ impl<'ctx> DISanitizer<'_> {
     fn fix_di_compile_units(&mut self) {
         for mut di_cu in self.di_compile_units() {
             let tmp_cu = di_cu.clone();
-            let enum_types = tmp_cu.enum_types();
-            let mut need_replace = false;
-            let new_enums: Vec<_> = enum_types
-                .into_iter()
-                .filter(|e| {
-                    let kind = kind(e.metadata_ref);
-
-                    if matches!(kind, LLVMMetadataKind::LLVMDIBasicTypeMetadataKind) {
-                        need_replace = true;
-                        return false;
-                    }
-
-                    true
-                })
-                .collect();
+            let mut enum_types = tmp_cu.enum_types().peekable();
+            let need_replace = enum_types.any(|ct| {
+                matches!(
+                    kind(ct.metadata_ref),
+                    LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
+                )
+            });
 
             if need_replace {
-                di_cu.replace_enum_types(self.builder, new_enums);
+                di_cu.replace_enum_types(self.builder, enum_types);
             }
         }
     }
