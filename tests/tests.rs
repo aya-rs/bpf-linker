@@ -34,7 +34,7 @@ fn run_mode<F: Fn(&mut compiletest_rs::Config)>(
         target_rustcflags: Some(target_rustcflags),
         llvm_filecheck,
         mode,
-        src_base: PathBuf::from(format!("tests/{}", mode)),
+        src_base: PathBuf::from(format!("tests/{mode}")),
         ..Default::default()
     };
     config.link_deps();
