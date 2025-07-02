@@ -169,7 +169,10 @@ jobs:
 
       - name: Test
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset
+        # Running tests without `rustc-build-sysroot` feature is possible only
+        # with a custom Rust compiler with BPF targets enabled in the main
+        # sysroot.
+        run: cargo hack test --feature-powerset --include-features rustc-build-sysroot
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
