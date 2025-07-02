@@ -6,6 +6,10 @@ use std::{
     process::Command,
 };
 
+fn rustc_cmd() -> Command {
+    Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")))
+}
+
 fn find_binary(binary_re_str: &str) -> PathBuf {
     let binary_re = regex::Regex::new(binary_re_str).unwrap();
     let mut binary = which::which_re(binary_re).expect(binary_re_str);
@@ -93,6 +97,21 @@ where
     }
 }
 
+fn is_nightly() -> bool {
+    let output = rustc_cmd()
+        .arg("--version")
+        .output()
+        .expect("failed to determine rustc version");
+    if !output.status.success() {
+        panic!(
+            "failed to determine rustc version; :\n{}",
+            String::from_utf8_lossy(&output.stderr).trim_end()
+        );
+    }
+    let version = std::str::from_utf8(&output.stdout).expect("rustc version is not valid UTF-8");
+    version.contains("nightly")
+}
+
 fn btf_dump(src: &Path, dst: &Path) {
     let dst = std::fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
@@ -107,8 +126,7 @@ fn btf_dump(src: &Path, dst: &Path) {
 #[test]
 fn compile_test() {
     let target = "bpfel-unknown-none";
-    let rustc =
-        std::process::Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
+    let rustc = rustc_cmd();
     let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc)
         .expect("could not determine sysroot source directory");
     let root_dir = env::var_os("CARGO_MANIFEST_DIR")
@@ -145,4 +163,15 @@ fn compile_test() {
             cfg.llvm_filecheck_preprocess = Some(btf_dump);
         }),
     );
+    if is_nightly() {
+        run_mode(
+            target,
+            "assembly",
+            Some(&directory),
+            Some(|cfg: &mut compiletest_rs::Config| {
+                cfg.src_base = PathBuf::from("tests/nightly/btf");
+                cfg.llvm_filecheck_preprocess = Some(btf_dump);
+            }),
+        );
+    }
 }
