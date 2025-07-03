@@ -13,7 +13,7 @@ use llvm_sys::{
 macro_rules! llvm_iterator {
     ($trait_name:ident, $iterator_name:ident, $iterable:ty, $method_name:ident, $item_ty:ty, $first:expr, $last:expr, $next:expr $(,)?) => {
         pub trait $trait_name {
-            fn $method_name(&self) -> $iterator_name;
+            fn $method_name(&self) -> $iterator_name<'_>;
         }
 
         pub struct $iterator_name<'a> {
@@ -23,7 +23,7 @@ macro_rules! llvm_iterator {
         }
 
         impl $trait_name for $iterable {
-            fn $method_name(&self) -> $iterator_name {
+            fn $method_name(&self) -> $iterator_name<'_> {
                 let first = unsafe { $first(*self) };
                 let last = unsafe { $last(*self) };
                 assert_eq!(first.is_null(), last.is_null());
