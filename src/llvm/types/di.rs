@@ -184,7 +184,7 @@ impl DIDerivedType<'_> {
     }
 
     /// Returns the base type of this derived type.
-    pub fn base_type(&self) -> Metadata {
+    pub fn base_type(&self) -> Metadata<'_> {
         unsafe {
             let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
             Metadata::from_value_ref(value)
@@ -246,7 +246,7 @@ impl DICompositeType<'_> {
 
     /// Returns an iterator over elements (struct fields, enum variants, etc.)
     /// of the composite type.
-    pub fn elements(&self) -> impl Iterator<Item = Metadata> {
+    pub fn elements(&self) -> impl Iterator<Item = Metadata<'_>> {
         let elements =
             unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::Elements as u32) };
         let operands = NonNull::new(elements)
@@ -263,7 +263,7 @@ impl DICompositeType<'_> {
     }
 
     /// Returns the file that the composite type belongs to.
-    pub fn file(&self) -> DIFile {
+    pub fn file(&self) -> DIFile<'_> {
         unsafe {
             let metadata = LLVMDIScopeGetFile(self.metadata_ref);
             DIFile::from_metadata_ref(metadata)
