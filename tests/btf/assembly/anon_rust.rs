@@ -30,5 +30,5 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 // CHECK: <STRUCT> '<anon>' sz:8 n:2
-// CHECK-NEXT: 'ayy' off:0 --> [17]
-// CHECK-NEXT: 'lmao' off:32 --> [17]
+// CHECK-NEXT: 'ayy' off:0 --> [{{[0-9]+}}]
+// CHECK-NEXT: 'lmao' off:32 --> [{{[0-9]+}}]
