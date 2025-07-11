@@ -47,7 +47,11 @@ rust-llvm = [
     "dep:aya-rustc-llvm-proxy",
     "llvm-sys/no-llvm-linking",
 ]
-default = ["rust-llvm"]
+default = [
+    "rust-llvm",
+    "rustc-build-sysroot",
+]
+rustc-build-sysroot = []
 
 [workspace]
 members = ["xtask"]
