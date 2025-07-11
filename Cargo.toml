@@ -17,8 +17,8 @@ edition = "2021"
 
 [dependencies]
 # cli deps
-anyhow = "1.0.98"
-clap = { version = "4.5.40", features = ["derive"] }
+anyhow = { workspace = true }
+clap = { workspace = true }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
@@ -36,7 +36,7 @@ tracing = "0.1"
 [dev-dependencies]
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.1", default-features = false }
-rustc-build-sysroot = { version = "0.5.9", default-features = false }
+rustc-build-sysroot = { workspace = true }
 which = { version = "8.0.0", default-features = false, features = ["real-sys", "regex"] }
 
 [[bin]]
@@ -48,6 +48,16 @@ rust-llvm = [
     "llvm-sys/no-llvm-linking",
 ]
 default = ["rust-llvm"]
+
+[workspace]
+members = ["xtask"]
+
+[workspace.dependencies]
+# cli deps
+anyhow = "1.0.98"
+clap = { version = "4.5.40", features = ["derive"] }
+# dev deps
+rustc-build-sysroot = { version = "0.5.9", default-features = false }
 
 [profile.release]
 debug = true
