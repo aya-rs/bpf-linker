@@ -167,9 +167,26 @@ jobs:
       - name: Build
         run: cargo hack build --feature-powerset
 
-      - name: Test
+      # Toolchains provided by rustup include standard library artifacts
+      # only for Tier 1 targets, which do not include BPF targets.
+      # The default workaround is to use the `rustc-build-sysroot` feature,
+      # which builds a custom sysroot with the required BPF standard library
+      # before running compiler tests.
+      - name: Test (sysroot built on demand)
         if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset
+        run: cargo hack test --feature-powerset --include-features rustc-build-sysroot
+
+      # To make things easier for package maintainers, the step of building
+      # a custom sysroot can be skipped by omitting the `rustc-build-sysroot`
+      # feature. In that case, the sysroot provided by the current toolchain
+      # is expected to already contain the prebuilt standard library.
+      # Test this configuration by prebuilding the BPF standard library
+      # manually.
+      - name: Test (prebuilt BPF standard library)
+        if: matrix.rust == 'nightly'
+        run: |
+          cargo xtask build-std
+          cargo hack test --feature-powerset --exclude-features rustc-build-sysroot
 
       - uses: actions/checkout@v4
         if: matrix.rust == 'nightly'
