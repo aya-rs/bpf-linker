@@ -27,7 +27,7 @@ tracing-tree = "0.4"
 ar = { version = "0.9.0" }
 aya-rustc-llvm-proxy = { version = "0.9.4", optional = true }
 gimli = { version = "0.32.0" }
-libc = { version = "0.2.174" }
+libc = { version = "0.2.175" }
 llvm-sys = { features = ["disable-alltargets-init"], version = "201.0.0-rc1" }
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
@@ -59,7 +59,7 @@ members = ["xtask"]
 [workspace.dependencies]
 # cli deps
 anyhow = { version = "1.0.98", default-features = false }
-clap = { version = "4.5.42", features = ["derive"] }
+clap = { version = "4.5.44", features = ["derive"] }
 # dev deps
 rustc-build-sysroot = { version = "0.5.9", default-features = false }
 
