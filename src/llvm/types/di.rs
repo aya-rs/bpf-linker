@@ -150,8 +150,8 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
 #[repr(u32)]
 enum DIDerivedTypeOperand {
     /// [`DIType`] representing a base type of the given derived type.
-    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1032).
-    BaseType = 3,
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386).
+    BaseType = 5,
 }
 
 /// Represents the debug information for a derived type in LLVM IR.
@@ -212,8 +212,8 @@ impl DIDerivedType<'_> {
 #[repr(u32)]
 enum DICompositeTypeOperand {
     /// Elements of the composite type.
-    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-17.0.3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1230).
-    Elements = 4,
+    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813).
+    Elements = 6,
 }
 
 /// Represents the debug info for a composite type in LLVM IR.
