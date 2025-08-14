@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -67,7 +67,7 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust ${{ matrix.rust }}
         if: matrix.rust != 'nightly'
@@ -188,7 +188,7 @@ jobs:
           cargo xtask build-std
           cargo hack test --feature-powerset --exclude-features rustc-build-sysroot
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
         with:
           repository: aya-rs/aya
