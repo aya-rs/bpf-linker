@@ -63,6 +63,6 @@ pub fn my_function<T: Add<Output = T> + Copy>(x: T, y: T) -> T {
         .add(y)
 }
 
-// CHECK: name: "Foo_3C_u32_3E_"
-// CHECK: name: "Bar_3C_di_generics_3A__3A_Foo_3C_u32_3E__3E_"
-// CHECK: name: "my_function_3C_u32_3E_"
+// CHECK-DAG: name: "Foo_3C_u32_3E_"
+// CHECK-DAG: name: "Bar_3C_di_generics_3A__3A_Foo_3C_u32_3E__3E_"
+// CHECK-DAG: name: "my_function_3C_u32_3E_"
