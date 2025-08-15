@@ -150,7 +150,14 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
 #[repr(u32)]
 enum DIDerivedTypeOperand {
     /// [`DIType`] representing a base type of the given derived type.
-    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386).
+    /// Reference in [LLVM 19-20][llvm-19] and [LLVM 21][llvm-21].
+    ///
+    /// [llvm-19]: https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/IR/DebugInfoMetadata.h#L1084
+    /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386
+    ///
+    #[cfg(any(feature = "llvm-19", feature = "llvm-20"))]
+    BaseType = 3,
+    #[cfg(feature = "llvm-21")]
     BaseType = 5,
 }
 
@@ -211,8 +218,14 @@ impl DIDerivedType<'_> {
 /// correspond to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DICompositeTypeOperand {
-    /// Elements of the composite type.
-    /// [Reference in LLVM code](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813).
+    /// Elements of the composite type. Reference in [LLVM 19-20][llvm-19] and
+    /// [LLVM 21][llvm-21].
+    ///
+    /// [llvm-19]: https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/IR/DebugInfoMetadata.h#L1299
+    /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813
+    #[cfg(any(feature = "llvm-19", feature = "llvm-20"))]
+    Elements = 4,
+    #[cfg(feature = "llvm-21")]
     Elements = 6,
 }
 

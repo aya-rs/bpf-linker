@@ -31,7 +31,7 @@ jobs:
           components: clippy, rust-src
 
       - name: Run clippy
-        run: cargo clippy --features llvm-sys/no-llvm-linking --all-targets --workspace -- --deny warnings
+        run: cargo clippy --features llvm-21,llvm-sys-21/no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
     runs-on: ubuntu-latest
@@ -53,13 +53,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
-        llvm:
-          - 21
-          - source
+        include:
+          - rust: 1.86.0
+            llvm: 19
+            llvm-from: apt
+            exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
+          - rust: 1.89.0
+            llvm: 20
+            llvm-from: apt
+            exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+          - rust: beta
+            llvm: 20
+            llvm-from: apt
+            exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+          - rust: nightly
+            llvm: 21
+            llvm-from: apt
+            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+          - rust: nightly
+            llvm: 21
+            llvm-from: source
+            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
     name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
     needs: llvm
 
@@ -70,13 +84,6 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install Rust ${{ matrix.rust }}
-        if: matrix.rust != 'nightly'
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
-
-      - name: Install Rust ${{ matrix.rust }}
-        if: matrix.rust == 'nightly'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
@@ -91,11 +98,9 @@ jobs:
         run: cargo build
 
       - name: Install btfdump
-        if: matrix.rust == 'nightly'
         run: cargo install btfdump
 
       - name: Install prerequisites
-        if: matrix.rust == 'nightly'
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
         #
@@ -111,7 +116,7 @@ jobs:
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
       - name: Install LLVM
-        if: matrix.llvm != 'source'
+        if: matrix.llvm-from == 'apt'
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -135,7 +140,7 @@ jobs:
           echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
-        if: matrix.llvm == 'source'
+        if: matrix.llvm-from == 'source'
         uses: actions/cache/restore@v4
         with:
           path: llvm-install
@@ -143,7 +148,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
-        if: matrix.llvm == 'source'
+        if: matrix.llvm-from == 'source'
         run: |
           set -euxo pipefail
           echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
@@ -162,19 +167,32 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
 
       - name: Check
-        run: cargo hack check --feature-powerset
+        run: |
+          cargo hack check --feature-powerset \
+            --exclude-features ${{ matrix.exclude-features }} \
+            --features llvm-${{ matrix.llvm }}
 
       - name: Build
-        run: cargo hack build --feature-powerset
+        run: |
+          cargo hack build --feature-powerset \
+            --exclude-features ${{ matrix.exclude-features }} \
+            --features llvm-${{ matrix.llvm }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
       # The default workaround is to use the `rustc-build-sysroot` feature,
       # which builds a custom sysroot with the required BPF standard library
       # before running compiler tests.
+      #
+      # `RUSTC_BOOTSTRAP` is needed to make rustc-build-sysroot work on stable
+      # Rust.
       - name: Test (sysroot built on demand)
-        if: matrix.rust == 'nightly'
-        run: cargo hack test --feature-powerset --include-features rustc-build-sysroot
+        env:
+          RUSTC_BOOTSTRAP: 1
+        run: |
+          cargo hack test --feature-powerset \
+            --exclude-features ${{ matrix.exclude-features }} \
+            --features llvm-${{ matrix.llvm }},rustc-build-sysroot
 
       # To make things easier for package maintainers, the step of building
       # a custom sysroot can be skipped by omitting the `rustc-build-sysroot`
@@ -182,11 +200,17 @@ jobs:
       # is expected to already contain the prebuilt standard library.
       # Test this configuration by prebuilding the BPF standard library
       # manually.
+      #
+      # `RUSTC_BOOTSTRAP` is needed to make `xtask build-std` work on stable
+      # Rust.
       - name: Test (prebuilt BPF standard library)
-        if: matrix.rust == 'nightly'
+        env:
+          RUSTC_BOOTSTRAP: 1
         run: |
           cargo xtask build-std
-          cargo hack test --feature-powerset --exclude-features rustc-build-sysroot
+          cargo hack test --feature-powerset \
+            --exclude-features ${{ matrix.exclude-features }},rustc-build-sysroot \
+            --features llvm-${{ matrix.llvm }}
 
       - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
@@ -197,7 +221,7 @@ jobs:
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features
+        run: cargo install --path . --no-default-features --features llvm-${{ matrix.llvm }}
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
