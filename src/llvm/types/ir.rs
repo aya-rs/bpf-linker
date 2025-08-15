@@ -140,39 +140,7 @@ impl Metadata<'_> {
                 let di_subprogram = unsafe { DISubprogram::from_value_ref(value) };
                 Metadata::DISubprogram(di_subprogram)
             }
-            LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind
-            | LLVMMetadataKind::LLVMDICommonBlockMetadataKind
-            | LLVMMetadataKind::LLVMMDStringMetadataKind
-            | LLVMMetadataKind::LLVMConstantAsMetadataMetadataKind
-            | LLVMMetadataKind::LLVMLocalAsMetadataMetadataKind
-            | LLVMMetadataKind::LLVMDistinctMDOperandPlaceholderMetadataKind
-            | LLVMMetadataKind::LLVMMDTupleMetadataKind
-            | LLVMMetadataKind::LLVMDILocationMetadataKind
-            | LLVMMetadataKind::LLVMDIExpressionMetadataKind
-            | LLVMMetadataKind::LLVMDIGlobalVariableExpressionMetadataKind
-            | LLVMMetadataKind::LLVMGenericDINodeMetadataKind
-            | LLVMMetadataKind::LLVMDISubrangeMetadataKind
-            | LLVMMetadataKind::LLVMDIEnumeratorMetadataKind
-            | LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
-            | LLVMMetadataKind::LLVMDISubroutineTypeMetadataKind
-            | LLVMMetadataKind::LLVMDIFileMetadataKind
-            | LLVMMetadataKind::LLVMDICompileUnitMetadataKind
-            | LLVMMetadataKind::LLVMDILexicalBlockMetadataKind
-            | LLVMMetadataKind::LLVMDILexicalBlockFileMetadataKind
-            | LLVMMetadataKind::LLVMDINamespaceMetadataKind
-            | LLVMMetadataKind::LLVMDIModuleMetadataKind
-            | LLVMMetadataKind::LLVMDITemplateTypeParameterMetadataKind
-            | LLVMMetadataKind::LLVMDITemplateValueParameterMetadataKind
-            | LLVMMetadataKind::LLVMDILocalVariableMetadataKind
-            | LLVMMetadataKind::LLVMDILabelMetadataKind
-            | LLVMMetadataKind::LLVMDIObjCPropertyMetadataKind
-            | LLVMMetadataKind::LLVMDIImportedEntityMetadataKind
-            | LLVMMetadataKind::LLVMDIMacroMetadataKind
-            | LLVMMetadataKind::LLVMDIMacroFileMetadataKind
-            | LLVMMetadataKind::LLVMDIStringTypeMetadataKind
-            | LLVMMetadataKind::LLVMDIGenericSubrangeMetadataKind
-            | LLVMMetadataKind::LLVMDIArgListMetadataKind
-            | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Other(value),
+            _ => Metadata::Other(value),
         }
     }
 }
