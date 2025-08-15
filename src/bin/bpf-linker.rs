@@ -1,6 +1,10 @@
 #![deny(clippy::all)]
 
-#[cfg(feature = "rust-llvm")]
+#[cfg(any(
+    feature = "rust-llvm-19",
+    feature = "rust-llvm-20",
+    feature = "rust-llvm-21"
+))]
 extern crate aya_rustc_llvm_proxy;
 
 use std::{
