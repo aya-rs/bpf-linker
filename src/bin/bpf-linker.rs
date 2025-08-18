@@ -289,8 +289,6 @@ fn main() -> anyhow::Result<()> {
         target,
         cpu,
         cpu_features,
-        inputs,
-        output,
         output_type,
         libs,
         optimize,
@@ -302,9 +300,9 @@ fn main() -> anyhow::Result<()> {
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
         btf,
-    });
+    })?;
 
-    linker.link()?;
+    linker.link(&inputs, &output)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(

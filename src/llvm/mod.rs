@@ -6,6 +6,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     ffi::{c_uchar, c_void, CStr, CString},
+    marker::PhantomData,
     os::raw::c_char,
     ptr, slice, str,
 };
@@ -16,11 +17,11 @@ use libc::c_char as libc_char;
 use llvm_sys::{
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
-        LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
-        LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity, LLVMGetEnumAttributeKindForName,
-        LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2,
-        LLVMModuleCreateWithNameInContext, LLVMPrintModuleToFile, LLVMRemoveEnumAttributeAtIndex,
-        LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
+        LLVMContextDispose, LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer,
+        LLVMDisposeMessage, LLVMDisposeModule, LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity,
+        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
+        LLVMGetValueName2, LLVMModuleCreateWithNameInContext, LLVMPrintModuleToFile,
+        LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
     },
     debuginfo::LLVMStripModuleDebugInfo,
     error::{
@@ -40,8 +41,8 @@ use llvm_sys::{
     },
     target_machine::{
         LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
-        LLVMGetTargetFromTriple, LLVMRelocMode, LLVMTargetMachineEmitToFile, LLVMTargetMachineRef,
-        LLVMTargetRef,
+        LLVMDisposeTargetMachine, LLVMGetTargetFromTriple, LLVMRelocMode,
+        LLVMTargetMachineEmitToFile, LLVMTargetMachineRef, LLVMTargetRef,
     },
     transforms::pass_builder::{
         LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
@@ -73,15 +74,21 @@ unsafe fn parse_command_line_options<T: AsRef<str>>(args: &[T], overview: &str) 
     LLVMParseCommandLineOptions(c_ptrs.len() as i32, c_ptrs.as_ptr(), overview.as_ptr());
 }
 
-pub unsafe fn create_module(name: &str, context: LLVMContextRef) -> Option<LLVMModuleRef> {
+pub unsafe fn create_module<'ctx>(
+    name: &str,
+    context: &'ctx LLVMContextWrapped,
+) -> Option<LLVMModuleWrapped<'ctx>> {
     let c_name = CString::new(name).unwrap();
-    let module = LLVMModuleCreateWithNameInContext(c_name.as_ptr(), context);
+    let module = LLVMModuleCreateWithNameInContext(c_name.as_ptr(), context.context);
 
     if module.is_null() {
         return None;
     }
 
-    Some(module)
+    Some(LLVMModuleWrapped {
+        module,
+        _marker: PhantomData,
+    })
 }
 
 pub unsafe fn find_embedded_bitcode(
@@ -126,7 +133,7 @@ pub unsafe fn find_embedded_bitcode(
 #[must_use]
 pub unsafe fn link_bitcode_buffer(
     context: LLVMContextRef,
-    module: LLVMModuleRef,
+    module: &LLVMModuleWrapped,
     buffer: &[u8],
 ) -> bool {
     let mut linked = false;
@@ -141,7 +148,7 @@ pub unsafe fn link_bitcode_buffer(
     let mut temp_module = ptr::null_mut();
 
     if LLVMParseBitcodeInContext2(context, buffer, &mut temp_module) == 0 {
-        linked = LLVMLinkModules2(module, temp_module) == 0;
+        linked = LLVMLinkModules2(module.module, temp_module) == 0;
     }
 
     LLVMDisposeMemoryBuffer(buffer);
@@ -160,8 +167,8 @@ pub unsafe fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String>
     }
 }
 
-pub unsafe fn target_from_module(module: LLVMModuleRef) -> Result<LLVMTargetRef, String> {
-    let triple = LLVMGetTarget(module);
+pub unsafe fn target_from_module(module: &LLVMModuleWrapped) -> Result<LLVMTargetRef, String> {
+    let triple = LLVMGetTarget(module.module);
     target_from_triple(CStr::from_ptr(triple))
 }
 
@@ -170,7 +177,7 @@ pub unsafe fn create_target_machine(
     triple: &str,
     cpu: &str,
     features: &str,
-) -> Option<LLVMTargetMachineRef> {
+) -> Option<LLVMTargetMachineWrapped> {
     let triple = CString::new(triple).unwrap();
     let cpu = CString::new(cpu).unwrap();
     let features = CString::new(features).unwrap();
@@ -186,29 +193,29 @@ pub unsafe fn create_target_machine(
     if tm.is_null() {
         None
     } else {
-        Some(tm)
+        Some(LLVMTargetMachineWrapped { target_machine: tm })
     }
 }
 
 pub unsafe fn optimize(
-    tm: LLVMTargetMachineRef,
-    module: LLVMModuleRef,
+    tm: &LLVMTargetMachineWrapped,
+    module: &LLVMModuleWrapped,
     opt_level: OptLevel,
     ignore_inline_never: bool,
     export_symbols: &HashSet<Cow<'static, str>>,
 ) -> Result<(), String> {
-    if module_asm_is_probestack(module) {
-        LLVMSetModuleInlineAsm2(module, ptr::null_mut(), 0);
+    if module_asm_is_probestack(module.module) {
+        LLVMSetModuleInlineAsm2(module.module, ptr::null_mut(), 0);
     }
 
-    for sym in module.globals_iter() {
+    for sym in module.module.globals_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
-    for sym in module.global_aliases_iter() {
+    for sym in module.module.global_aliases_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
 
-    for function in module.functions_iter() {
+    for function in module.module.functions_iter() {
         let name = symbol_name(function);
         if !name.starts_with("llvm.") {
             if ignore_inline_never {
@@ -239,7 +246,7 @@ pub unsafe fn optimize(
     debug!("running passes: {passes}");
     let passes = CString::new(passes).unwrap();
     let options = LLVMCreatePassBuilderOptions();
-    let error = LLVMRunPasses(module, passes.as_ptr(), tm, options);
+    let error = LLVMRunPasses(module.module, passes.as_ptr(), tm.target_machine, options);
     LLVMDisposePassBuilderOptions(options);
     // Handle the error and print it to stderr.
     if !error.is_null() {
@@ -256,8 +263,8 @@ pub unsafe fn optimize(
 }
 
 /// strips debug information, returns true if DI got stripped
-pub unsafe fn strip_debug_info(module: LLVMModuleRef) -> bool {
-    LLVMStripModuleDebugInfo(module) != 0
+pub unsafe fn strip_debug_info(module: &LLVMModuleWrapped) -> bool {
+    LLVMStripModuleDebugInfo(module.module) != 0
 }
 
 unsafe fn module_asm_is_probestack(module: LLVMModuleRef) -> bool {
@@ -282,9 +289,9 @@ unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
     LLVMRemoveEnumAttributeAtIndex(function, LLVMAttributeFunctionIndex, attr_kind);
 }
 
-pub unsafe fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), String> {
+pub unsafe fn write_ir(module: &LLVMModuleWrapped, output: &CStr) -> Result<(), String> {
     let (ret, message) =
-        Message::with(|message| LLVMPrintModuleToFile(module, output.as_ptr(), message));
+        Message::with(|message| LLVMPrintModuleToFile(module.module, output.as_ptr(), message));
     if ret == 0 {
         Ok(())
     } else {
@@ -293,13 +300,19 @@ pub unsafe fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), Strin
 }
 
 pub unsafe fn codegen(
-    tm: LLVMTargetMachineRef,
-    module: LLVMModuleRef,
+    tm: &LLVMTargetMachineWrapped,
+    module: &LLVMModuleWrapped,
     output: &CStr,
     output_type: LLVMCodeGenFileType,
 ) -> Result<(), String> {
     let (ret, message) = Message::with(|message| {
-        LLVMTargetMachineEmitToFile(tm, module, output.as_ptr() as *mut _, output_type, message)
+        LLVMTargetMachineEmitToFile(
+            tm.target_machine,
+            module.module,
+            output.as_ptr() as *mut _,
+            output_type,
+            message,
+        )
     });
     if ret == 0 {
         Ok(())
@@ -374,4 +387,39 @@ fn mdstring_to_str<'a>(mdstring: LLVMValueRef) -> &'a str {
     let mut len = 0;
     let ptr = unsafe { LLVMGetMDString(mdstring, &mut len) };
     unsafe { str::from_utf8(slice::from_raw_parts(ptr as *const c_uchar, len as usize)).unwrap() }
+}
+
+pub struct LLVMContextWrapped {
+    pub(crate) context: LLVMContextRef,
+}
+
+impl Drop for LLVMContextWrapped {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMContextDispose(self.context);
+        }
+    }
+}
+
+pub struct LLVMModuleWrapped<'ctx> {
+    pub(crate) module: LLVMModuleRef,
+    _marker: PhantomData<&'ctx LLVMContextWrapped>,
+}
+
+impl<'ctx> Drop for LLVMModuleWrapped<'ctx> {
+    fn drop(&mut self) {
+        unsafe { LLVMDisposeModule(self.module) };
+    }
+}
+
+pub struct LLVMTargetMachineWrapped {
+    target_machine: LLVMTargetMachineRef,
+}
+
+impl Drop for LLVMTargetMachineWrapped {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeTargetMachine(self.target_machine);
+        }
+    }
 }
