@@ -221,6 +221,9 @@ pub struct LinkerOptions {
     pub disable_memory_builtins: bool,
     /// Emit BTF information
     pub btf: bool,
+    /// Permit automatic insertion of __bpf_trap calls.
+    /// See: https://github.com/llvm/llvm-project/commit/ab391beb11f733b526b86f9df23734a34657d876
+    pub allow_bpf_trap: bool,
 }
 
 /// BPF Linker
@@ -528,6 +531,15 @@ impl Linker {
         }
         if !self.options.disable_expand_memcpy_in_order {
             args.push("--bpf-expand-memcpy-in-order".into());
+        }
+        if !self.options.allow_bpf_trap {
+            // TODO: Remove this once ksyms support is guaranteed.
+            // LLVM introduces __bpf_trap calls at points where __builtin_trap would normally be
+            // emitted. This is currently not supported by aya because __bpf_trap requires a .ksyms
+            // section, but this is not trivial to support. In the meantime, using this flag
+            // returns LLVM to the old behaviour, which did not introduce these calls and therefore
+            // does not require the .ksyms section.
+            args.push("--bpf-disable-trap-unreachable".into());
         }
         args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);

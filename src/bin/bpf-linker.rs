@@ -113,6 +113,11 @@ struct CommandLine {
     #[clap(long)]
     btf: bool,
 
+    /// Permit automatic insertion of __bpf_trap calls.
+    /// See: https://github.com/llvm/llvm-project/commit/ab391beb11f733b526b86f9df23734a34657d876
+    #[clap(long)]
+    allow_bpf_trap: bool,
+
     /// Add a directory to the library search path
     #[clap(short = 'L', number_of_values = 1)]
     libs: Vec<PathBuf>,
@@ -207,6 +212,7 @@ fn main() -> anyhow::Result<()> {
         output,
         emit,
         btf,
+        allow_bpf_trap,
         libs,
         optimize,
         export_symbols,
@@ -302,6 +308,7 @@ fn main() -> anyhow::Result<()> {
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
         btf,
+        allow_bpf_trap,
     });
 
     linker.link()?;
