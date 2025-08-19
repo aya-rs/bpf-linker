@@ -529,6 +529,7 @@ impl Linker {
         if !self.options.disable_expand_memcpy_in_order {
             args.push("--bpf-expand-memcpy-in-order".into());
         }
+        args.push("--bpf-disable-trap-unreachable".into());
         args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);
         unsafe {
