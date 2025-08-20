@@ -1,27 +1,30 @@
+mod context;
 mod di;
 mod iter;
+mod module;
+mod target_machine;
 mod types;
 
 use std::{
     borrow::Cow,
     collections::HashSet,
     ffi::{c_uchar, c_void, CStr, CString},
-    marker::PhantomData,
     os::raw::c_char,
     ptr, slice, str,
 };
 
+pub use context::LLVMContextWrapped;
 pub use di::DISanitizer;
 use iter::{IterModuleFunctions, IterModuleGlobalAliases, IterModuleGlobals};
 use libc::c_char as libc_char;
 use llvm_sys::{
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
-        LLVMContextDispose, LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer,
-        LLVMDisposeMessage, LLVMDisposeModule, LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity,
-        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
-        LLVMGetValueName2, LLVMModuleCreateWithNameInContext, LLVMPrintModuleToFile,
-        LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
+        LLVMContextSetDiagnosticHandler, LLVMCreateMemoryBufferWithMemoryRange,
+        LLVMDisposeMemoryBuffer, LLVMDisposeMessage, LLVMGetDiagInfoDescription,
+        LLVMGetDiagInfoSeverity, LLVMGetEnumAttributeKindForName, LLVMGetMDString,
+        LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex,
+        LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
     },
     debuginfo::LLVMStripModuleDebugInfo,
     error::{
@@ -33,22 +36,23 @@ use llvm_sys::{
         LLVMGetSectionName, LLVMGetSectionSize, LLVMMoveToNextSection,
         LLVMObjectFileCopySectionIterator, LLVMObjectFileIsSectionIteratorAtEnd,
     },
-    prelude::{LLVMContextRef, LLVMDiagnosticInfoRef, LLVMModuleRef, LLVMValueRef},
+    prelude::{LLVMDiagnosticInfoRef, LLVMModuleRef, LLVMValueRef},
     support::LLVMParseCommandLineOptions,
     target::{
         LLVMInitializeBPFAsmParser, LLVMInitializeBPFAsmPrinter, LLVMInitializeBPFDisassembler,
         LLVMInitializeBPFTarget, LLVMInitializeBPFTargetInfo, LLVMInitializeBPFTargetMC,
     },
     target_machine::{
-        LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
-        LLVMDisposeTargetMachine, LLVMGetTargetFromTriple, LLVMRelocMode,
-        LLVMTargetMachineEmitToFile, LLVMTargetMachineRef, LLVMTargetRef,
+        LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine, LLVMGetTargetFromTriple,
+        LLVMRelocMode, LLVMTargetRef,
     },
     transforms::pass_builder::{
         LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
     },
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
+pub use module::LLVMModuleWrapped;
+pub use target_machine::LLVMTargetMachineWrapped;
 use tracing::{debug, error};
 
 use crate::OptLevel;
@@ -74,25 +78,8 @@ unsafe fn parse_command_line_options<T: AsRef<str>>(args: &[T], overview: &str) 
     LLVMParseCommandLineOptions(c_ptrs.len() as i32, c_ptrs.as_ptr(), overview.as_ptr());
 }
 
-pub unsafe fn create_module<'ctx>(
-    name: &str,
-    context: &'ctx LLVMContextWrapped,
-) -> Option<LLVMModuleWrapped<'ctx>> {
-    let c_name = CString::new(name).unwrap();
-    let module = LLVMModuleCreateWithNameInContext(c_name.as_ptr(), context.context);
-
-    if module.is_null() {
-        return None;
-    }
-
-    Some(LLVMModuleWrapped {
-        module,
-        _marker: PhantomData,
-    })
-}
-
 pub unsafe fn find_embedded_bitcode(
-    context: LLVMContextRef,
+    context: &LLVMContextWrapped,
     data: &[u8],
 ) -> Result<Option<Vec<u8>>, String> {
     let buffer_name = CString::new("mem_buffer").unwrap();
@@ -103,7 +90,8 @@ pub unsafe fn find_embedded_bitcode(
         0,
     );
 
-    let (bin, message) = Message::with(|message| LLVMCreateBinary(buffer, context, message));
+    let (bin, message) =
+        Message::with(|message| LLVMCreateBinary(buffer, context.context, message));
     if bin.is_null() {
         return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
@@ -131,9 +119,9 @@ pub unsafe fn find_embedded_bitcode(
 }
 
 #[must_use]
-pub unsafe fn link_bitcode_buffer(
-    context: LLVMContextRef,
-    module: &LLVMModuleWrapped,
+pub unsafe fn link_bitcode_buffer<'ctx>(
+    context: &'ctx LLVMContextWrapped,
+    module: &mut LLVMModuleWrapped<'ctx>,
     buffer: &[u8],
 ) -> bool {
     let mut linked = false;
@@ -147,7 +135,7 @@ pub unsafe fn link_bitcode_buffer(
 
     let mut temp_module = ptr::null_mut();
 
-    if LLVMParseBitcodeInContext2(context, buffer, &mut temp_module) == 0 {
+    if LLVMParseBitcodeInContext2(context.context, buffer, &mut temp_module) == 0 {
         linked = LLVMLinkModules2(module.module, temp_module) == 0;
     }
 
@@ -199,7 +187,7 @@ pub unsafe fn create_target_machine(
 
 pub unsafe fn optimize(
     tm: &LLVMTargetMachineWrapped,
-    module: &LLVMModuleWrapped,
+    module: &mut LLVMModuleWrapped,
     opt_level: OptLevel,
     ignore_inline_never: bool,
     export_symbols: &HashSet<Cow<'static, str>>,
@@ -289,38 +277,6 @@ unsafe fn remove_attribute(function: *mut llvm_sys::LLVMValue, name: &str) {
     LLVMRemoveEnumAttributeAtIndex(function, LLVMAttributeFunctionIndex, attr_kind);
 }
 
-pub unsafe fn write_ir(module: &LLVMModuleWrapped, output: &CStr) -> Result<(), String> {
-    let (ret, message) =
-        Message::with(|message| LLVMPrintModuleToFile(module.module, output.as_ptr(), message));
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
-    }
-}
-
-pub unsafe fn codegen(
-    tm: &LLVMTargetMachineWrapped,
-    module: &LLVMModuleWrapped,
-    output: &CStr,
-    output_type: LLVMCodeGenFileType,
-) -> Result<(), String> {
-    let (ret, message) = Message::with(|message| {
-        LLVMTargetMachineEmitToFile(
-            tm.target_machine,
-            module.module,
-            output.as_ptr() as *mut _,
-            output_type,
-            message,
-        )
-    });
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
-    }
-}
-
 pub unsafe fn internalize(
     value: LLVMValueRef,
     name: &str,
@@ -389,37 +345,13 @@ fn mdstring_to_str<'a>(mdstring: LLVMValueRef) -> &'a str {
     unsafe { str::from_utf8(slice::from_raw_parts(ptr as *const c_uchar, len as usize)).unwrap() }
 }
 
-pub struct LLVMContextWrapped {
-    pub(crate) context: LLVMContextRef,
-}
-
-impl Drop for LLVMContextWrapped {
-    fn drop(&mut self) {
-        unsafe {
-            LLVMContextDispose(self.context);
-        }
-    }
-}
-
-pub struct LLVMModuleWrapped<'ctx> {
-    pub(crate) module: LLVMModuleRef,
-    _marker: PhantomData<&'ctx LLVMContextWrapped>,
-}
-
-impl<'ctx> Drop for LLVMModuleWrapped<'ctx> {
-    fn drop(&mut self) {
-        unsafe { LLVMDisposeModule(self.module) };
-    }
-}
-
-pub struct LLVMTargetMachineWrapped {
-    target_machine: LLVMTargetMachineRef,
-}
-
-impl Drop for LLVMTargetMachineWrapped {
-    fn drop(&mut self) {
-        unsafe {
-            LLVMDisposeTargetMachine(self.target_machine);
-        }
-    }
+pub unsafe fn set_diagnostic_handler<T: LLVMDiagnosticHandler>(
+    context: &LLVMContextWrapped,
+    handler: &mut T,
+) {
+    LLVMContextSetDiagnosticHandler(
+        context.context,
+        Some(diagnostic_handler::<T>),
+        handler as *mut _ as _,
+    );
 }

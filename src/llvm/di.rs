@@ -3,6 +3,7 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     ffi::c_char,
     hash::Hasher,
+    marker::PhantomData,
     ptr,
 };
 
@@ -14,20 +15,21 @@ use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{iter::*, types::di::DISubprogram};
+use crate::llvm::{iter::*, types::di::DISubprogram, LLVMContextWrapped, LLVMModuleWrapped};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found accross kernel versions to ensure
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-pub struct DISanitizer {
+pub struct DISanitizer<'ctx> {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types: Vec<String>,
+    _marker: PhantomData<LLVMModuleWrapped<'ctx>>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -58,15 +60,19 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
     n
 }
 
-impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
+impl<'ctx> DISanitizer<'ctx> {
+    pub fn new(
+        context: &'ctx LLVMContextWrapped,
+        module: &mut LLVMModuleWrapped<'ctx>,
+    ) -> DISanitizer<'ctx> {
         DISanitizer {
-            context,
-            module,
-            builder: unsafe { LLVMCreateDIBuilder(module) },
+            context: context.context,
+            module: module.module,
+            builder: unsafe { LLVMCreateDIBuilder(module.module) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types: Vec::new(),
+            _marker: PhantomData,
         }
     }
 
