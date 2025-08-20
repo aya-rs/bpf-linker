@@ -13,7 +13,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cpu_features: String::new(),
         libs: vec![],
         optimize: OptLevel::Default,
-        export_symbols: HashSet::new(),
         unroll_loops: false,
         ignore_inline_never: false,
         dump_module: None,
@@ -33,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             LinkerInput::from(("my buffer", bytes)),
         ],
         OutputType::Bitcode,
+        &HashSet::new(),
     )?;
 
     // Use the buffer as slice of u8
@@ -47,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
         Path::new("/path/to/output"),
         OutputType::Object,
+        &HashSet::new(),
     )?;
 
     Ok(())

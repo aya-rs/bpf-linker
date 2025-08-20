@@ -246,8 +246,6 @@ pub struct LinkerOptions {
     pub libs: Vec<PathBuf>,
     /// Optimization level.
     pub optimize: OptLevel,
-    /// Set of symbol names to export.
-    pub export_symbols: HashSet<Cow<'static, str>>,
     /// Whether to aggressively unroll loops. Useful for older kernels that don't support loops.
     pub unroll_loops: bool,
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
@@ -292,8 +290,9 @@ impl Linker {
         inputs: Vec<LinkerInput>,
         output: &Path,
         output_type: OutputType,
+        export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
-        let (linked_module, target_machine) = self.link(inputs)?;
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_file(&linked_module, &target_machine, &output, output_type)?;
         Ok(())
     }
@@ -302,8 +301,9 @@ impl Linker {
         &self,
         inputs: Vec<LinkerInput>,
         output_type: OutputType,
+        export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<LinkedBuffer, LinkerError> {
-        let (linked_module, target_machine) = self.link(inputs)?;
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_buffer(&linked_module, &target_machine, output_type)
     }
 
@@ -311,6 +311,7 @@ impl Linker {
     fn link<'ctx>(
         &'ctx self,
         inputs: Vec<LinkerInput>,
+        export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(LLVMModuleWrapped<'ctx>, LLVMTargetMachineWrapped), LinkerError> {
         let mut module = link_modules(&self.context, inputs)?;
 
@@ -325,7 +326,13 @@ impl Linker {
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             unsafe { module.write_ir_to_file(&path) }.map_err(LinkerError::WriteIRError)?;
         };
-        optimize(&self.options, &self.context, &target_machine, &mut module)?;
+        optimize(
+            &self.options,
+            &self.context,
+            &target_machine,
+            &mut module,
+            export_symbols,
+        )?;
         if let Some(path) = &self.options.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
@@ -663,8 +670,9 @@ fn optimize<'ctx>(
     context: &'ctx LLVMContextWrapped,
     target_machine: &LLVMTargetMachineWrapped,
     module: &mut LLVMModuleWrapped<'ctx>,
+    export_symbols: &HashSet<Cow<'static, str>>,
 ) -> Result<(), LinkerError> {
-    let mut export_symbols = options.export_symbols.clone();
+    let mut export_symbols = export_symbols.clone();
 
     if !options.disable_memory_builtins {
         export_symbols.extend(

@@ -291,7 +291,6 @@ fn main() -> anyhow::Result<()> {
         cpu_features,
         libs,
         optimize,
-        export_symbols,
         unroll_loops,
         ignore_inline_never,
         dump_module,
@@ -306,7 +305,7 @@ fn main() -> anyhow::Result<()> {
         .map(|p| LinkerInput::try_from(p.as_path()))
         .collect::<Result<_, _>>()?;
 
-    linker.link_to_file(inputs, &output, output_type)?;
+    linker.link_to_file(inputs, &output, output_type, &export_symbols)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
