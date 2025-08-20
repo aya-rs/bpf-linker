@@ -13,7 +13,7 @@ use std::{
     str::FromStr,
 };
 
-use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
     error::ErrorKind,
@@ -285,11 +285,10 @@ fn main() -> anyhow::Result<()> {
         [.., CliOptLevel(optimize)] => optimize,
     };
 
-    let mut linker = Linker::new(LinkerOptions {
+    let linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
-        output_type,
         libs,
         optimize,
         export_symbols,
@@ -302,7 +301,12 @@ fn main() -> anyhow::Result<()> {
         btf,
     })?;
 
-    linker.link(&inputs, &output)?;
+    let inputs: Vec<LinkerInput> = inputs
+        .iter()
+        .map(|p| LinkerInput::try_from(p.as_path()))
+        .collect::<Result<_, _>>()?;
+
+    linker.link_to_file(inputs, &output, output_type)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(

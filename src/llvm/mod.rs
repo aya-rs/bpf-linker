@@ -1,6 +1,7 @@
 mod context;
 mod di;
 mod iter;
+mod memory_buffer;
 mod module;
 mod target_machine;
 mod types;
@@ -51,6 +52,7 @@ use llvm_sys::{
     },
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
+pub use memory_buffer::MemoryBufferWrapped;
 pub use module::LLVMModuleWrapped;
 pub use target_machine::LLVMTargetMachineWrapped;
 use tracing::{debug, error};

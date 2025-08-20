@@ -1,12 +1,18 @@
-use std::{ffi::CStr, marker::PhantomData};
+use std::{
+    ffi::{CStr, CString},
+    marker::PhantomData,
+};
 
 use llvm_sys::{
     bit_writer::LLVMWriteBitcodeToFile,
-    core::{LLVMDisposeModule, LLVMGetTarget, LLVMPrintModuleToFile},
+    core::{
+        LLVMCreateMemoryBufferWithMemoryRangeCopy, LLVMDisposeMessage, LLVMDisposeModule,
+        LLVMGetTarget, LLVMPrintModuleToFile, LLVMPrintModuleToString,
+    },
     prelude::LLVMModuleRef,
 };
 
-use crate::llvm::Message;
+use crate::llvm::{MemoryBufferWrapped, Message};
 
 pub struct LLVMModuleWrapped<'ctx> {
     pub(super) module: LLVMModuleRef,
@@ -18,7 +24,7 @@ impl<'ctx> LLVMModuleWrapped<'ctx> {
         unsafe { LLVMGetTarget(self.module) }
     }
 
-    pub fn write_bitcode(&self, output: &CStr) -> Result<(), String> {
+    pub fn write_bitcode_to_file(&self, output: &CStr) -> Result<(), String> {
         if unsafe { LLVMWriteBitcodeToFile(self.module, output.as_ptr()) } == 1 {
             return Err("failed to write bitcode".to_string());
         }
@@ -26,7 +32,13 @@ impl<'ctx> LLVMModuleWrapped<'ctx> {
         Ok(())
     }
 
-    pub unsafe fn write_ir(&self, output: &CStr) -> Result<(), String> {
+    pub unsafe fn write_bitcode_to_memory(&self) -> MemoryBufferWrapped {
+        let buf = llvm_sys::bit_writer::LLVMWriteBitcodeToMemoryBuffer(self.module);
+
+        MemoryBufferWrapped { memory_buffer: buf }
+    }
+
+    pub unsafe fn write_ir_to_file(&self, output: &CStr) -> Result<(), String> {
         let (ret, message) =
             Message::with(|message| LLVMPrintModuleToFile(self.module, output.as_ptr(), message));
         if ret == 0 {
@@ -34,6 +46,24 @@ impl<'ctx> LLVMModuleWrapped<'ctx> {
         } else {
             Err(message.as_c_str().unwrap().to_str().unwrap().to_string())
         }
+    }
+
+    pub unsafe fn write_ir_to_memory(&self) -> MemoryBufferWrapped {
+        let ptr = LLVMPrintModuleToString(self.module);
+        let cstr = CStr::from_ptr(ptr);
+        let bytes = cstr.to_bytes();
+
+        let buffer_name = CString::new("mem_buffer").unwrap();
+
+        // Copy bytes into a new LLVMMemoryBuffer so we can safely dispose the message.
+        let memory_buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy(
+            bytes.as_ptr() as *const ::libc::c_char,
+            bytes.len(),
+            buffer_name.as_ptr(),
+        );
+        LLVMDisposeMessage(ptr);
+
+        MemoryBufferWrapped { memory_buffer }
     }
 }
 
