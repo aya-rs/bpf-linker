@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
         Path::new("/path/to/output"),
         OutputType::Object,
-        &HashSet::new(),
+        HashSet::new(),
     )?;
 
     Ok(())

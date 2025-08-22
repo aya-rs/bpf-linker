@@ -290,9 +290,9 @@ impl Linker {
         inputs: Vec<LinkerInput>,
         output: &Path,
         output_type: OutputType,
-        export_symbols: &HashSet<Cow<'static, str>>,
+        export_symbols: HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
-        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
+        let (linked_module, target_machine) = self.link(inputs, &export_symbols)?;
         codegen_to_file(&linked_module, &target_machine, &output, output_type)?;
         Ok(())
     }
@@ -302,7 +302,7 @@ impl Linker {
         inputs: Vec<LinkerInput>,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
-    ) -> Result<LinkedBuffer, LinkerError> {
+    ) -> Result<LinkerOutput, LinkerError> {
         let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_buffer(&linked_module, &target_machine, output_type)
     }
@@ -715,7 +715,7 @@ fn codegen_to_buffer(
     module: &LLVMModuleWrapped,
     target_machine: &LLVMTargetMachineWrapped,
     output_type: OutputType,
-) -> Result<LinkedBuffer, LinkerError> {
+) -> Result<LinkerOutput, LinkerError> {
     let memory_buffer = unsafe {
         match output_type {
             OutputType::Bitcode => module.write_bitcode_to_memory(),
@@ -729,17 +729,17 @@ fn codegen_to_buffer(
         }
     };
 
-    Ok(LinkedBuffer {
+    Ok(LinkerOutput {
         inner: memory_buffer,
     })
 }
 
 // To avoid leaking of internal LLVM wrapper
-pub struct LinkedBuffer {
+pub struct LinkerOutput {
     inner: MemoryBufferWrapped,
 }
 
-impl LinkedBuffer {
+impl LinkerOutput {
     pub fn as_slice(&self) -> &[u8] {
         self.inner.as_slice()
     }

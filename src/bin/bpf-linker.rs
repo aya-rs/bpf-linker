@@ -305,7 +305,7 @@ fn main() -> anyhow::Result<()> {
         .map(|p| LinkerInput::try_from(p.as_path()))
         .collect::<Result<_, _>>()?;
 
-    linker.link_to_file(inputs, &output, output_type, &export_symbols)?;
+    linker.link_to_file(inputs, &output, output_type, export_symbols)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
