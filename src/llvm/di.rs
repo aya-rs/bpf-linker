@@ -6,12 +6,14 @@ use std::{
     ptr,
 };
 
-use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
+use gimli::{
+    DW_TAG_enumeration_type, DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part,
+};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{span, trace, warn, Level};
 
 use super::types::{
-    di::DIType,
+    di::{DIBasicType, DIBasicTypeKind, DICompileUnit, DIType},
     ir::{Function, MDNode, Metadata, Value},
 };
 use crate::llvm::{iter::*, types::di::DISubprogram};
@@ -21,13 +23,14 @@ use crate::llvm::{iter::*, types::di::DISubprogram};
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-pub struct DISanitizer {
+pub struct DISanitizer<'ctx> {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types: Vec<String>,
+    basic_types: HashMap<DIBasicTypeKind, DIBasicType<'ctx>>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -58,8 +61,13 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
     n
 }
 
-impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
+/// [`LLVMGetMetadataKind`] wrapper
+fn kind(m: LLVMMetadataRef) -> LLVMMetadataKind {
+    unsafe { LLVMGetMetadataKind(m) }
+}
+
+impl<'ctx> DISanitizer<'_> {
+    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer<'ctx> {
         DISanitizer {
             context,
             module,
@@ -67,15 +75,42 @@ impl DISanitizer {
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types: Vec::new(),
+            basic_types: HashMap::new(),
         }
     }
 
-    fn visit_mdnode(&mut self, mdnode: MDNode) {
+    /// Returns a [`DIBasicType`] given a [`DIBasicTypeKind`].
+    fn di_basic_type(&'ctx mut self, di_bt: DIBasicTypeKind) -> &'ctx DIBasicType<'ctx> {
+        self.basic_types
+            .entry(di_bt)
+            .or_insert_with(|| DIBasicType::llvm_create(self.context, self.builder, di_bt))
+    }
+
+    fn visit_mdnode_item(&mut self, item: &mut Item) {
+        let Some(mdnode) = item.as_mdnode() else {
+            return;
+        };
+
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
                 #[allow(clippy::single_match)]
                 #[allow(non_upper_case_globals)]
                 match di_composite_type.tag() {
+                    DW_TAG_enumeration_type => {
+                        if let Some(name) = di_composite_type.name() {
+                            // we found the c_void enum
+                            if name == c"c_void" && di_composite_type.size_in_bits() == 8 {
+                                if let Item::Operand(ref mut op) = item {
+                                    // get i8 DIBasicType
+                                    let i8_bt = self.di_basic_type(DIBasicTypeKind::I8);
+                                    op.replace(i8_bt.value_ref);
+                                } else {
+                                    // c_void enum is not an Item::Operand so we cannot replace it
+                                    warn!("failed at replacing c_void enum, it might result in BTF parsing errors in kernels < 5.4")
+                                }
+                            }
+                        }
+                    }
                     DW_TAG_structure_type => {
                         let names = match di_composite_type.name() {
                             Some(name) => {
@@ -247,9 +282,7 @@ impl DISanitizer {
             return;
         }
 
-        if let Value::MDNode(mdnode) = value.clone() {
-            self.visit_mdnode(mdnode)
-        }
+        self.visit_mdnode_item(&mut item);
 
         if let Some(operands) = value.operands() {
             for (index, operand) in operands.enumerate() {
@@ -305,6 +338,8 @@ impl DISanitizer {
                 self.skipped_types.join(", ")
             );
         }
+
+        self.fix_di_compile_units();
 
         unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
@@ -404,6 +439,58 @@ impl DISanitizer {
 
         replace
     }
+
+    fn di_compile_units(&self) -> Vec<DICompileUnit> {
+        let compile_unit_name = c"llvm.dbg.cu";
+
+        // Get the number of DICompileUnit.
+        let num_di_cu =
+            unsafe { LLVMGetNamedMetadataNumOperands(self.module, compile_unit_name.as_ptr()) };
+
+        // Create a vector to hold them all.
+        let mut di_cus: Vec<LLVMValueRef> = vec![core::ptr::null_mut(); num_di_cu as usize];
+
+        unsafe {
+            LLVMGetNamedMetadataOperands(
+                self.module,
+                compile_unit_name.as_ptr(),
+                di_cus.as_mut_ptr(),
+            )
+        };
+
+        di_cus
+            .into_iter()
+            .map(|v| unsafe { DICompileUnit::from_value_ref(v) })
+            .collect()
+    }
+
+    /// Removes replaced `c_void` Rust enum from all [`DICompileUnit`]. After
+    /// replacing `c_void` enum with a [`DIBasicType`] the [`DICompileUnit`] still
+    /// hold a reference to the enum and still believes it is a [`DICompositeType`]
+    /// which triggers a casting assertion in LLVM.
+    fn fix_di_compile_units(&mut self) {
+        for mut di_cu in self.di_compile_units() {
+            let tmp_cu = di_cu.clone();
+            let need_replace = tmp_cu.enum_types().any(|ct| {
+                matches!(
+                    kind(ct.metadata_ref),
+                    LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
+                )
+            });
+
+            if need_replace {
+                di_cu.replace_enum_types(
+                    self.builder,
+                    tmp_cu.enum_types().filter(|ct| {
+                        !matches!(
+                            kind(ct.metadata_ref),
+                            LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
+                        )
+                    }),
+                );
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -438,6 +525,16 @@ impl Operand {
 }
 
 impl Item {
+    /// Returns the [`Item`] as [`MDNode`] only if [`Item::is_mdnode`] is `true` else `None`.
+    fn as_mdnode(&self) -> Option<MDNode<'_>> {
+        let is_mdnode = unsafe { !LLVMIsAMDNode(self.value_ref()).is_null() };
+        if is_mdnode {
+            Some(unsafe { MDNode::from_value_ref(self.value_ref()) })
+        } else {
+            None
+        }
+    }
+
     fn value_ref(&self) -> LLVMValueRef {
         match self {
             Item::GlobalVariable(value)
