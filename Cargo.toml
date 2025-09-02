@@ -76,7 +76,7 @@ members = ["xtask"]
 [workspace.dependencies]
 # cli deps
 anyhow = { version = "1.0.99", default-features = false }
-clap = { version = "4.5.45", features = ["derive"] }
+clap = { version = "4.5.46", features = ["derive"] }
 # dev deps
 rustc-build-sysroot = { version = "0.5.11", default-features = false }
 
