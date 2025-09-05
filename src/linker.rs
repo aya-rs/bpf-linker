@@ -329,8 +329,8 @@ impl Linker {
         export_symbols: &HashSet<Cow<'static, str>>,
         dump_module: Option<&Path>,
     ) -> Result<(), LinkerError> {
-        let (linked_module, target_machine) = self.link(inputs, &export_symbols, dump_module)?;
-        codegen_to_file(&linked_module, &target_machine, &output, output_type)?;
+        let (linked_module, target_machine) = self.link(inputs, export_symbols, dump_module)?;
+        codegen_to_file(&linked_module, &target_machine, output, output_type)?;
         Ok(())
     }
 
