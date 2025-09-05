@@ -4,6 +4,7 @@ use std::{
     ffi::{CStr, CString},
     fs::File,
     io::{self, Read, Seek},
+    ops::Deref,
     path::{Path, PathBuf},
     str::{self, FromStr},
 };
@@ -872,6 +873,14 @@ impl LinkerOutput {
 
 impl AsRef<[u8]> for LinkerOutput {
     fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl Deref for LinkerOutput {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
         self.as_slice()
     }
 }
