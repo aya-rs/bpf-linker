@@ -85,7 +85,7 @@ pub unsafe fn find_embedded_bitcode(
     );
 
     let (bin, message) =
-        Message::with(|message| LLVMCreateBinary(buffer, unsafe { context.as_raw() }, message));
+        Message::with(|message| LLVMCreateBinary(buffer, context.as_mut_ptr(), message));
     if bin.is_null() {
         return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
     }
@@ -129,8 +129,8 @@ pub unsafe fn link_bitcode_buffer<'ctx>(
 
     let mut temp_module = ptr::null_mut();
 
-    if LLVMParseBitcodeInContext2(unsafe { context.as_raw() }, buffer, &mut temp_module) == 0 {
-        linked = LLVMLinkModules2(unsafe { module.as_raw() }, temp_module) == 0;
+    if LLVMParseBitcodeInContext2(context.as_mut_ptr(), buffer, &mut temp_module) == 0 {
+        linked = LLVMLinkModules2(module.as_mut_ptr(), temp_module) == 0;
     }
 
     LLVMDisposeMemoryBuffer(buffer);
@@ -150,7 +150,7 @@ pub unsafe fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String>
 }
 
 pub unsafe fn target_from_module(module: &LLVMModule) -> Result<LLVMTargetRef, String> {
-    let triple = LLVMGetTarget(unsafe { module.as_raw() });
+    let triple = LLVMGetTarget(module.as_mut_ptr());
     target_from_triple(CStr::from_ptr(triple))
 }
 
@@ -161,18 +161,18 @@ pub unsafe fn optimize(
     ignore_inline_never: bool,
     export_symbols: &HashSet<Cow<'static, str>>,
 ) -> Result<(), String> {
-    if module_asm_is_probestack(unsafe { module.as_raw() }) {
-        LLVMSetModuleInlineAsm2(unsafe { module.as_raw() }, ptr::null_mut(), 0);
+    if module_asm_is_probestack(module.as_mut_ptr()) {
+        LLVMSetModuleInlineAsm2(module.as_mut_ptr(), ptr::null_mut(), 0);
     }
 
-    for sym in unsafe { module.as_raw() }.globals_iter() {
+    for sym in module.as_mut_ptr().globals_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
-    for sym in unsafe { module.as_raw() }.global_aliases_iter() {
+    for sym in module.as_mut_ptr().global_aliases_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
 
-    for function in unsafe { module.as_raw() }.functions_iter() {
+    for function in module.as_mut_ptr().functions_iter() {
         let name = symbol_name(function);
         if !name.starts_with("llvm.") {
             if ignore_inline_never {
@@ -204,9 +204,9 @@ pub unsafe fn optimize(
     let passes = CString::new(passes).unwrap();
     let options = LLVMCreatePassBuilderOptions();
     let error = LLVMRunPasses(
-        unsafe { module.as_raw() },
+        module.as_mut_ptr(),
         passes.as_ptr(),
-        unsafe { tm.as_raw() },
+        tm.as_mut_ptr(),
         options,
     );
     LLVMDisposePassBuilderOptions(options);

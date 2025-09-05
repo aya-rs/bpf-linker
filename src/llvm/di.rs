@@ -63,9 +63,9 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
 impl<'ctx> DISanitizer<'ctx> {
     pub fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> DISanitizer<'ctx> {
         DISanitizer {
-            context: unsafe { context.as_raw() },
-            module: unsafe { module.as_raw() },
-            builder: unsafe { LLVMCreateDIBuilder(module.as_raw()) },
+            context: context.as_mut_ptr(),
+            module: module.as_mut_ptr(),
+            builder: unsafe { LLVMCreateDIBuilder(module.as_mut_ptr()) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types: Vec::new(),

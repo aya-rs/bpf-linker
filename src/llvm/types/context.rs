@@ -18,18 +18,22 @@ pub struct LLVMContext {
 }
 
 impl LLVMContext {
-    pub unsafe fn new() -> Self {
-        let context = LLVMContextCreate();
+    pub fn new() -> Self {
+        let context = unsafe { LLVMContextCreate() };
         Self { context }
     }
 
-    pub(in crate::llvm) unsafe fn as_raw(&self) -> LLVMContextRef {
+    /// Returns an unsafe mutable pointer to the LLVM context.
+    ///
+    /// The caller must ensure that the [LLVMContext] outlives the pointer this
+    /// function returns, or else it will end up dangling.
+    pub(in crate::llvm) const fn as_mut_ptr(&self) -> LLVMContextRef {
         self.context
     }
 
-    pub unsafe fn create_module<'ctx>(&'ctx self, name: &str) -> Option<LLVMModule<'ctx>> {
+    pub fn create_module<'ctx>(&'ctx self, name: &str) -> Option<LLVMModule<'ctx>> {
         let c_name = CString::new(name).unwrap();
-        let module = LLVMModuleCreateWithNameInContext(c_name.as_ptr(), self.context);
+        let module = unsafe { LLVMModuleCreateWithNameInContext(c_name.as_ptr(), self.context) };
 
         if module.is_null() {
             return None;
@@ -41,12 +45,14 @@ impl LLVMContext {
         })
     }
 
-    pub unsafe fn set_diagnostic_handler<T: LLVMDiagnosticHandler>(&self, handler: &mut T) {
-        LLVMContextSetDiagnosticHandler(
-            self.context,
-            Some(diagnostic_handler::<T>),
-            handler as *mut _ as _,
-        );
+    pub fn set_diagnostic_handler<T: LLVMDiagnosticHandler>(&self, handler: &mut T) {
+        unsafe {
+            LLVMContextSetDiagnosticHandler(
+                self.context,
+                Some(diagnostic_handler::<T>),
+                handler as *mut _ as _,
+            )
+        };
     }
 }
 
