@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::{ffi::CStr, path::Path};
 
 use llvm_sys::target_machine::{
     LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
@@ -37,21 +37,27 @@ impl LLVMTargetMachine {
         }
     }
 
-    pub(in crate::llvm) unsafe fn as_raw(&self) -> LLVMTargetMachineRef {
+    /// Returns an unsafe mutable pointer to the LLVM target machine.
+    ///
+    /// The caller must ensure that the [LLVMTargetMachine] outlives the pointer this
+    /// function returns, or else it will end up dangling.
+    pub(in crate::llvm) const fn as_mut_ptr(&self) -> LLVMTargetMachineRef {
         self.target_machine
     }
 
-    pub fn codegen_to_file(
+    pub fn codegen_to_path(
         &self,
-        module: &LLVMModule<'_>,
-        output: &CStr,
+        module: &LLVMModule,
+        path: impl AsRef<Path>,
         output_type: LLVMCodeGenFileType,
     ) -> Result<(), String> {
+        let path_str_ptr = path.as_ref().as_os_str().as_encoded_bytes().as_ptr().cast();
+
         let (ret, message) = Message::with(|message| unsafe {
             LLVMTargetMachineEmitToFile(
                 self.target_machine,
                 module.module,
-                output.as_ptr() as *mut _,
+                path_str_ptr,
                 output_type,
                 message,
             )

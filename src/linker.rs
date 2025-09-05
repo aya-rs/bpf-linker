@@ -7,7 +7,6 @@ use std::{
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     pin::Pin,
-    ptr,
     str::{self, FromStr},
 };
 
@@ -445,8 +444,9 @@ impl Linker {
         if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            unsafe { module.write_ir_to_file(&path) }.map_err(LinkerError::WriteIRError)?;
+            module
+                .write_ir_to_path(path)
+                .map_err(LinkerError::WriteIRError)?;
         };
         optimize(
             &self.options,
@@ -458,8 +458,9 @@ impl Linker {
         if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            unsafe { module.write_ir_to_file(&path) }.map_err(LinkerError::WriteIRError)?;
+            module
+                .write_ir_to_path(&path)
+                .map_err(LinkerError::WriteIRError)?;
         };
 
         Ok((module, target_machine))
@@ -572,11 +573,12 @@ fn llvm_init(options: &LinkerOptions) -> (LLVMContext, Pin<Box<DiagnosticHandler
 
     llvm::init(&args, c"BPF linker");
 
-    let context = LLVMContext::new();
+    let mut context = LLVMContext::new();
+
     let mut diagnostic_handler = Box::pin(DiagnosticHandler::default());
+    context.set_diagnostic_handler(unsafe { diagnostic_handler.as_mut().get_unchecked_mut() });
 
     unsafe {
-        context.set_diagnostic_handler(diagnostic_handler.as_mut().get_unchecked_mut());
         LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
         LLVMEnablePrettyStackTrace();
     }
@@ -646,33 +648,31 @@ fn codegen_to_file(
     output: &Path,
     output_type: OutputType,
 ) -> Result<(), LinkerError> {
-    let output = CString::new(output.as_os_str().to_str().unwrap()).unwrap();
     match output_type {
         OutputType::Bitcode => {
             info!("writing bitcode to {:?}", output);
             module
-                .write_bitcode_to_file(&output)
+                .write_bitcode_to_path(output)
                 .map_err(|_| LinkerError::WriteBitcodeError)
         }
         OutputType::LlvmAssembly => {
             info!("writing IR to {:?}", output);
-            unsafe { module.write_ir_to_file(&output) }.map_err(LinkerError::WriteIRError)
+            module
+                .write_ir_to_path(output)
+                .map_err(LinkerError::WriteIRError)
         }
         OutputType::Assembly => {
             info!("emitting {:?} to {:?}", output_type, output);
-            unsafe {
-                target_machine.codegen_to_file(
-                    module,
-                    &output,
-                    LLVMCodeGenFileType::LLVMAssemblyFile,
-                )
-            }
-            .map_err(LinkerError::EmitCodeError)
+
+            target_machine
+                .codegen_to_path(module, output, LLVMCodeGenFileType::LLVMAssemblyFile)
+                .map_err(LinkerError::EmitCodeError)
         }
         OutputType::Object => {
             info!("emitting {:?} to {:?}", output_type, output);
+
             target_machine
-                .codegen_to_file(module, &output, LLVMCodeGenFileType::LLVMObjectFile)
+                .codegen_to_path(module, output, LLVMCodeGenFileType::LLVMObjectFile)
                 .map_err(LinkerError::EmitCodeError)
         }
     }
@@ -682,7 +682,8 @@ fn link_modules<'ctx, 'i>(
     context: &'ctx LLVMContext,
     inputs: impl IntoIterator<Item = InputReader<'i>>,
 ) -> Result<LLVMModule<'ctx>, LinkerError> {
-    let mut module = unsafe { context.create_module("linked_module") }
+    let mut module = context
+        .create_module("linked_module")
         .ok_or(LinkerError::ModuleCreationError)?;
 
     // buffer used to perform file type detection
@@ -819,7 +820,7 @@ fn optimize<'ctx>(
         llvm::DISanitizer::new(context, module).run(&export_symbols);
     } else {
         // if we don't need BTF emission, we can strip DI
-        let ok = unsafe { module.strip_debug_info() };
+        let ok = module.strip_debug_info();
         debug!("Stripping DI, changed={}", ok);
     }
 
@@ -840,17 +841,15 @@ fn codegen_to_buffer(
     target_machine: &LLVMTargetMachine,
     output_type: OutputType,
 ) -> Result<LinkerOutput, LinkerError> {
-    let memory_buffer = unsafe {
-        match output_type {
-            OutputType::Bitcode => module.write_bitcode_to_memory(),
-            OutputType::LlvmAssembly => module.write_ir_to_memory(),
-            OutputType::Assembly => target_machine
-                .codegen_to_mem(module, LLVMCodeGenFileType::LLVMAssemblyFile)
-                .map_err(LinkerError::EmitCodeError)?,
-            OutputType::Object => target_machine
-                .codegen_to_mem(module, LLVMCodeGenFileType::LLVMObjectFile)
-                .map_err(LinkerError::EmitCodeError)?,
-        }
+    let memory_buffer = match output_type {
+        OutputType::Bitcode => module.write_bitcode_to_memory(),
+        OutputType::LlvmAssembly => module.write_ir_to_memory(),
+        OutputType::Assembly => target_machine
+            .codegen_to_mem(module, LLVMCodeGenFileType::LLVMAssemblyFile)
+            .map_err(LinkerError::EmitCodeError)?,
+        OutputType::Object => target_machine
+            .codegen_to_mem(module, LLVMCodeGenFileType::LLVMObjectFile)
+            .map_err(LinkerError::EmitCodeError)?,
     };
 
     Ok(LinkerOutput {

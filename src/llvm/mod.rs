@@ -6,7 +6,7 @@ mod types;
 use std::{
     borrow::Cow,
     collections::HashSet,
-    ffi::{c_void, CStr, CString},
+    ffi::{CStr, CString},
     os::raw::c_char,
     ptr, slice, str,
 };
@@ -79,7 +79,7 @@ pub(crate) fn find_embedded_bitcode(
     };
 
     let (bin, message) =
-        Message::with(|message| unsafe { LLVMCreateBinary(buffer, context.as_raw(), message) });
+        Message::with(|message| unsafe { LLVMCreateBinary(buffer, context.as_mut_ptr(), message) });
     if bin.is_null() {
         return Err(message.as_string_lossy().to_string());
     }
@@ -125,8 +125,8 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
 
     let mut temp_module = ptr::null_mut();
 
-    if unsafe { LLVMParseBitcodeInContext2(context.as_raw(), buffer, &mut temp_module) } == 0 {
-        linked = unsafe { LLVMLinkModules2(module.as_raw(), temp_module) } == 0;
+    if unsafe { LLVMParseBitcodeInContext2(context.as_mut_ptr(), buffer, &mut temp_module) } == 0 {
+        linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
     }
 
     unsafe { LLVMDisposeMemoryBuffer(buffer) };
@@ -147,7 +147,7 @@ pub(crate) fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String>
 }
 
 pub(crate) fn target_from_module(module: &LLVMModule<'_>) -> Result<LLVMTargetRef, String> {
-    let triple = unsafe { LLVMGetTarget(module.as_raw()) };
+    let triple = unsafe { LLVMGetTarget(module.as_mut_ptr()) };
     unsafe { target_from_triple(CStr::from_ptr(triple)) }
 }
 
@@ -158,18 +158,18 @@ pub(crate) fn optimize(
     ignore_inline_never: bool,
     export_symbols: &HashSet<Cow<'_, [u8]>>,
 ) -> Result<(), String> {
-    if module_asm_is_probestack(unsafe { module.as_raw() }) {
-        unsafe { LLVMSetModuleInlineAsm2(module.as_raw(), ptr::null_mut(), 0) };
+    if module_asm_is_probestack(module.as_mut_ptr()) {
+        unsafe { LLVMSetModuleInlineAsm2(module.as_mut_ptr(), ptr::null_mut(), 0) };
     }
 
-    for sym in unsafe { module.as_raw() }.globals_iter() {
+    for sym in module.as_mut_ptr().globals_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
-    for sym in unsafe { module.as_raw() }.global_aliases_iter() {
+    for sym in module.as_mut_ptr().global_aliases_iter() {
         internalize(sym, symbol_name(sym), export_symbols);
     }
 
-    for function in unsafe { module.as_raw() }.functions_iter() {
+    for function in module.as_mut_ptr().functions_iter() {
         let name = symbol_name(function);
         if !name.starts_with(b"llvm.") {
             if ignore_inline_never {
@@ -200,7 +200,14 @@ pub(crate) fn optimize(
     debug!("running passes: {passes}");
     let passes = CString::new(passes).unwrap();
     let options = unsafe { LLVMCreatePassBuilderOptions() };
-    let error = unsafe { LLVMRunPasses(module.as_raw(), passes.as_ptr(), tm.as_raw(), options) };
+    let error = unsafe {
+        LLVMRunPasses(
+            module.as_mut_ptr(),
+            passes.as_ptr(),
+            tm.as_mut_ptr(),
+            options,
+        )
+    };
     unsafe { LLVMDisposePassBuilderOptions(options) };
     // Handle the error and print it to stderr.
     if !error.is_null() {

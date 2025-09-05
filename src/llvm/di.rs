@@ -22,7 +22,7 @@ use crate::llvm::{iter::*, types::di::DISubprogram, LLVMContext, LLVMModule};
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-pub (crate) struct DISanitizer<'ctx> {
+pub(crate) struct DISanitizer<'ctx> {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
@@ -58,11 +58,11 @@ fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
 }
 
 impl<'ctx> DISanitizer<'ctx> {
-    pub (crate) fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
-        Self {
-            context: unsafe { context.as_raw() },
-            module: unsafe { module.as_raw() },
-            builder: unsafe { LLVMCreateDIBuilder(module.as_raw()) },
+    pub fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
+        DISanitizer {
+            context: context.as_mut_ptr(),
+            module: module.as_mut_ptr(),
+            builder: unsafe { LLVMCreateDIBuilder(module.as_mut_ptr()) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types_lossy: Vec::new(),
