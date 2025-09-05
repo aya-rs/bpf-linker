@@ -118,6 +118,9 @@ struct CommandLine {
     #[clap(long)]
     allow_bpf_trap: bool,
 
+    #[clap(short = 'L', number_of_values = 1)]
+    libs: Vec<PathBuf>,
+
     /// Optimization level. 0-3, s, or z
     #[clap(short = 'O', default_value = "2")]
     optimize: Vec<CliOptLevel>,
@@ -223,6 +226,7 @@ fn main() -> anyhow::Result<()> {
         export,
         fatal_errors,
         _debug,
+        libs: _libs, // NOTE: not used right now
     } = match Parser::try_parse_from(args) {
         Ok(command_line) => command_line,
         Err(err) => match err.kind() {
