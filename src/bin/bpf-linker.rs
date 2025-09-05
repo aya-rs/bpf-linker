@@ -304,10 +304,9 @@ fn main() -> anyhow::Result<()> {
         allow_bpf_trap,
     })?;
 
-    let inputs: Vec<LinkerInput> = inputs
+    let inputs = inputs
         .iter()
-        .map(|p| LinkerInput::try_from(p.as_path()))
-        .collect::<Result<_, _>>()?;
+        .map(|p| LinkerInput::new_from_file(p.as_path()));
 
     linker.link_to_file(
         inputs,

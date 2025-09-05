@@ -139,53 +139,75 @@ pub enum OptLevel {
 
 pub struct FileInput<'a> {
     path: &'a Path,
-    file: File,
 }
 
-pub struct BytesInput<'a> {
+pub struct BufferInput<'a> {
     name: &'a str,
-    cursor: io::Cursor<&'a [u8]>,
+    bytes: &'a [u8],
 }
 
 pub enum LinkerInput<'a> {
     File(FileInput<'a>),
-    Bytes(BytesInput<'a>),
+    Buffer(BufferInput<'a>),
 }
 
-impl<'a> Seek for LinkerInput<'a> {
+impl<'a> LinkerInput<'a> {
+    pub fn new_from_file(path: &'a Path) -> Self {
+        LinkerInput::File(FileInput { path })
+    }
+
+    pub fn new_from_buffer(name: &'a str, bytes: &'a [u8]) -> Self {
+        LinkerInput::Buffer(BufferInput { name, bytes })
+    }
+}
+
+enum InputReader<'a> {
+    File {
+        path: &'a Path,
+        file: File,
+    },
+    Buffer {
+        name: &'a str,
+        cursor: io::Cursor<&'a [u8]>,
+    },
+}
+
+impl<'a> TryFrom<LinkerInput<'a>> for InputReader<'a> {
+    type Error = LinkerError;
+
+    fn try_from(value: LinkerInput<'a>) -> Result<Self, Self::Error> {
+        match value {
+            LinkerInput::File(file_input) => {
+                let file = File::open(file_input.path)
+                    .map_err(|err| LinkerError::IoError(file_input.path.to_owned(), err))?;
+                Ok(InputReader::File {
+                    path: file_input.path,
+                    file,
+                })
+            }
+            LinkerInput::Buffer(buffer_input) => Ok(InputReader::Buffer {
+                name: buffer_input.name,
+                cursor: io::Cursor::new(buffer_input.bytes),
+            }),
+        }
+    }
+}
+
+impl<'a> Seek for InputReader<'a> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match self {
-            LinkerInput::File(input) => input.file.seek(pos),
-            LinkerInput::Bytes(input) => input.cursor.seek(pos),
+            InputReader::File { file, .. } => file.seek(pos),
+            InputReader::Buffer { cursor, .. } => cursor.seek(pos),
         }
     }
 }
 
-impl<'a> Read for LinkerInput<'a> {
+impl<'a> Read for InputReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
-            LinkerInput::File(input) => input.file.read(buf),
-            LinkerInput::Bytes(input) => input.cursor.read(buf),
+            InputReader::File { file, .. } => file.read(buf),
+            InputReader::Buffer { cursor, .. } => cursor.read(buf),
         }
-    }
-}
-
-impl<'a> From<(&'a str, &'a [u8])> for LinkerInput<'a> {
-    fn from(value: (&'a str, &'a [u8])) -> Self {
-        LinkerInput::Bytes(BytesInput {
-            name: value.0,
-            cursor: io::Cursor::new(value.1),
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a Path> for LinkerInput<'a> {
-    type Error = io::Error;
-
-    fn try_from(path: &'a Path) -> Result<Self, Self::Error> {
-        let file = File::open(path)?;
-
-        Ok(LinkerInput::File(FileInput { path, file }))
     }
 }
 
@@ -310,8 +332,8 @@ impl Linker {
     /// // Link to a file
     /// linker.link_to_file(
     ///     vec![
-    ///         LinkerInput::try_from(path)?,
-    ///         LinkerInput::from(("my buffer", bytes)), // In memory buffer needs a name
+    ///         LinkerInput::new_from_file(path),
+    ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
     ///     ],
     ///     Path::new("/path/to/output"),
     ///     OutputType::Object,
@@ -321,14 +343,20 @@ impl Linker {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn link_to_file(
+    pub fn link_to_file<'i>(
         &self,
-        inputs: Vec<LinkerInput>,
+        inputs: impl IntoIterator<Item = LinkerInput<'i>>,
         output: &Path,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
         dump_module: Option<&Path>,
     ) -> Result<(), LinkerError> {
+        // Catch non existing files
+        let inputs = inputs
+            .into_iter()
+            .map(InputReader::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+
         let (linked_module, target_machine) = self.link(inputs, export_symbols, dump_module)?;
         codegen_to_file(&linked_module, &target_machine, output, output_type)?;
         Ok(())
@@ -362,8 +390,8 @@ impl Linker {
     /// // Link into an in-memory buffer.
     /// let out_buf = linker.link_to_buffer(
     ///     vec![
-    ///         LinkerInput::try_from(path)?,
-    ///         LinkerInput::from(("my buffer", bytes)), // In memory buffer needs a name
+    ///         LinkerInput::new_from_file(path),
+    ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
     ///     ],
     ///     OutputType::Bitcode,
     ///     &HashSet::new(),
@@ -377,21 +405,27 @@ impl Linker {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn link_to_buffer(
+    pub fn link_to_buffer<'i>(
         &self,
-        inputs: Vec<LinkerInput>,
+        inputs: impl IntoIterator<Item = LinkerInput<'i>>,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
         dump_module: Option<&Path>,
     ) -> Result<LinkerOutput, LinkerError> {
+        // Catch non existing files
+        let inputs = inputs
+            .into_iter()
+            .map(InputReader::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+
         let (linked_module, target_machine) = self.link(inputs, export_symbols, dump_module)?;
         codegen_to_buffer(&linked_module, &target_machine, output_type)
     }
 
     /// Link and generate the output code.
-    fn link<'ctx>(
+    fn link<'ctx, 'i>(
         &'ctx self,
-        inputs: Vec<LinkerInput>,
+        inputs: impl IntoIterator<Item = InputReader<'i>>,
         export_symbols: &HashSet<Cow<'static, str>>,
         dump_module: Option<&Path>,
     ) -> Result<(LLVMModule<'ctx>, LLVMTargetMachine), LinkerError> {
@@ -645,9 +679,9 @@ fn codegen_to_file(
     }
 }
 
-fn link_modules<'ctx>(
+fn link_modules<'ctx, 'i>(
     context: &'ctx LLVMContext,
-    inputs: Vec<LinkerInput>,
+    inputs: impl IntoIterator<Item = InputReader<'i>>,
 ) -> Result<LLVMModule<'ctx>, LinkerError> {
     let mut module = unsafe { context.create_module("linked_module") }
         .ok_or(LinkerError::ModuleCreationError)?;
@@ -655,9 +689,9 @@ fn link_modules<'ctx>(
     // buffer used to perform file type detection
     let mut buf = [0u8; 8];
     for mut input in inputs {
-        let path = match &input {
-            LinkerInput::File(input) => input.path.into(),
-            LinkerInput::Bytes(input) => PathBuf::from(format!("in_memory::{}", input.name)),
+        let path = match input {
+            InputReader::File { path, .. } => path.into(),
+            InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
         };
 
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
