@@ -117,6 +117,7 @@ struct CommandLine {
     #[clap(long)]
     allow_bpf_trap: bool,
 
+    /// Add a directory to the library search path
     #[clap(short = 'L', number_of_values = 1)]
     libs: Vec<PathBuf>,
 
