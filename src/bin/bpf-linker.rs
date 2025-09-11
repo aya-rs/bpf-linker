@@ -13,7 +13,7 @@ use std::{
     str::FromStr,
 };
 
-use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
     error::ErrorKind,
@@ -213,7 +213,6 @@ fn main() -> anyhow::Result<()> {
         emit,
         btf,
         allow_bpf_trap,
-        libs,
         optimize,
         export_symbols,
         log_file,
@@ -228,6 +227,7 @@ fn main() -> anyhow::Result<()> {
         export,
         fatal_errors,
         _debug,
+        libs: _libs, // NOTE: not used right now
     } = match Parser::try_parse_from(args) {
         Ok(command_line) => command_line,
         Err(err) => match err.kind() {
@@ -291,27 +291,31 @@ fn main() -> anyhow::Result<()> {
         [.., CliOptLevel(optimize)] => optimize,
     };
 
-    let mut linker = Linker::new(LinkerOptions {
+    let linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
-        inputs,
-        output,
-        output_type,
-        libs,
         optimize,
-        export_symbols,
         unroll_loops,
         ignore_inline_never,
-        dump_module,
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
         btf,
         allow_bpf_trap,
-    });
+    })?;
 
-    linker.link()?;
+    let inputs = inputs
+        .iter()
+        .map(|p| LinkerInput::new_from_file(p.as_path()));
+
+    linker.link_to_file(
+        inputs,
+        &output,
+        output_type,
+        &export_symbols,
+        dump_module.as_deref(),
+    )?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
