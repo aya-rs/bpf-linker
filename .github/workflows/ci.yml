@@ -63,9 +63,9 @@ jobs:
             llvm-from: apt
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
           - rust: beta
-            llvm: 20
+            llvm: 21
             llvm-from: apt
-            exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+            exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
             llvm: 21
             llvm-from: apt
