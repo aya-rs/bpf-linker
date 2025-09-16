@@ -22,7 +22,7 @@ use llvm_sys::{
 use crate::llvm::{
     iter::IterBasicBlocks as _,
     symbol_name,
-    types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+    types::di::{DICompileUnit, DICompositeType, DIDerivedType, DISubprogram, DIType},
     Message,
 };
 
@@ -112,6 +112,7 @@ pub enum Metadata<'ctx> {
     DICompositeType(DICompositeType<'ctx>),
     DIDerivedType(DIDerivedType<'ctx>),
     DISubprogram(DISubprogram<'ctx>),
+    DICompileUnit(#[allow(dead_code)] DICompileUnit<'ctx>),
     Other(#[allow(dead_code)] LLVMValueRef),
 }
 
@@ -140,6 +141,10 @@ impl Metadata<'_> {
                 let di_subprogram = unsafe { DISubprogram::from_value_ref(value) };
                 Metadata::DISubprogram(di_subprogram)
             }
+            LLVMMetadataKind::LLVMDICompileUnitMetadataKind => {
+                let di_compile_unit = unsafe { DICompileUnit::from_value_ref(value) };
+                Metadata::DICompileUnit(di_compile_unit)
+            }
             LLVMMetadataKind::LLVMDIGlobalVariableMetadataKind
             | LLVMMetadataKind::LLVMDICommonBlockMetadataKind
             | LLVMMetadataKind::LLVMMDStringMetadataKind
@@ -156,7 +161,6 @@ impl Metadata<'_> {
             | LLVMMetadataKind::LLVMDIBasicTypeMetadataKind
             | LLVMMetadataKind::LLVMDISubroutineTypeMetadataKind
             | LLVMMetadataKind::LLVMDIFileMetadataKind
-            | LLVMMetadataKind::LLVMDICompileUnitMetadataKind
             | LLVMMetadataKind::LLVMDILexicalBlockMetadataKind
             | LLVMMetadataKind::LLVMDILexicalBlockFileMetadataKind
             | LLVMMetadataKind::LLVMDINamespaceMetadataKind
