@@ -65,12 +65,8 @@ impl<'ctx> LLVMModule<'ctx> {
     }
 
     pub fn write_ir_to_memory(&self) -> MemoryBuffer {
-        // NOTE: This function implementation wraps the result into a MemoryBuffer,
-        // with a copy.
-        //
-        // The reason is to uniform the output for LinkerOutput.
-        // The cleanest solution is LinkerOutput being a wrapper over an enum, with
-        // the last being an LLVMMemoryBuffer or a LLVMMessage.
+        // Format the module to a string, then copy into a MemoryBuffer. We do the extra copy to keep the
+        // internal API simpler, as all the other codegen methods output a MemoryBuffer.
         unsafe {
             let ptr = LLVMPrintModuleToString(self.module);
             let cstr = CStr::from_ptr(ptr);

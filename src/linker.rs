@@ -72,7 +72,7 @@ pub enum LinkerError {
 
     /// LLVM cannot create a module for linking.
     #[error("failed to create module")]
-    ModuleCreationError,
+    CreateModuleError,
 }
 
 /// BPF Cpu type
@@ -331,7 +331,7 @@ impl Linker {
     ///
     /// // Link to a file
     /// linker.link_to_file(
-    ///     vec![
+    ///     [
     ///         LinkerInput::new_from_file(path),
     ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
     ///     ],
@@ -389,7 +389,7 @@ impl Linker {
     ///
     /// // Link into an in-memory buffer.
     /// let out_buf = linker.link_to_buffer(
-    ///     vec![
+    ///     [
     ///         LinkerInput::new_from_file(path),
     ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
     ///     ],
@@ -668,14 +668,14 @@ fn codegen_to_file(
             info!("emitting {:?} to {:?}", output_type, output);
 
             target_machine
-                .codegen_to_path(module, output, LLVMCodeGenFileType::LLVMAssemblyFile)
+                .emit_to_file(module, output, LLVMCodeGenFileType::LLVMAssemblyFile)
                 .map_err(LinkerError::EmitCodeError)
         }
         OutputType::Object => {
             info!("emitting {:?} to {:?}", output_type, output);
 
             target_machine
-                .codegen_to_path(module, output, LLVMCodeGenFileType::LLVMObjectFile)
+                .emit_to_file(module, output, LLVMCodeGenFileType::LLVMObjectFile)
                 .map_err(LinkerError::EmitCodeError)
         }
     }
@@ -687,7 +687,7 @@ fn link_modules<'ctx, 'i>(
 ) -> Result<LLVMModule<'ctx>, LinkerError> {
     let mut module = context
         .create_module("linked_module")
-        .ok_or(LinkerError::ModuleCreationError)?;
+        .ok_or(LinkerError::CreateModuleError)?;
 
     // buffer used to perform file type detection
     let mut buf = [0u8; 8];
@@ -849,10 +849,10 @@ fn codegen_to_buffer(
         OutputType::Bitcode => module.write_bitcode_to_memory(),
         OutputType::LlvmAssembly => module.write_ir_to_memory(),
         OutputType::Assembly => target_machine
-            .codegen_to_mem(module, LLVMCodeGenFileType::LLVMAssemblyFile)
+            .emit_to_memory_buffer(module, LLVMCodeGenFileType::LLVMAssemblyFile)
             .map_err(LinkerError::EmitCodeError)?,
         OutputType::Object => target_machine
-            .codegen_to_mem(module, LLVMCodeGenFileType::LLVMObjectFile)
+            .emit_to_memory_buffer(module, LLVMCodeGenFileType::LLVMObjectFile)
             .map_err(LinkerError::EmitCodeError)?,
     };
 
