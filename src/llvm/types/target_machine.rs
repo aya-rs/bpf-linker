@@ -45,7 +45,7 @@ impl LLVMTargetMachine {
         self.target_machine
     }
 
-    pub fn codegen_to_path(
+    pub fn emit_to_file(
         &self,
         module: &LLVMModule,
         path: impl AsRef<Path>,
@@ -69,7 +69,7 @@ impl LLVMTargetMachine {
         }
     }
 
-    pub fn codegen_to_mem(
+    pub fn emit_to_memory_buffer(
         &self,
         module: &LLVMModule<'_>,
         output_type: LLVMCodeGenFileType,
