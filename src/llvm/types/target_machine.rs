@@ -1,4 +1,4 @@
-use std::{ffi::CStr, path::Path};
+use std::{ffi::{CStr, CString}, path::Path};
 
 use llvm_sys::target_machine::{
     LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
@@ -51,17 +51,19 @@ impl LLVMTargetMachine {
         path: impl AsRef<Path>,
         output_type: LLVMCodeGenFileType,
     ) -> Result<(), String> {
-        let path_str_ptr = path.as_ref().as_os_str().as_encoded_bytes().as_ptr().cast();
+        let path = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
-        let (ret, message) = Message::with(|message| unsafe {
-            LLVMTargetMachineEmitToFile(
-                self.target_machine,
-                module.module,
-                path_str_ptr,
-                output_type,
-                message,
-            )
-        });
+        let (ret, message) = unsafe {
+            Message::with(|message| {
+                LLVMTargetMachineEmitToFile(
+                    self.target_machine,
+                    module.module,
+                    path.as_ptr(),
+                    output_type,
+                    message,
+                )
+            })
+        };
         if ret == 0 {
             Ok(())
         } else {
