@@ -36,9 +36,9 @@ impl<'ctx> LLVMModule<'ctx> {
     }
 
     pub fn write_bitcode_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
-        let path_str_ptr = path.as_ref().as_os_str().as_encoded_bytes().as_ptr().cast();
+        let path = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
-        if unsafe { LLVMWriteBitcodeToFile(self.module, path_str_ptr) } == 1 {
+        if unsafe { LLVMWriteBitcodeToFile(self.module, path.as_ptr()) } == 1 {
             return Err("failed to write bitcode".to_string());
         }
 
@@ -52,11 +52,12 @@ impl<'ctx> LLVMModule<'ctx> {
     }
 
     pub fn write_ir_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
-        let path_str_ptr = path.as_ref().as_os_str().as_encoded_bytes().as_ptr().cast();
+        let path = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
         let (ret, message) = unsafe {
-            Message::with(|message| LLVMPrintModuleToFile(self.module, path_str_ptr, message))
+            Message::with(|message| LLVMPrintModuleToFile(self.module, path.as_ptr(), message))
         };
+
         if ret == 0 {
             Ok(())
         } else {
