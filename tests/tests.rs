@@ -1,3 +1,5 @@
+#![expect(unused_crate_dependencies, reason = "used in lib/bin")]
+
 use std::{
     env,
     ffi::{OsStr, OsString},
@@ -109,11 +111,13 @@ fn is_nightly() -> bool {
 }
 
 fn btf_dump(src: &Path, dst: &Path) {
-    let dst = std::fs::File::create(dst)
+    let dst = fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
     let mut btf = Command::new("btf");
-    btf.arg("dump").arg(src).stdout(dst);
     let status = btf
+        .arg("dump")
+        .arg(src)
+        .stdout(dst)
         .status()
         .unwrap_or_else(|err| panic!("could not run {btf:?}: {err}"));
     assert_eq!(status.code(), Some(0), "{btf:?} failed");

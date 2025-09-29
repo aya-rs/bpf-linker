@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf, process::Command};
+use std::{env, ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf, process::Command};
 
 use anyhow::{Context as _, Result, bail};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};

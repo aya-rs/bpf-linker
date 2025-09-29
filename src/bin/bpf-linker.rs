@@ -1,11 +1,4 @@
-#![deny(clippy::all)]
-
-#[cfg(any(
-    feature = "rust-llvm-19",
-    feature = "rust-llvm-20",
-    feature = "rust-llvm-21"
-))]
-extern crate aya_rustc_llvm_proxy;
+#![expect(unused_crate_dependencies, reason = "used in lib")]
 
 use std::{
     env, fs, io,
@@ -13,6 +6,12 @@ use std::{
     str::FromStr,
 };
 
+#[cfg(any(
+    feature = "rust-llvm-19",
+    feature = "rust-llvm-20",
+    feature = "rust-llvm-21"
+))]
+use aya_rustc_llvm_proxy as _;
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
@@ -39,14 +38,13 @@ impl FromStr for CliOptLevel {
     type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use OptLevel::*;
-        Ok(CliOptLevel(match s {
-            "0" => No,
-            "1" => Less,
-            "2" => Default,
-            "3" => Aggressive,
-            "s" => Size,
-            "z" => SizeMin,
+        Ok(Self(match s {
+            "0" => OptLevel::No,
+            "1" => OptLevel::Less,
+            "2" => OptLevel::Default,
+            "3" => OptLevel::Aggressive,
+            "s" => OptLevel::Size,
+            "z" => OptLevel::SizeMin,
             _ => return Err(CliError::InvalidOptimization(s.to_string())),
         }))
     }
@@ -59,12 +57,11 @@ impl FromStr for CliOutputType {
     type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use OutputType::*;
-        Ok(CliOutputType(match s {
-            "llvm-bc" => Bitcode,
-            "asm" => Assembly,
-            "llvm-ir" => LlvmAssembly,
-            "obj" => Object,
+        Ok(Self(match s {
+            "llvm-bc" => OutputType::Bitcode,
+            "asm" => OutputType::Assembly,
+            "llvm-ir" => OutputType::LlvmAssembly,
+            "obj" => OutputType::Object,
             _ => return Err(CliError::InvalidOutputType(s.to_string())),
         }))
     }

@@ -1,2 +1,2 @@
-pub mod di;
-pub mod ir;
+pub(super) mod di;
+pub(super) mod ir;
