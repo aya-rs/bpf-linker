@@ -7,3 +7,6 @@ edition = "2024"
 anyhow = { workspace = true }
 clap = { workspace = true }
 rustc-build-sysroot = { workspace = true }
+
+[lints]
+workspace = true

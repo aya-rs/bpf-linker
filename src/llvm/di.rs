@@ -1,8 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
-    ffi::c_char,
-    hash::Hasher,
+    hash::Hasher as _,
     ptr,
 };
 
@@ -21,7 +20,7 @@ use crate::llvm::{iter::*, types::di::DISubprogram};
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-pub struct DISanitizer {
+pub(crate) struct DISanitizer {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
@@ -59,8 +58,8 @@ fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
 }
 
 impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
-        DISanitizer {
+    pub(crate) fn new(context: LLVMContextRef, module: LLVMModuleRef) -> Self {
+        Self {
             context,
             module,
             builder: unsafe { LLVMCreateDIBuilder(module) },
@@ -70,11 +69,11 @@ impl DISanitizer {
         }
     }
 
-    fn visit_mdnode(&mut self, mdnode: MDNode) {
+    fn visit_mdnode(&mut self, mdnode: MDNode<'_>) {
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
-                #[allow(clippy::single_match)]
-                #[allow(non_upper_case_globals)]
+                #[expect(clippy::single_match)]
+                #[expect(non_upper_case_globals)]
                 match di_composite_type.tag() {
                     DW_TAG_structure_type => {
                         let names = match di_composite_type.name() {
@@ -96,7 +95,7 @@ impl DISanitizer {
 
                         let mut is_data_carrying_enum = false;
                         let mut remove_name = false;
-                        let mut members: Vec<DIType> = Vec::new();
+                        let mut members: Vec<DIType<'_>> = Vec::new();
                         for element in di_composite_type.elements() {
                             match element {
                                 Metadata::DICompositeType(di_composite_type_inner) => {
@@ -191,8 +190,8 @@ impl DISanitizer {
                 }
             }
             Metadata::DIDerivedType(mut di_derived_type) => {
-                #[allow(clippy::single_match)]
-                #[allow(non_upper_case_globals)]
+                #[expect(clippy::single_match)]
+                #[expect(non_upper_case_globals)]
                 match di_derived_type.tag() {
                     DW_TAG_pointer_type => {
                         // remove rust names
@@ -204,7 +203,7 @@ impl DISanitizer {
             Metadata::DISubprogram(mut di_subprogram) => {
                 // Sanitize function names
                 if let Some(name) = di_subprogram.name() {
-                    let name = sanitize_type_name(name);
+                    let name = sanitize_type_name(name.to_str().unwrap());
                     di_subprogram
                         .replace_name(self.context, name.as_str())
                         .unwrap();
@@ -283,7 +282,7 @@ impl DISanitizer {
         }
     }
 
-    pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
+    pub(crate) fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
         let module = self.module;
 
         self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
@@ -352,10 +351,13 @@ impl DISanitizer {
                 let new_program = LLVMDIBuilderCreateFunction(
                     self.builder,
                     subprogram.scope().unwrap(),
-                    name.as_ptr() as *const c_char,
-                    name.len(),
-                    linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()) as *const c_char,
-                    linkage_name.unwrap_or("").len(),
+                    name.as_ptr().cast(),
+                    name.count_bytes(),
+                    linkage_name
+                        .map(|s| s.as_ptr())
+                        .unwrap_or(ptr::null())
+                        .cast(),
+                    linkage_name.map_or(0, |s| s.count_bytes()),
                     subprogram.file(),
                     subprogram.line(),
                     ty,
@@ -392,8 +394,7 @@ impl DISanitizer {
             // Remove retained nodes from the old program or we'll hit a debug assertion since
             // its debug variables no longer point to the program. See the
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
-            let empty_node =
-                unsafe { LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0) };
+            let empty_node = unsafe { LLVMMDNodeInContext2(self.context, ptr::null_mut(), 0) };
             subprogram.set_retained_nodes(empty_node);
 
             let ret = replace.insert(subprogram.value_ref as u64, unsafe {
@@ -440,13 +441,13 @@ impl Operand {
 impl Item {
     fn value_ref(&self) -> LLVMValueRef {
         match self {
-            Item::GlobalVariable(value)
-            | Item::GlobalAlias(value)
-            | Item::Function(value)
-            | Item::FunctionParam(value)
-            | Item::Instruction(value)
-            | Item::Operand(Operand { value, .. })
-            | Item::MetadataEntry(value, _, _) => *value,
+            Self::GlobalVariable(value)
+            | Self::GlobalAlias(value)
+            | Self::Function(value)
+            | Self::FunctionParam(value)
+            | Self::Instruction(value)
+            | Self::Operand(Operand { value, .. })
+            | Self::MetadataEntry(value, _, _) => *value,
         }
     }
 
