@@ -3,12 +3,12 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
-    io,
-    io::{Read, Seek},
+    io::{self, Read, Seek as _},
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    ptr, str,
-    str::FromStr,
+    pin::Pin,
+    ptr,
+    str::{self, FromStr},
 };
 
 use ar::Archive;
@@ -232,18 +232,18 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
-    diagnostic_handler: DiagnosticHandler,
+    diagnostic_handler: Pin<Box<DiagnosticHandler>>,
 }
 
 impl Linker {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
-        Linker {
+        Self {
             options,
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
-            diagnostic_handler: DiagnosticHandler::new(),
+            diagnostic_handler: Box::pin(DiagnosticHandler::default()),
         }
     }
 
@@ -352,10 +352,9 @@ impl Linker {
             .or_else(|| detect_input_type(&data))
             .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
-        use InputType::*;
         let bitcode = match in_type {
-            Bitcode => data,
-            Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
+            InputType::Bitcode => data,
+            InputType::Elf => match llvm::find_embedded_bitcode(self.context, &data) {
                 Ok(Some(bitcode)) => bitcode,
                 Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
                 Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
@@ -365,10 +364,10 @@ impl Linker {
             // mach-o on macos
             InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
             // this can't really happen
-            Archive => panic!("nested archives not supported duh"),
+            InputType::Archive => panic!("nested archives not supported duh"),
         };
 
-        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
+        if !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) {
             return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 
@@ -405,22 +404,20 @@ impl Linker {
             // case 1
             Some(triple) => {
                 let c_triple = CString::new(triple.as_str()).unwrap();
-                (triple.as_str(), unsafe {
-                    llvm::target_from_triple(&c_triple)
-                })
+                (triple.as_str(), llvm::target_from_triple(&c_triple))
             }
             None => {
                 let c_triple = unsafe { LLVMGetTarget(*module) };
                 let triple = unsafe { CStr::from_ptr(c_triple) }.to_str().unwrap();
                 if triple.starts_with("bpf") {
                     // case 2
-                    (triple, unsafe { llvm::target_from_module(*module) })
+                    (triple, llvm::target_from_module(*module))
                 } else {
                     // case 3.
                     info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
                     let triple = "bpf";
                     let c_triple = CString::new(triple).unwrap();
-                    (triple, unsafe { llvm::target_from_triple(&c_triple) })
+                    (triple, llvm::target_from_triple(&c_triple))
                 }
             }
         };
@@ -431,9 +428,8 @@ impl Linker {
             triple, cpu, cpu_features,
         );
 
-        *target_machine =
-            unsafe { llvm::create_target_machine(target, triple, cpu.to_str(), cpu_features) }
-                .ok_or_else(|| LinkerError::InvalidTarget(triple.to_owned()))?;
+        *target_machine = llvm::create_target_machine(target, triple, cpu.to_str(), cpu_features)
+            .ok_or_else(|| LinkerError::InvalidTarget(triple.to_owned()))?;
 
         Ok(())
     }
@@ -458,19 +454,17 @@ impl Linker {
             llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
         } else {
             // if we don't need BTF emission, we can strip DI
-            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            let ok = llvm::strip_debug_info(self.module);
             debug!("Stripping DI, changed={}", ok);
         }
 
-        unsafe {
-            llvm::optimize(
-                self.target_machine,
-                self.module,
-                self.options.optimize,
-                self.options.ignore_inline_never,
-                &self.options.export_symbols,
-            )
-        }
+        llvm::optimize(
+            self.target_machine,
+            self.module,
+            self.options.optimize,
+            self.options.ignore_inline_never,
+            &self.options.export_symbols,
+        )
         .map_err(LinkerError::OptimizeError)?;
 
         Ok(())
@@ -499,18 +493,18 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, output) }.map_err(LinkerError::WriteIRError)
+        llvm::write_ir(self.module, output).map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
         info!("emitting {:?} to {:?}", output_type, output);
 
-        unsafe { llvm::codegen(self.target_machine, self.module, output, output_type) }
+        llvm::codegen(self.target_machine, self.module, output, output_type)
             .map_err(LinkerError::EmitCodeError)
     }
 
     fn llvm_init(&mut self) {
-        let mut args = Vec::<Cow<str>>::new();
+        let mut args = Vec::<Cow<'_, str>>::new();
         args.push("bpf-linker".into());
         // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
         // where the layout is larger than 64 bits, but the LLVM BPF target only supports
@@ -543,23 +537,31 @@ impl Linker {
         }
         args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);
-        unsafe {
-            llvm::init(&args, "BPF linker");
+        llvm::init(&args, "BPF linker");
 
-            self.context = LLVMContextCreate();
+        let context = unsafe { LLVMContextCreate() };
+        self.context = context;
+
+        unsafe {
+            let handler_ptr = {
+                // SAFETY: `diagnostic_handler` is pinned for the lifetime of `Linker`, and we use
+                // the mutable reference only to obtain a stable raw pointer for LLVM’s callback.
+                let handler = self.diagnostic_handler.as_mut().get_unchecked_mut();
+                ptr::from_mut(handler).cast()
+            };
             LLVMContextSetDiagnosticHandler(
-                self.context,
+                context,
                 Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-                &mut self.diagnostic_handler as *mut _ as _,
+                handler_ptr,
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
-            self.module = llvm::create_module(
-                self.options.output.file_stem().unwrap().to_str().unwrap(),
-                self.context,
-            )
-            .unwrap();
         }
+        self.module = llvm::create_module(
+            self.options.output.file_stem().unwrap().to_str().unwrap(),
+            context,
+        )
+        .unwrap();
     }
 }
 
@@ -579,20 +581,11 @@ impl Drop for Linker {
     }
 }
 
-pub struct DiagnosticHandler {
+#[derive(Default)]
+pub(crate) struct DiagnosticHandler {
     pub(crate) has_errors: bool,
-}
-
-impl Default for DiagnosticHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DiagnosticHandler {
-    pub fn new() -> Self {
-        Self { has_errors: false }
-    }
+    // The handler is passed to LLVM as a raw pointer so it must not be moved.
+    _marker: std::marker::PhantomPinned,
 }
 
 impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
