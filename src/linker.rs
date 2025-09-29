@@ -3,12 +3,12 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
-    io,
-    io::{Read, Seek},
+    io::{self, Read, Seek as _},
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    ptr, str,
-    str::FromStr,
+    pin::Pin,
+    ptr,
+    str::{self, FromStr},
 };
 
 use ar::Archive;
@@ -232,18 +232,18 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
-    diagnostic_handler: DiagnosticHandler,
+    diagnostic_handler: Pin<Box<DiagnosticHandler>>,
 }
 
 impl Linker {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
-        Linker {
+        Self {
             options,
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
-            diagnostic_handler: DiagnosticHandler::new(),
+            diagnostic_handler: Box::pin(DiagnosticHandler::default()),
         }
     }
 
@@ -352,10 +352,9 @@ impl Linker {
             .or_else(|| detect_input_type(&data))
             .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
-        use InputType::*;
         let bitcode = match in_type {
-            Bitcode => data,
-            Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
+            InputType::Bitcode => data,
+            InputType::Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
                 Ok(Some(bitcode)) => bitcode,
                 Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
                 Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
@@ -365,7 +364,7 @@ impl Linker {
             // mach-o on macos
             InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
             // this can't really happen
-            Archive => panic!("nested archives not supported duh"),
+            InputType::Archive => panic!("nested archives not supported duh"),
         };
 
         if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
@@ -510,7 +509,7 @@ impl Linker {
     }
 
     fn llvm_init(&mut self) {
-        let mut args = Vec::<Cow<str>>::new();
+        let mut args = Vec::<Cow<'_, str>>::new();
         args.push("bpf-linker".into());
         // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
         // where the layout is larger than 64 bits, but the LLVM BPF target only supports
@@ -550,7 +549,7 @@ impl Linker {
             LLVMContextSetDiagnosticHandler(
                 self.context,
                 Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-                &mut self.diagnostic_handler as *mut _ as _,
+                ptr::from_mut(&mut self.diagnostic_handler).cast(),
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
@@ -579,20 +578,11 @@ impl Drop for Linker {
     }
 }
 
-pub struct DiagnosticHandler {
+#[derive(Default)]
+pub(crate) struct DiagnosticHandler {
     pub(crate) has_errors: bool,
-}
-
-impl Default for DiagnosticHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DiagnosticHandler {
-    pub fn new() -> Self {
-        Self { has_errors: false }
-    }
+    // The handler is passed to LLVM as a raw pointer so it must not be moved.
+    _marker: std::marker::PhantomPinned,
 }
 
 impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {

@@ -1,9 +1,8 @@
-#![deny(clippy::all)]
-#![deny(unused_results)]
-
 // The following macros are adapted from from https://github.com/TheDan64/inkwell,
 // licensed under Apache-2.0.
 // Original source: https://github.com/TheDan64/inkwell/blob/0b0a2c0b2eb5e458767093c2ab8c56cbd05ec4c9/src/lib.rs#L85-L112
+
+#![expect(unused_crate_dependencies, reason = "used in bin")]
 
 macro_rules! assert_unique_features {
     () => {};
