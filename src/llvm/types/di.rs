@@ -7,13 +7,17 @@ use std::{
 
 use gimli::DwTag;
 use llvm_sys::{
-    core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
-    debuginfo::{
-        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
-        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+    core::{
+        LLVMGetNumOperands, LLVMGetOperand, LLVMMetadataAsValue, LLVMReplaceMDNodeOperandWith,
+        LLVMValueAsMetadata,
     },
-    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
+    debuginfo::{
+        LLVMDIBuilderCreateBasicType, LLVMDIBuilderGetOrCreateTypeArray, LLVMDIFileGetFilename,
+        LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine, LLVMDITypeGetFlags,
+        LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMDITypeGetSizeInBits,
+        LLVMDWARFTypeEncoding, LLVMGetDINodeTag,
+    },
+    prelude::{LLVMContextRef, LLVMDIBuilderRef, LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
@@ -234,7 +238,7 @@ enum DICompositeTypeOperand {
 /// Composite type is a kind of type that can include other types, such as
 /// structures, enums, unions, etc.
 pub struct DICompositeType<'ctx> {
-    metadata_ref: LLVMMetadataRef,
+    pub(crate) metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
@@ -320,6 +324,11 @@ impl DICompositeType<'_> {
     /// Returns a DWARF tag of the given composite type.
     pub fn tag(&self) -> DwTag {
         unsafe { di_node_tag(self.metadata_ref) }
+    }
+
+    /// Returns the size in bits of the composite type.
+    pub fn size_in_bits(&self) -> u64 {
+        unsafe { LLVMDITypeGetSizeInBits(LLVMValueAsMetadata(self.value_ref)) }
     }
 }
 
@@ -441,5 +450,141 @@ impl DISubprogram<'_> {
                 nodes,
             )
         };
+    }
+}
+
+/// Represents the operands for a [`DICompileUnit`]. The enum values correspond
+/// to the operand indices within metadata nodes.
+#[repr(u32)]
+enum DICompileUnitOperand {
+    EnumTypes = 4,
+}
+
+/// Represents the debug information for a compile unit in LLVM IR.
+#[derive(Clone)]
+pub struct DICompileUnit<'ctx> {
+    value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl<'ctx> DICompileUnit<'ctx> {
+    /// Constructs a new [`DICompileUnit`] from the given `value_ref`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a valid
+    /// instance of [LLVM `DICompileUnit`](https://llvm.org/doxygen/classllvm_1_1DICompileUnit.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any valiation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn enum_types(&self) -> impl Iterator<Item = DICompositeType> {
+        let llvm_enum_types =
+            unsafe { LLVMGetOperand(self.value_ref, DICompileUnitOperand::EnumTypes as u32) };
+
+        let llvm_enum_types_len = if llvm_enum_types.is_null() {
+            0
+        } else {
+            unsafe { LLVMGetNumOperands(llvm_enum_types) }
+        };
+
+        (0..llvm_enum_types_len).map(move |i| unsafe {
+            let enum_type = LLVMGetOperand(llvm_enum_types, i as u32);
+            DICompositeType::from_value_ref(enum_type)
+        })
+    }
+
+    pub fn replace_enum_types<I>(&mut self, builder: LLVMDIBuilderRef, rep: I)
+    where
+        I: IntoIterator<Item = DICompositeType<'ctx>>,
+    {
+        let mut rep: Vec<_> = rep.into_iter().map(|dct| dct.metadata_ref).collect();
+
+        unsafe {
+            let enum_array =
+                LLVMDIBuilderGetOrCreateTypeArray(builder, rep.as_mut_ptr(), rep.len());
+            LLVMReplaceMDNodeOperandWith(
+                self.value_ref,
+                DICompileUnitOperand::EnumTypes as u32,
+                enum_array,
+            );
+        }
+    }
+}
+
+/// Represents [`DIBasicType`] kinds.
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+pub enum DIBasicTypeKind {
+    I8,
+}
+
+impl DIBasicTypeKind {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::I8 => "i8",
+        }
+    }
+
+    fn size_in_bits(&self) -> u64 {
+        match self {
+            Self::I8 => 8,
+        }
+    }
+
+    // DWARF encoding https://llvm.org/docs/LangRef.html#dibasictype
+    fn dwarf_type_encoding(&self) -> LLVMDWARFTypeEncoding {
+        match self {
+            // DW_ATE_signed
+            Self::I8 => gimli::DW_ATE_signed.0.into(),
+        }
+    }
+}
+
+/// Represents the debug information for a basic type in LLVM IR.
+pub struct DIBasicType<'ctx> {
+    pub(crate) value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl DIBasicType<'_> {
+    /// Constructs a new [`DIBasicType`] from the given `value_ref`.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a valid
+    /// instance of [LLVM `DIBasicType`](https://llvm.org/doxygen/classllvm_1_1DIBasicType.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any valiation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Creates a new [`DIBasicType`] of `kind` given a `context` and a `builder`.
+    pub fn llvm_create(
+        ctx: LLVMContextRef,
+        builder: LLVMDIBuilderRef,
+        kind: DIBasicTypeKind,
+    ) -> Self {
+        let name = kind.name();
+        let metadata_ref = unsafe {
+            LLVMDIBuilderCreateBasicType(
+                builder,
+                name.as_ptr() as *const _,
+                name.len(),
+                kind.size_in_bits(),
+                kind.dwarf_type_encoding(),
+                0,
+            )
+        };
+
+        unsafe { Self::from_value_ref(LLVMMetadataAsValue(ctx, metadata_ref)) }
     }
 }
