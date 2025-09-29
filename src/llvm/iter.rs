@@ -12,11 +12,11 @@ use llvm_sys::{
 
 macro_rules! llvm_iterator {
     ($trait_name:ident, $iterator_name:ident, $iterable:ty, $method_name:ident, $item_ty:ty, $first:expr, $last:expr, $next:expr $(,)?) => {
-        pub trait $trait_name {
+        pub(crate) trait $trait_name {
             fn $method_name(&self) -> $iterator_name<'_>;
         }
 
-        pub struct $iterator_name<'a> {
+        pub(crate) struct $iterator_name<'a> {
             lifetime: PhantomData<&'a $iterable>,
             next: $item_ty,
             last: $item_ty,
@@ -35,7 +35,7 @@ macro_rules! llvm_iterator {
             }
         }
 
-        impl<'a> Iterator for $iterator_name<'a> {
+        impl Iterator for $iterator_name<'_> {
             type Item = $item_ty;
 
             fn next(&mut self) -> Option<Self::Item> {
