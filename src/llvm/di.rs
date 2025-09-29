@@ -1,8 +1,8 @@
 use std::{
     borrow::Cow,
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
-    ffi::c_char,
-    hash::Hasher,
+    hash::Hasher as _,
+    io::Write as _,
     ptr,
 };
 
@@ -17,75 +17,66 @@ use super::types::{
 use crate::llvm::{iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
-// to lower value found accross kernel versions to ensure
+// to lower value found across kernel versions to ensure
 // backward compatibility
 const MAX_KSYM_NAME_LEN: usize = 128;
 
-pub struct DISanitizer {
+pub(crate) struct DISanitizer {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
-    skipped_types: Vec<String>,
+    skipped_types_lossy: Vec<String>,
 }
 
 // Sanitize Rust type names to be valid C type names.
-fn sanitize_type_name<T: AsRef<str>>(name: T) -> String {
-    let n: String = name
-        .as_ref()
-        .chars()
-        .map(|ch| {
-            // Characters which are valid in C type names (alphanumeric and `_`).
-            if matches!(ch, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
-                ch.to_string()
-            } else {
-                format!("_{:X}_", ch as u32)
-            }
-        })
-        .collect();
-
-    // we trim type name if it is too long
-    if n.len() > MAX_KSYM_NAME_LEN {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(n.as_bytes());
-        let hash = format!("{:x}", hasher.finish());
-        // leave space for underscore
-        let trim = MAX_KSYM_NAME_LEN - hash.len() - 1;
-        return format!("{}_{hash}", &n[..trim]);
+fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
+    let mut sanitized = Vec::with_capacity(name.len());
+    for &byte in name {
+        // Characters which are valid in C type names (alphanumeric and `_`).
+        if matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_') {
+            sanitized.push(byte);
+        } else {
+            write!(&mut sanitized, "_{:X}_", byte).unwrap();
+        }
     }
 
-    n
+    if sanitized.len() > MAX_KSYM_NAME_LEN {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&sanitized);
+        let hash = hasher.finish();
+        // leave space for underscore
+        let trim = MAX_KSYM_NAME_LEN - 2 * size_of_val(&hash) - 1;
+        sanitized.truncate(trim);
+        write!(&mut sanitized, "_{:x}", hash).unwrap();
+    }
+
+    sanitized
 }
 
 impl DISanitizer {
-    pub fn new(context: LLVMContextRef, module: LLVMModuleRef) -> DISanitizer {
-        DISanitizer {
+    pub(crate) fn new(context: LLVMContextRef, module: LLVMModuleRef) -> Self {
+        Self {
             context,
             module,
             builder: unsafe { LLVMCreateDIBuilder(module) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
-            skipped_types: Vec::new(),
+            skipped_types_lossy: Vec::new(),
         }
     }
 
-    fn visit_mdnode(&mut self, mdnode: MDNode) {
+    fn visit_mdnode(&mut self, mdnode: MDNode<'_>) {
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
-                #[allow(clippy::single_match)]
-                #[allow(non_upper_case_globals)]
+                #[expect(clippy::single_match)]
+                #[expect(non_upper_case_globals)]
                 match di_composite_type.tag() {
                     DW_TAG_structure_type => {
-                        let names = match di_composite_type.name() {
-                            Some(name) => {
-                                let original_name = name.to_string_lossy().to_string();
-                                let sanitized_name = sanitize_type_name(&original_name);
-
-                                Some((original_name, sanitized_name))
-                            }
-                            None => None,
-                        };
+                        let names = di_composite_type
+                            .name()
+                            .map(|name| (name.to_owned(), sanitize_type_name(name)));
 
                         // This is a forward declaration. We don't need to do
                         // anything on the declaration, we're going to process
@@ -96,7 +87,7 @@ impl DISanitizer {
 
                         let mut is_data_carrying_enum = false;
                         let mut remove_name = false;
-                        let mut members: Vec<DIType> = Vec::new();
+                        let mut members: Vec<DIType<'_>> = Vec::new();
                         for element in di_composite_type.elements() {
                             match element {
                                 Metadata::DICompositeType(di_composite_type_inner) => {
@@ -107,27 +98,17 @@ impl DISanitizer {
                                     // doesn't contain data carried by the enum variant.
                                     match di_composite_type_inner.tag() {
                                         DW_TAG_variant_part => {
-                                            let line = di_composite_type.line();
-                                            let file = di_composite_type.file();
-                                            let filename = file.filename();
-
-                                            let name = match names {
-                                                Some((ref original_name, _)) => {
-                                                    original_name.to_owned()
-                                                }
-                                                None => "(anon)".to_owned(),
-                                            };
-                                            let filename = match filename {
-                                                Some(filename) => {
-                                                    filename.to_string_lossy().to_string()
-                                                }
-                                                None => "<unknown>".to_owned(),
-                                            };
-
-                                            trace!(
-                                                "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it"
-                                            );
-                                            self.skipped_types.push(name);
+                                            if let Some((ref name, _)) = names {
+                                                let file = di_composite_type.file();
+                                                let name = String::from_utf8_lossy(name.as_slice())
+                                                    .to_string();
+                                                trace!(
+                                                    "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it",
+                                                    filename = file.filename().map_or( "<unknown>".into(), String::from_utf8_lossy),
+                                                    line = di_composite_type.line(),
+                                                );
+                                                self.skipped_types_lossy.push(name);
+                                            }
 
                                             is_data_carrying_enum = true;
                                             break;
@@ -143,12 +124,10 @@ impl DISanitizer {
                                             if let Some(base_type_name) =
                                                 base_type_di_composite_type.name()
                                             {
-                                                let base_type_name =
-                                                    base_type_name.to_string_lossy();
                                                 // `AyaBtfMapMarker` is a type which is used in fields of BTF map
                                                 // structs. We need to make such structs anonymous in order to get
                                                 // BTF maps accepted by the Linux kernel.
-                                                if base_type_name == "AyaBtfMapMarker" {
+                                                if base_type_name == b"AyaBtfMapMarker" {
                                                     // Remove the name from the struct.
                                                     remove_name = true;
                                                     // And don't include the field in the sanitized DI.
@@ -179,24 +158,22 @@ impl DISanitizer {
                             // `AyaBtfMapMarker` is a type which is used in fields of BTF map
                             // structs. We need to make such structs anonymous in order to get
                             // BTF maps accepted by the Linux kernel.
-                            di_composite_type.replace_name(self.context, "").unwrap();
+                            di_composite_type.replace_name(self.context, &[])
                         } else if let Some((_, sanitized_name)) = names {
                             // Clear the name from characters incompatible with C.
-                            di_composite_type
-                                .replace_name(self.context, sanitized_name.as_str())
-                                .unwrap();
+                            di_composite_type.replace_name(self.context, sanitized_name.as_slice())
                         }
                     }
                     _ => (),
                 }
             }
             Metadata::DIDerivedType(mut di_derived_type) => {
-                #[allow(clippy::single_match)]
-                #[allow(non_upper_case_globals)]
+                #[expect(clippy::single_match)]
+                #[expect(non_upper_case_globals)]
                 match di_derived_type.tag() {
                     DW_TAG_pointer_type => {
                         // remove rust names
-                        di_derived_type.replace_name(self.context, "").unwrap();
+                        di_derived_type.replace_name(self.context, &[])
                     }
                     _ => (),
                 }
@@ -205,9 +182,7 @@ impl DISanitizer {
                 // Sanitize function names
                 if let Some(name) = di_subprogram.name() {
                     let name = sanitize_type_name(name);
-                    di_subprogram
-                        .replace_name(self.context, name.as_str())
-                        .unwrap();
+                    di_subprogram.replace_name(self.context, name.as_slice())
                 }
             }
             _ => (),
@@ -283,7 +258,7 @@ impl DISanitizer {
         }
     }
 
-    pub fn run(mut self, exported_symbols: &HashSet<Cow<'static, str>>) {
+    pub(crate) fn run(mut self, exported_symbols: &HashSet<Cow<'_, [u8]>>) {
         let module = self.module;
 
         self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
@@ -299,10 +274,10 @@ impl DISanitizer {
             self.visit_item(Item::Function(function));
         }
 
-        if !self.skipped_types.is_empty() {
+        if !self.skipped_types_lossy.is_empty() {
             warn!(
                 "debug info was not emitted for the following types: {}",
-                self.skipped_types.join(", ")
+                self.skipped_types_lossy.join(", ")
             );
         }
 
@@ -324,7 +299,7 @@ impl DISanitizer {
     // See tests/btf/assembly/exported-symbols.rs .
     fn fix_subprogram_linkage(
         &mut self,
-        export_symbols: &HashSet<Cow<'static, str>>,
+        export_symbols: &HashSet<Cow<'_, [u8]>>,
     ) -> HashMap<u64, LLVMMetadataRef> {
         let mut replace = HashMap::new();
 
@@ -342,8 +317,12 @@ impl DISanitizer {
                 continue;
             };
 
-            let name = subprogram.name().unwrap();
-            let linkage_name = subprogram.linkage_name();
+            let (name, name_len) = subprogram
+                .name()
+                .map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
+            let (linkage_name, linkage_name_len) = subprogram
+                .linkage_name()
+                .map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
             let ty = subprogram.ty();
 
             // Create a new subprogram that has DISPFlagLocalToUnit set, so the BTF backend emits it
@@ -352,10 +331,10 @@ impl DISanitizer {
                 let new_program = LLVMDIBuilderCreateFunction(
                     self.builder,
                     subprogram.scope().unwrap(),
-                    name.as_ptr() as *const c_char,
-                    name.len(),
-                    linkage_name.map(|s| s.as_ptr()).unwrap_or(ptr::null()) as *const c_char,
-                    linkage_name.unwrap_or("").len(),
+                    name.cast(),
+                    name_len,
+                    linkage_name.cast(),
+                    linkage_name_len,
                     subprogram.file(),
                     subprogram.line(),
                     ty,
@@ -392,8 +371,7 @@ impl DISanitizer {
             // Remove retained nodes from the old program or we'll hit a debug assertion since
             // its debug variables no longer point to the program. See the
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
-            let empty_node =
-                unsafe { LLVMMDNodeInContext2(self.context, core::ptr::null_mut(), 0) };
+            let empty_node = unsafe { LLVMMDNodeInContext2(self.context, ptr::null_mut(), 0) };
             subprogram.set_retained_nodes(empty_node);
 
             let ret = replace.insert(subprogram.value_ref as u64, unsafe {
@@ -440,13 +418,13 @@ impl Operand {
 impl Item {
     fn value_ref(&self) -> LLVMValueRef {
         match self {
-            Item::GlobalVariable(value)
-            | Item::GlobalAlias(value)
-            | Item::Function(value)
-            | Item::FunctionParam(value)
-            | Item::Instruction(value)
-            | Item::Operand(Operand { value, .. })
-            | Item::MetadataEntry(value, _, _) => *value,
+            Self::GlobalVariable(value)
+            | Self::GlobalAlias(value)
+            | Self::Function(value)
+            | Self::FunctionParam(value)
+            | Self::Instruction(value)
+            | Self::Operand(Operand { value, .. })
+            | Self::MetadataEntry(value, _, _) => *value,
         }
     }
 
@@ -462,36 +440,44 @@ mod test {
     #[test]
     fn test_strip_generics() {
         let name = "MyStruct<u64>";
-        assert_eq!(sanitize_type_name(name), "MyStruct_3C_u64_3E_");
+        assert_eq!(
+            sanitize_type_name(name.as_bytes()),
+            b"MyStruct_3C_u64_3E_".as_slice()
+        );
 
         let name = "MyStruct<u64, u64>";
-        assert_eq!(sanitize_type_name(name), "MyStruct_3C_u64_2C__20_u64_3E_");
+        assert_eq!(
+            sanitize_type_name(name.as_bytes()),
+            b"MyStruct_3C_u64_2C__20_u64_3E_".as_slice()
+        );
 
         let name = "my_function<aya_bpf::BpfContext>";
         assert_eq!(
-            sanitize_type_name(name),
-            "my_function_3C_aya_bpf_3A__3A_BpfContext_3E_"
+            sanitize_type_name(name.as_bytes()),
+            b"my_function_3C_aya_bpf_3A__3A_BpfContext_3E_".as_slice()
         );
 
         let name = "my_function<aya_bpf::BpfContext, aya_log_ebpf::WriteToBuf>";
         assert_eq!(
-            sanitize_type_name(name),
-            "my_function_3C_aya_bpf_3A__3A_BpfContext_2C__20_aya_log_ebpf_3A__3A_WriteToBuf_3E_"
+            sanitize_type_name(name.as_bytes()),
+            b"my_function_3C_aya_bpf_3A__3A_BpfContext_2C__20_aya_log_ebpf_3A__3A_WriteToBuf_3E_"
+                .as_slice()
         );
 
         let name = "PerfEventArray<[u8; 32]>";
         assert_eq!(
-            sanitize_type_name(name),
-            "PerfEventArray_3C__5B_u8_3B__20_32_5D__3E_"
+            sanitize_type_name(name.as_bytes()),
+            b"PerfEventArray_3C__5B_u8_3B__20_32_5D__3E_".as_slice()
         );
 
         let name = "my_function<aya_bpf::this::is::a::very::long::namespace::BpfContext, aya_log_ebpf::this::is::a::very::long::namespace::WriteToBuf>";
-        let san = sanitize_type_name(name);
+        let san = sanitize_type_name(name.as_bytes());
 
         assert_eq!(san.len(), 128);
         assert_eq!(
             san,
-            "my_function_3C_aya_bpf_3A__3A_this_3A__3A_is_3A__3A_a_3A__3A_very_3A__3A_long_3A__3A_namespace_3A__3A_BpfContex_94e4085604b3142f"
+            b"my_function_3C_aya_bpf_3A__3A_this_3A__3A_is_3A__3A_a_3A__3A_very_3A__3A_long_3A__3A_namespace_3A__3A_BpfContex_94e4085604b3142f"
+                .as_slice()
         );
     }
 }

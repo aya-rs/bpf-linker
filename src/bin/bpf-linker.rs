@@ -1,18 +1,19 @@
-#![deny(clippy::all)]
+#![expect(unused_crate_dependencies, reason = "used in lib")]
+
+use std::{
+    env,
+    ffi::CString,
+    fs, io,
+    path::{Component, Path, PathBuf},
+    str::FromStr,
+};
 
 #[cfg(any(
     feature = "rust-llvm-19",
     feature = "rust-llvm-20",
     feature = "rust-llvm-21"
 ))]
-extern crate aya_rustc_llvm_proxy;
-
-use std::{
-    env, fs, io,
-    path::{Component, Path, PathBuf},
-    str::FromStr,
-};
-
+use aya_rustc_llvm_proxy as _;
 use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
@@ -39,14 +40,13 @@ impl FromStr for CliOptLevel {
     type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use OptLevel::*;
-        Ok(CliOptLevel(match s {
-            "0" => No,
-            "1" => Less,
-            "2" => Default,
-            "3" => Aggressive,
-            "s" => Size,
-            "z" => SizeMin,
+        Ok(Self(match s {
+            "0" => OptLevel::No,
+            "1" => OptLevel::Less,
+            "2" => OptLevel::Default,
+            "3" => OptLevel::Aggressive,
+            "s" => OptLevel::Size,
+            "z" => OptLevel::SizeMin,
             _ => return Err(CliError::InvalidOptimization(s.to_string())),
         }))
     }
@@ -59,12 +59,11 @@ impl FromStr for CliOutputType {
     type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use OutputType::*;
-        Ok(CliOutputType(match s {
-            "llvm-bc" => Bitcode,
-            "asm" => Assembly,
-            "llvm-ir" => LlvmAssembly,
-            "obj" => Object,
+        Ok(Self(match s {
+            "llvm-bc" => OutputType::Bitcode,
+            "asm" => OutputType::Assembly,
+            "llvm-ir" => OutputType::LlvmAssembly,
+            "obj" => OutputType::Object,
             _ => return Err(CliError::InvalidOutputType(s.to_string())),
         }))
     }
@@ -89,7 +88,7 @@ fn parent_and_file_name(p: PathBuf) -> anyhow::Result<(PathBuf, PathBuf)> {
 struct CommandLine {
     /// LLVM target triple. When not provided, the target is inferred from the inputs
     #[clap(long)]
-    target: Option<String>,
+    target: Option<CString>,
 
     /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`
     #[clap(long, default_value = "generic")]
@@ -99,7 +98,7 @@ struct CommandLine {
     /// +feature to enable a feature, or -feature to disable it.  For example
     /// --cpu-features=+alu32,-dwarfris
     #[clap(long, value_name = "features", default_value = "")]
-    cpu_features: String,
+    cpu_features: CString,
 
     /// Write output to <output>
     #[clap(short, long)]
@@ -157,7 +156,7 @@ struct CommandLine {
 
     /// Extra command line arguments to pass to LLVM
     #[clap(long, value_name = "args", use_value_delimiter = true, action = clap::ArgAction::Append)]
-    llvm_args: Vec<String>,
+    llvm_args: Vec<CString>,
 
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
     #[clap(long)]

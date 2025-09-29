@@ -1,14 +1,14 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
-    ffi::{CStr, CString},
+    ffi::{CStr, CString, OsStr},
     fs::File,
-    io,
-    io::{Read, Seek},
+    io::{self, Read, Seek as _},
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    ptr, str,
-    str::FromStr,
+    pin::Pin,
+    ptr,
+    str::{self, FromStr},
 };
 
 use ar::Archive;
@@ -90,21 +90,26 @@ pub enum Cpu {
 }
 
 impl Cpu {
-    fn to_str(self) -> &'static str {
-        use Cpu::*;
+    fn as_c_str(&self) -> &'static CStr {
         match self {
-            Generic => "generic",
-            Probe => "probe",
-            V1 => "v1",
-            V2 => "v2",
-            V3 => "v3",
+            Self::Generic => c"generic",
+            Self::Probe => c"probe",
+            Self::V1 => c"v1",
+            Self::V2 => c"v2",
+            Self::V3 => c"v3",
         }
     }
 }
 
 impl std::fmt::Display for Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.pad(self.to_str())
+        f.pad(match self {
+            Self::Generic => "generic",
+            Self::Probe => "probe",
+            Self::V1 => "v1",
+            Self::V2 => "v2",
+            Self::V3 => "v3",
+        })
     }
 }
 
@@ -112,13 +117,12 @@ impl FromStr for Cpu {
     type Err = LinkerError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Cpu::*;
         Ok(match s {
-            "generic" => Generic,
-            "probe" => Probe,
-            "v1" => V1,
-            "v2" => V2,
-            "v3" => V3,
+            "generic" => Self::Generic,
+            "probe" => Self::Probe,
+            "v1" => Self::V1,
+            "v2" => Self::V2,
+            "v3" => Self::V3,
             _ => return Err(LinkerError::InvalidCpu(s.to_string())),
         })
     }
@@ -156,15 +160,14 @@ enum InputType {
 
 impl std::fmt::Display for InputType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use InputType::*;
         write!(
             f,
             "{}",
             match self {
-                Bitcode => "bitcode",
-                Elf => "elf",
-                MachO => "Mach-O",
-                Archive => "archive",
+                Self::Bitcode => "bitcode",
+                Self::Elf => "elf",
+                Self::MachO => "Mach-O",
+                Self::Archive => "archive",
             }
         )
     }
@@ -188,11 +191,11 @@ pub enum OutputType {
 pub struct LinkerOptions {
     /// The LLVM target to generate code for. If None, the target will be inferred from the input
     /// modules.
-    pub target: Option<String>,
+    pub target: Option<CString>,
     /// Cpu type.
     pub cpu: Cpu,
     /// Cpu features.
-    pub cpu_features: String,
+    pub cpu_features: CString,
     /// Input files. Can be bitcode, object files with embedded bitcode or archive files.
     pub inputs: Vec<PathBuf>,
     /// Where to save the output.
@@ -212,7 +215,7 @@ pub struct LinkerOptions {
     /// Write the linked module IR before and after optimization.
     pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
-    pub llvm_args: Vec<String>,
+    pub llvm_args: Vec<CString>,
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
     pub disable_expand_memcpy_in_order: bool,
     /// Disable exporting memcpy, memmove, memset, memcmp and bcmp. Exporting
@@ -232,18 +235,18 @@ pub struct Linker {
     context: LLVMContextRef,
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
-    diagnostic_handler: DiagnosticHandler,
+    diagnostic_handler: Pin<Box<DiagnosticHandler>>,
 }
 
 impl Linker {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
-        Linker {
+        Self {
             options,
             context: ptr::null_mut(),
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
-            diagnostic_handler: DiagnosticHandler::new(),
+            diagnostic_handler: Box::pin(DiagnosticHandler::default()),
         }
     }
 
@@ -298,8 +301,7 @@ impl Linker {
                     // Extract the archive and call link_reader() for each item.
                     let mut archive = Archive::new(file);
                     while let Some(Ok(item)) = archive.next_entry() {
-                        let name =
-                            PathBuf::from(str::from_utf8(item.header().identifier()).unwrap());
+                        let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
                         info!("linking archive item {:?}", name);
 
                         match self.link_reader(&name, item, None) {
@@ -352,10 +354,9 @@ impl Linker {
             .or_else(|| detect_input_type(&data))
             .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
-        use InputType::*;
         let bitcode = match in_type {
-            Bitcode => data,
-            Elf => match unsafe { llvm::find_embedded_bitcode(self.context, &data) } {
+            InputType::Bitcode => data,
+            InputType::Elf => match llvm::find_embedded_bitcode(self.context, &data) {
                 Ok(Some(bitcode)) => bitcode,
                 Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
                 Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
@@ -365,10 +366,10 @@ impl Linker {
             // mach-o on macos
             InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
             // this can't really happen
-            Archive => panic!("nested archives not supported duh"),
+            InputType::Archive => panic!("nested archives not supported duh"),
         };
 
-        if unsafe { !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) } {
+        if !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) {
             return Err(LinkerError::LinkModuleError(path.to_owned()));
         }
 
@@ -403,37 +404,33 @@ impl Linker {
         //      endianness)
         let (triple, target) = match target {
             // case 1
-            Some(triple) => {
-                let c_triple = CString::new(triple.as_str()).unwrap();
-                (triple.as_str(), unsafe {
-                    llvm::target_from_triple(&c_triple)
-                })
-            }
+            Some(c_triple) => (c_triple.as_c_str(), llvm::target_from_triple(c_triple)),
             None => {
                 let c_triple = unsafe { LLVMGetTarget(*module) };
-                let triple = unsafe { CStr::from_ptr(c_triple) }.to_str().unwrap();
-                if triple.starts_with("bpf") {
+                let c_triple = unsafe { CStr::from_ptr(c_triple) };
+                if c_triple.to_bytes().starts_with(b"bpf") {
                     // case 2
-                    (triple, unsafe { llvm::target_from_module(*module) })
+                    (c_triple, llvm::target_from_module(*module))
                 } else {
                     // case 3.
-                    info!("detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'", triple);
-                    let triple = "bpf";
-                    let c_triple = CString::new(triple).unwrap();
-                    (triple, unsafe { llvm::target_from_triple(&c_triple) })
+                    info!("detected non-bpf input target {:?} and no explicit output --target specified, selecting `bpf'", c_triple);
+                    let c_triple = c"bpf";
+                    (c_triple, llvm::target_from_triple(c_triple))
                 }
             }
         };
-        let target = target.map_err(|_msg| LinkerError::InvalidTarget(triple.to_owned()))?;
+        let target = target
+            .map_err(|_msg| LinkerError::InvalidTarget(triple.to_string_lossy().to_string()))?;
 
         debug!(
             "creating target machine: triple: {} cpu: {} features: {}",
-            triple, cpu, cpu_features,
+            triple.to_string_lossy(),
+            cpu,
+            cpu_features.to_string_lossy(),
         );
 
-        *target_machine =
-            unsafe { llvm::create_target_machine(target, triple, cpu.to_str(), cpu_features) }
-                .ok_or_else(|| LinkerError::InvalidTarget(triple.to_owned()))?;
+        *target_machine = llvm::create_target_machine(target, triple, cpu.as_c_str(), cpu_features)
+            .ok_or_else(|| LinkerError::InvalidTarget(triple.to_string_lossy().to_string()))?;
 
         Ok(())
     }
@@ -453,31 +450,36 @@ impl Linker {
         // run optimizations. Will optionally remove noinline attributes, intern all non exported
         // programs and maps and remove dead code.
 
+        let export_symbols = self
+            .options
+            .export_symbols
+            .iter()
+            .map(|s| s.as_bytes().into())
+            .collect();
+
         if self.options.btf {
             // if we want to emit BTF, we need to sanitize the debug information
-            llvm::DISanitizer::new(self.context, self.module).run(&self.options.export_symbols);
+            llvm::DISanitizer::new(self.context, self.module).run(&export_symbols);
         } else {
             // if we don't need BTF emission, we can strip DI
-            let ok = unsafe { llvm::strip_debug_info(self.module) };
+            let ok = llvm::strip_debug_info(self.module);
             debug!("Stripping DI, changed={}", ok);
         }
 
-        unsafe {
-            llvm::optimize(
-                self.target_machine,
-                self.module,
-                self.options.optimize,
-                self.options.ignore_inline_never,
-                &self.options.export_symbols,
-            )
-        }
+        llvm::optimize(
+            self.target_machine,
+            self.module,
+            self.options.optimize,
+            self.options.ignore_inline_never,
+            &export_symbols,
+        )
         .map_err(LinkerError::OptimizeError)?;
 
         Ok(())
     }
 
     fn codegen(&mut self) -> Result<(), LinkerError> {
-        let output = CString::new(self.options.output.as_os_str().to_str().unwrap()).unwrap();
+        let output = CString::new(self.options.output.as_os_str().as_bytes()).unwrap();
         match self.options.output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
             OutputType::LlvmAssembly => self.write_ir(&output),
@@ -499,38 +501,42 @@ impl Linker {
     fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
         info!("writing IR to {:?}", output);
 
-        unsafe { llvm::write_ir(self.module, output) }.map_err(LinkerError::WriteIRError)
+        llvm::write_ir(self.module, output).map_err(LinkerError::WriteIRError)
     }
 
     fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
         info!("emitting {:?} to {:?}", output_type, output);
 
-        unsafe { llvm::codegen(self.target_machine, self.module, output, output_type) }
+        llvm::codegen(self.target_machine, self.module, output, output_type)
             .map_err(LinkerError::EmitCodeError)
     }
 
     fn llvm_init(&mut self) {
-        let mut args = Vec::<Cow<str>>::new();
-        args.push("bpf-linker".into());
+        let mut args = Vec::<Cow<'_, CStr>>::new();
+        args.push(c"bpf-linker".into());
         // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
         // where the layout is larger than 64 bits, but the LLVM BPF target only supports
         // up to 64 bits return values. Since the accessors are tiny in terms of code, we
         // avoid the issue by annotating them with #[inline(always)]. If they are classified
         // as cold though - and they often are starting from LLVM17 - #[inline(always)]
         // is ignored and the BPF target fails codegen.
-        args.push("--cold-callsite-rel-freq=0".into());
+        args.push(c"--cold-callsite-rel-freq=0".into());
         if self.options.unroll_loops {
             // setting cmdline arguments is the only way to customize the unroll pass with the
             // C API.
             args.extend([
-                "--unroll-runtime".into(),
-                "--unroll-runtime-multi-exit".into(),
-                format!("--unroll-max-upperbound={}", u32::MAX).into(),
-                format!("--unroll-threshold={}", u32::MAX).into(),
+                c"--unroll-runtime".into(),
+                c"--unroll-runtime-multi-exit".into(),
+                CString::new(format!("--unroll-max-upperbound={}", u32::MAX))
+                    .unwrap()
+                    .into(),
+                CString::new(format!("--unroll-threshold={}", u32::MAX))
+                    .unwrap()
+                    .into(),
             ]);
         }
         if !self.options.disable_expand_memcpy_in_order {
-            args.push("--bpf-expand-memcpy-in-order".into());
+            args.push(c"--bpf-expand-memcpy-in-order".into());
         }
         if !self.options.allow_bpf_trap {
             // TODO: Remove this once ksyms support is guaranteed.
@@ -539,27 +545,37 @@ impl Linker {
             // section, but this is not trivial to support. In the meantime, using this flag
             // returns LLVM to the old behaviour, which did not introduce these calls and therefore
             // does not require the .ksyms section.
-            args.push("--bpf-disable-trap-unreachable".into());
+            args.push(c"--bpf-disable-trap-unreachable".into());
         }
         args.extend(self.options.llvm_args.iter().map(Into::into));
         info!("LLVM command line: {:?}", args);
-        unsafe {
-            llvm::init(&args, "BPF linker");
+        llvm::init(args.as_slice(), c"BPF linker");
 
-            self.context = LLVMContextCreate();
+        let context = unsafe { LLVMContextCreate() };
+        self.context = context;
+
+        unsafe {
+            let handler_ptr = {
+                // SAFETY: `diagnostic_handler` is pinned for the lifetime of `Linker`, and we use
+                // the mutable reference only to obtain a stable raw pointer for LLVM’s callback.
+                let handler = self.diagnostic_handler.as_mut().get_unchecked_mut();
+                ptr::from_mut(handler).cast()
+            };
             LLVMContextSetDiagnosticHandler(
-                self.context,
+                context,
                 Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-                &mut self.diagnostic_handler as *mut _ as _,
+                handler_ptr,
             );
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
-            self.module = llvm::create_module(
-                self.options.output.file_stem().unwrap().to_str().unwrap(),
-                self.context,
-            )
-            .unwrap();
         }
+        self.module = llvm::create_module(
+            CString::new(self.options.output.file_stem().unwrap().as_bytes())
+                .unwrap()
+                .as_c_str(),
+            context,
+        )
+        .unwrap();
     }
 }
 
@@ -579,24 +595,19 @@ impl Drop for Linker {
     }
 }
 
-pub struct DiagnosticHandler {
+#[derive(Default)]
+pub(crate) struct DiagnosticHandler {
     pub(crate) has_errors: bool,
-}
-
-impl Default for DiagnosticHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DiagnosticHandler {
-    pub fn new() -> Self {
-        Self { has_errors: false }
-    }
+    // The handler is passed to LLVM as a raw pointer so it must not be moved.
+    _marker: std::marker::PhantomPinned,
 }
 
 impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
-    fn handle_diagnostic(&mut self, severity: llvm_sys::LLVMDiagnosticSeverity, message: &str) {
+    fn handle_diagnostic(
+        &mut self,
+        severity: llvm_sys::LLVMDiagnosticSeverity,
+        message: Cow<'_, str>,
+    ) {
         // TODO(https://reviews.llvm.org/D155894): Remove this when LLVM no longer emits these
         // errors.
         //
@@ -631,14 +642,13 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
         return None;
     }
 
-    use InputType::*;
     match &data[..4] {
-        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(Bitcode),
-        b"\x7FELF" => Some(Elf),
-        b"\xcf\xfa\xed\xfe" => Some(MachO),
+        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
+        b"\x7FELF" => Some(InputType::Elf),
+        b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
         _ => {
             if &data[..8] == b"!<arch>\x0A" {
-                Some(Archive)
+                Some(InputType::Archive)
             } else {
                 None
             }
