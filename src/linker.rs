@@ -295,6 +295,7 @@ pub struct Linker {
     options: LinkerOptions,
     context: LLVMContext,
     diagnostic_handler: Pin<Box<DiagnosticHandler>>,
+    dump_module: Option<PathBuf>,
 }
 
 impl Linker {
@@ -306,7 +307,19 @@ impl Linker {
             options,
             context,
             diagnostic_handler,
+            dump_module: None,
         })
+    }
+
+    /// Set the directory where the linker will dump the linked LLVM IR before and after
+    /// optimization, for debugging and inspection purposes.
+    ///
+    /// When set:
+    /// - The directory is created if it does not already exist.
+    /// - A "pre-opt.ll" file is written with the IR before optimization.
+    /// - A "post-opt.ll" file is written with the IR after optimization.
+    pub fn set_dump_module_path(&mut self, path: impl AsRef<Path>) {
+        self.dump_module = Some(path.as_ref().to_path_buf())
     }
 
     /// Link and generate the output code to file.
@@ -360,7 +373,6 @@ impl Linker {
         output: &Path,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
-        dump_module: Option<&Path>,
     ) -> Result<(), LinkerError> {
         // Catch non existing files
         let inputs = inputs
@@ -368,7 +380,7 @@ impl Linker {
             .map(InputReader::try_from)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (linked_module, target_machine) = self.link(inputs, export_symbols, dump_module)?;
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_file(&linked_module, &target_machine, output, output_type)?;
         Ok(())
     }
@@ -427,7 +439,6 @@ impl Linker {
         inputs: impl IntoIterator<Item = LinkerInput<'i>>,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
-        dump_module: Option<&Path>,
     ) -> Result<LinkerOutput, LinkerError> {
         // Catch non existing files
         let inputs = inputs
@@ -435,7 +446,7 @@ impl Linker {
             .map(InputReader::try_from)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (linked_module, target_machine) = self.link(inputs, export_symbols, dump_module)?;
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_buffer(&linked_module, &target_machine, output_type)
     }
 
@@ -445,17 +456,16 @@ impl Linker {
         &'ctx self,
         inputs: impl IntoIterator<Item = InputReader<'i>>,
         export_symbols: &HashSet<Cow<'static, str>>,
-        dump_module: Option<&Path>,
     ) -> Result<(LLVMModule<'ctx>, LLVMTargetMachine), LinkerError> {
         let mut module = link_modules(&self.context, inputs)?;
 
         let target_machine = create_target_machine(&self.options, &module)?;
 
-        if let Some(path) = dump_module {
+        if let Some(path) = &self.dump_module {
             std::fs::create_dir_all(path)
                 .map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
         }
-        if let Some(path) = dump_module {
+        if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
             module
@@ -469,7 +479,7 @@ impl Linker {
             &mut module,
             export_symbols,
         )?;
-        if let Some(path) = dump_module {
+        if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             module

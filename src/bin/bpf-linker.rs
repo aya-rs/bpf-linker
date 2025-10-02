@@ -290,7 +290,7 @@ fn main() -> anyhow::Result<()> {
         [.., CliOptLevel(optimize)] => optimize,
     };
 
-    let linker = Linker::new(LinkerOptions {
+    let mut linker = Linker::new(LinkerOptions {
         target,
         cpu,
         cpu_features,
@@ -304,17 +304,15 @@ fn main() -> anyhow::Result<()> {
         allow_bpf_trap,
     })?;
 
+    if let Some(path) = dump_module {
+        linker.set_dump_module_path(path);
+    }
+
     let inputs = inputs
         .iter()
         .map(|p| LinkerInput::new_from_file(p.as_path()));
 
-    linker.link_to_file(
-        inputs,
-        &output,
-        output_type,
-        &export_symbols,
-        dump_module.as_deref(),
-    )?;
+    linker.link_to_file(inputs, &output, output_type, &export_symbols)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
