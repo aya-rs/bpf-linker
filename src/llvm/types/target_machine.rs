@@ -1,4 +1,7 @@
-use std::{ffi::{CStr, CString}, path::Path};
+use std::{
+    ffi::{CStr, CString},
+    path::Path,
+};
 
 use llvm_sys::target_machine::{
     LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
@@ -8,17 +11,17 @@ use llvm_sys::target_machine::{
 
 use crate::llvm::{types::module::LLVMModule, MemoryBuffer, Message};
 
-pub struct LLVMTargetMachine {
+pub(crate) struct LLVMTargetMachine {
     pub(super) target_machine: LLVMTargetMachineRef,
 }
 
 impl LLVMTargetMachine {
-    pub fn new(
+    pub(crate) fn new(
         target: LLVMTargetRef,
         triple: &CStr,
         cpu: &CStr,
         features: &CStr,
-    ) -> Option<LLVMTargetMachine> {
+    ) -> Option<Self> {
         let tm = unsafe {
             LLVMCreateTargetMachine(
                 target,
@@ -33,7 +36,7 @@ impl LLVMTargetMachine {
         if tm.is_null() {
             None
         } else {
-            Some(LLVMTargetMachine { target_machine: tm })
+            Some(Self { target_machine: tm })
         }
     }
 
@@ -45,9 +48,9 @@ impl LLVMTargetMachine {
         self.target_machine
     }
 
-    pub fn emit_to_file(
+    pub(crate) fn emit_to_file(
         &self,
-        module: &LLVMModule,
+        module: &LLVMModule<'_>,
         path: impl AsRef<Path>,
         output_type: LLVMCodeGenFileType,
     ) -> Result<(), String> {
@@ -71,7 +74,7 @@ impl LLVMTargetMachine {
         }
     }
 
-    pub fn emit_to_memory_buffer(
+    pub(crate) fn emit_to_memory_buffer(
         &self,
         module: &LLVMModule<'_>,
         output_type: LLVMCodeGenFileType,

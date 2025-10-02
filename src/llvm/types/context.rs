@@ -14,12 +14,12 @@ use llvm_sys::{
 
 use crate::llvm::{types::module::LLVMModule, LLVMDiagnosticHandler, Message};
 
-pub struct LLVMContext {
+pub(crate) struct LLVMContext {
     pub(super) context: LLVMContextRef,
 }
 
 impl LLVMContext {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let context = unsafe { LLVMContextCreate() };
         Self { context }
     }
@@ -32,7 +32,7 @@ impl LLVMContext {
         self.context
     }
 
-    pub fn create_module<'ctx>(&'ctx self, name: &str) -> Option<LLVMModule<'ctx>> {
+    pub(crate) fn create_module<'ctx>(&'ctx self, name: &str) -> Option<LLVMModule<'ctx>> {
         let c_name = CString::new(name).unwrap();
         let module = unsafe { LLVMModuleCreateWithNameInContext(c_name.as_ptr(), self.context) };
 

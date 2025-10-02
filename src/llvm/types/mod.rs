@@ -1,6 +1,6 @@
-pub mod context;
+pub(super) mod context;
 pub(super) mod di;
 pub(super) mod ir;
-pub mod memory_buffer;
-pub mod module;
-pub mod target_machine;
+pub(super) mod memory_buffer;
+pub(super) mod module;
+pub(super) mod target_machine;

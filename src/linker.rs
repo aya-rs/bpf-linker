@@ -199,7 +199,7 @@ impl<'a> TryFrom<LinkerInput<'a>> for InputReader<'a> {
     }
 }
 
-impl<'a> Seek for InputReader<'a> {
+impl Seek for InputReader<'_> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match self {
             InputReader::File { file, .. } => file.seek(pos),
@@ -208,7 +208,7 @@ impl<'a> Seek for InputReader<'a> {
     }
 }
 
-impl<'a> Read for InputReader<'a> {
+impl Read for InputReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             InputReader::File { file, .. } => file.read(buf),
@@ -353,6 +353,7 @@ impl Linker {
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(single_use_lifetimes)]
     pub fn link_to_file<'i>(
         &self,
         inputs: impl IntoIterator<Item = LinkerInput<'i>>,
@@ -420,6 +421,7 @@ impl Linker {
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(single_use_lifetimes)]
     pub fn link_to_buffer<'i>(
         &self,
         inputs: impl IntoIterator<Item = LinkerInput<'i>>,
@@ -438,6 +440,7 @@ impl Linker {
     }
 
     /// Link and generate the output code.
+    #[allow(single_use_lifetimes)]
     fn link<'ctx, 'i>(
         &'ctx self,
         inputs: impl IntoIterator<Item = InputReader<'i>>,
@@ -599,7 +602,7 @@ fn llvm_init(options: &LinkerOptions) -> (LLVMContext, Pin<Box<DiagnosticHandler
 
 fn create_target_machine(
     options: &LinkerOptions,
-    module: &LLVMModule,
+    module: &LLVMModule<'_>,
 ) -> Result<LLVMTargetMachine, LinkerError> {
     let LinkerOptions {
         target,
@@ -624,11 +627,11 @@ fn create_target_machine(
         // case 1
         Some(c_triple) => (c_triple.as_c_str(), llvm::target_from_triple(c_triple)),
         None => {
-            let c_triple = unsafe { module.get_target() };
+            let c_triple = module.get_target();
             let c_triple = unsafe { CStr::from_ptr(c_triple) };
             if c_triple.to_bytes().starts_with(b"bpf") {
                 // case 2
-                (c_triple, unsafe { llvm::target_from_module(module) })
+                (c_triple, llvm::target_from_module(module))
             } else {
                 // case 3.
                 info!("detected non-bpf input target {:?} and no explicit output --target specified, selecting `bpf'", c_triple);
@@ -689,6 +692,7 @@ fn codegen_to_file(
     }
 }
 
+#[allow(single_use_lifetimes)]
 fn link_modules<'ctx, 'i>(
     context: &'ctx LLVMContext,
     inputs: impl IntoIterator<Item = InputReader<'i>>,
@@ -848,7 +852,7 @@ fn optimize<'ctx>(
 }
 
 fn codegen_to_buffer(
-    module: &LLVMModule,
+    module: &LLVMModule<'_>,
     target_machine: &LLVMTargetMachine,
     output_type: OutputType,
 ) -> Result<LinkerOutput, LinkerError> {

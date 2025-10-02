@@ -58,7 +58,7 @@ fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
 }
 
 impl<'ctx> DISanitizer<'ctx> {
-    pub fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
+    pub(crate) fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
         DISanitizer {
             context: context.as_mut_ptr(),
             module: module.as_mut_ptr(),

@@ -17,12 +17,12 @@ use llvm_sys::{
 
 use crate::llvm::{types::context::LLVMContext, MemoryBuffer, Message};
 
-pub struct LLVMModule<'ctx> {
+pub(crate) struct LLVMModule<'ctx> {
     pub(super) module: LLVMModuleRef,
     pub(super) _marker: PhantomData<&'ctx LLVMContext>,
 }
 
-impl<'ctx> LLVMModule<'ctx> {
+impl LLVMModule<'_> {
     /// Returns an unsafe mutable pointer to the LLVM module.
     ///
     /// The caller must ensure that the [LLVMModule] outlives the pointer this
@@ -31,11 +31,11 @@ impl<'ctx> LLVMModule<'ctx> {
         self.module
     }
 
-    pub fn get_target(&self) -> *const c_char {
+    pub(crate) fn get_target(&self) -> *const c_char {
         unsafe { LLVMGetTarget(self.module) }
     }
 
-    pub fn write_bitcode_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
+    pub(crate) fn write_bitcode_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
         let path = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
         if unsafe { LLVMWriteBitcodeToFile(self.module, path.as_ptr()) } == 1 {
@@ -45,13 +45,13 @@ impl<'ctx> LLVMModule<'ctx> {
         Ok(())
     }
 
-    pub fn write_bitcode_to_memory(&self) -> MemoryBuffer {
+    pub(crate) fn write_bitcode_to_memory(&self) -> MemoryBuffer {
         let buf = unsafe { llvm_sys::bit_writer::LLVMWriteBitcodeToMemoryBuffer(self.module) };
 
         MemoryBuffer { memory_buffer: buf }
     }
 
-    pub fn write_ir_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
+    pub(crate) fn write_ir_to_path(&self, path: impl AsRef<Path>) -> Result<(), String> {
         let path = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
         let (ret, message) = unsafe {
@@ -65,7 +65,7 @@ impl<'ctx> LLVMModule<'ctx> {
         }
     }
 
-    pub fn write_ir_to_memory(&self) -> MemoryBuffer {
+    pub(crate) fn write_ir_to_memory(&self) -> MemoryBuffer {
         // Format the module to a string, then copy into a MemoryBuffer. We do the extra copy to keep the
         // internal API simpler, as all the other codegen methods output a MemoryBuffer.
         unsafe {
@@ -77,7 +77,7 @@ impl<'ctx> LLVMModule<'ctx> {
 
             // Copy bytes into a new LLVMMemoryBuffer so we can safely dispose the message.
             let memory_buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy(
-                bytes.as_ptr() as *const ::libc::c_char,
+                bytes.as_ptr().cast(),
                 bytes.len(),
                 buffer_name.as_ptr(),
             );
@@ -88,12 +88,12 @@ impl<'ctx> LLVMModule<'ctx> {
     }
 
     /// strips debug information, returns true if DI got stripped
-    pub fn strip_debug_info(&mut self) -> bool {
+    pub(crate) fn strip_debug_info(&mut self) -> bool {
         unsafe { LLVMStripModuleDebugInfo(self.module) != 0 }
     }
 }
 
-impl<'ctx> Drop for LLVMModule<'ctx> {
+impl Drop for LLVMModule<'_> {
     fn drop(&mut self) {
         unsafe { LLVMDisposeModule(self.module) };
     }

@@ -43,7 +43,7 @@ use llvm_sys::{
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
 use tracing::{debug, error};
-pub use types::{
+pub(crate) use types::{
     context::LLVMContext, memory_buffer::MemoryBuffer, module::LLVMModule,
     target_machine::LLVMTargetMachine,
 };
