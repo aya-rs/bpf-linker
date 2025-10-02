@@ -314,7 +314,7 @@ impl Linker {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use std::{collections::HashSet, path::Path};
+    /// # use std::{collections::HashSet, path::Path, borrow::Cow};
     /// # use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let path = Path::new("/path/to/object-or-bitcode");
@@ -334,6 +334,11 @@ impl Linker {
     /// # };
     /// # let linker = Linker::new(options)?;
     ///
+    /// let export_symbols = ["my_sym_1", "my_sym_2"]
+    ///     .into_iter()
+    ///     .map(Cow::Borrowed)
+    ///     .collect();
+    ///
     /// // Link to a file
     /// linker.link_to_file(
     ///     [
@@ -342,7 +347,7 @@ impl Linker {
     ///     ],
     ///     Path::new("/path/to/output"),
     ///     OutputType::Object,
-    ///     &HashSet::new(),
+    ///     &export_symbols,
     ///     None,
     /// )?;
     /// # Ok(())
@@ -372,7 +377,7 @@ impl Linker {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use std::{collections::HashSet, path::Path};
+    /// # use std::{collections::HashSet, path::Path, borrow::Cow};
     /// # use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let path = Path::new("/path/to/object-or-bitcode");
@@ -392,6 +397,11 @@ impl Linker {
     /// # };
     /// # let linker = Linker::new(options)?;
     ///
+    /// let export_symbols = ["my_sym_1", "my_sym_2"]
+    ///     .into_iter()
+    ///     .map(Cow::Borrowed)
+    ///     .collect();
+    ///
     /// // Link into an in-memory buffer.
     /// let out_buf = linker.link_to_buffer(
     ///     [
@@ -399,7 +409,7 @@ impl Linker {
     ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
     ///     ],
     ///     OutputType::Bitcode,
-    ///     &HashSet::new(),
+    ///     &export_symbols,
     ///     None,
     /// )?;
     ///
