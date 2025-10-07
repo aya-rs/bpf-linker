@@ -73,7 +73,7 @@ impl LLVMModule<'_> {
             let cstr = CStr::from_ptr(ptr);
             let bytes = cstr.to_bytes();
 
-            let buffer_name = CString::new("mem_buffer").unwrap();
+            let buffer_name = c"mem_buffer";
 
             // Copy bytes into a new LLVMMemoryBuffer so we can safely dispose the message.
             let memory_buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy(

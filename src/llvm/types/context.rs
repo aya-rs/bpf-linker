@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_void, CString},
+    ffi::{c_void, CStr},
     marker::PhantomData,
     ptr,
 };
@@ -32,9 +32,8 @@ impl LLVMContext {
         self.context
     }
 
-    pub(crate) fn create_module<'ctx>(&'ctx self, name: &str) -> Option<LLVMModule<'ctx>> {
-        let c_name = CString::new(name).unwrap();
-        let module = unsafe { LLVMModuleCreateWithNameInContext(c_name.as_ptr(), self.context) };
+    pub(crate) fn create_module<'ctx>(&'ctx self, name: &CStr) -> Option<LLVMModule<'ctx>> {
+        let module = unsafe { LLVMModuleCreateWithNameInContext(name.as_ptr(), self.context) };
 
         if module.is_null() {
             return None;

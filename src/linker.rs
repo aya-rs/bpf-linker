@@ -708,7 +708,7 @@ fn link_modules<'ctx, 'i>(
     inputs: impl IntoIterator<Item = InputReader<'i>>,
 ) -> Result<LLVMModule<'ctx>, LinkerError> {
     let mut module = context
-        .create_module("linked_module")
+        .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
     // buffer used to perform file type detection

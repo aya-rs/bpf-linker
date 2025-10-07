@@ -90,7 +90,7 @@ impl LLVMTargetMachine {
             )
         });
         if ret != 0 {
-            return Err(message.as_c_str().unwrap().to_str().unwrap().to_string());
+            return Err(message.as_string_lossy().to_string());
         }
 
         Ok(MemoryBuffer {
