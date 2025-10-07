@@ -7,7 +7,6 @@ use std::{
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    pin::Pin,
     str::{self, FromStr},
 };
 
@@ -294,7 +293,7 @@ pub struct LinkerOptions {
 pub struct Linker {
     options: LinkerOptions,
     context: LLVMContext,
-    diagnostic_handler: Pin<Box<DiagnosticHandler>>,
+    diagnostic_handler: llvm::InstalledDiagnosticHandler<DiagnosticHandler>,
     dump_module: Option<PathBuf>,
 }
 
@@ -491,7 +490,7 @@ impl Linker {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostic_handler.has_errors
+        self.diagnostic_handler.with_view(|h| h.has_errors)
     }
 }
 
@@ -556,7 +555,12 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
     }
 }
 
-fn llvm_init(options: &LinkerOptions) -> (LLVMContext, Pin<Box<DiagnosticHandler>>) {
+fn llvm_init(
+    options: &LinkerOptions,
+) -> (
+    LLVMContext,
+    llvm::InstalledDiagnosticHandler<DiagnosticHandler>,
+) {
     let mut args = Vec::<Cow<'_, CStr>>::new();
     args.push(c"bpf-linker".into());
     // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
@@ -599,8 +603,7 @@ fn llvm_init(options: &LinkerOptions) -> (LLVMContext, Pin<Box<DiagnosticHandler
 
     let mut context = LLVMContext::new();
 
-    let mut diagnostic_handler = Box::pin(DiagnosticHandler::default());
-    context.set_diagnostic_handler(unsafe { diagnostic_handler.as_mut().get_unchecked_mut() });
+    let diagnostic_handler = context.set_diagnostic_handler(DiagnosticHandler::default());
 
     unsafe {
         LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));

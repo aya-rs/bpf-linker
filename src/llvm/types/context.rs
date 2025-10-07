@@ -1,7 +1,10 @@
 use std::{
+    any::Any,
     ffi::{c_void, CStr},
     marker::PhantomData,
+    pin::Pin,
     ptr,
+    rc::Rc,
 };
 
 use llvm_sys::{
@@ -16,12 +19,16 @@ use crate::llvm::{types::module::LLVMModule, LLVMDiagnosticHandler, Message};
 
 pub(crate) struct LLVMContext {
     pub(super) context: LLVMContextRef,
+    diagnostic_handler: Option<StoredHandler>,
 }
 
 impl LLVMContext {
     pub(crate) fn new() -> Self {
         let context = unsafe { LLVMContextCreate() };
-        Self { context }
+        Self {
+            context,
+            diagnostic_handler: None,
+        }
     }
 
     /// Returns an unsafe mutable pointer to the LLVM context.
@@ -45,8 +52,17 @@ impl LLVMContext {
         })
     }
 
-    pub(crate) fn set_diagnostic_handler<T: LLVMDiagnosticHandler>(&mut self, handler: &mut T) {
-        let handler_ptr = ptr::from_mut(handler).cast();
+    pub(crate) fn set_diagnostic_handler<T>(&mut self, handler: T) -> InstalledDiagnosticHandler<T>
+    where
+        T: LLVMDiagnosticHandler + 'static,
+    {
+        let pinrc = Rc::pin(handler);
+        self.diagnostic_handler = Some(StoredHandler {
+            _handler: pinrc.clone(),
+        });
+
+        let handler_ptr = ptr::from_ref(Pin::as_ref(&pinrc).get_ref()) as *mut c_void;
+
         unsafe {
             LLVMContextSetDiagnosticHandler(
                 self.context,
@@ -54,6 +70,8 @@ impl LLVMContext {
                 handler_ptr,
             )
         };
+
+        InstalledDiagnosticHandler { inner: pinrc }
     }
 }
 
@@ -63,6 +81,10 @@ impl Drop for LLVMContext {
             LLVMContextDispose(self.context);
         }
     }
+}
+
+struct StoredHandler {
+    _handler: Pin<Rc<dyn Any>>,
 }
 
 extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
@@ -75,4 +97,15 @@ extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
     };
     let handler = handler.cast::<T>();
     unsafe { &mut *handler }.handle_diagnostic(severity, message.as_string_lossy());
+}
+
+#[derive(Clone)]
+pub(crate) struct InstalledDiagnosticHandler<T: LLVMDiagnosticHandler> {
+    inner: Pin<Rc<T>>,
+}
+
+impl<T: LLVMDiagnosticHandler> InstalledDiagnosticHandler<T> {
+    pub(crate) fn with_view<R, F: FnOnce(&T) -> R>(&self, f: F) -> R {
+        f(Pin::as_ref(&self.inner).get_ref())
+    }
 }
