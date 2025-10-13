@@ -55,26 +55,26 @@ jobs:
       matrix:
         include:
           - rust: 1.86.0
-            llvm: 19
+            llvm-version: 19
             llvm-from: apt
             exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
           - rust: 1.89.0
-            llvm: 20
+            llvm-version: 20
             llvm-from: apt
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
           - rust: beta
-            llvm: 21
+            llvm-version: 21
             llvm-from: apt
             exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
-            llvm: 21
+            llvm-version: 21
             llvm-from: apt
             exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
-            llvm: 21
+            llvm-version: 21
             llvm-from: source
             exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
-    name: rustc=${{ matrix.rust }} llvm=${{ matrix.llvm }}
+    name: rustc=${{ matrix.rust }} llvm-version=${{ matrix.llvm-version }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
     env:
@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm-version }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
           # TODO(vadorovsky): Remove the requirement of libpolly.
@@ -136,8 +136,8 @@ jobs:
           #
           # Hopefully that nightmare goes away once we switch to binstalls and
           # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.llvm }}-dev libpolly-${{ matrix.llvm }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm }}/bin >> $GITHUB_PATH
+          sudo apt -y install llvm-${{ matrix.llvm-version }}-dev libpolly-${{ matrix.llvm-version }}-dev
+          echo /usr/lib/llvm-${{ matrix.llvm-version }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
         if: matrix.llvm-from == 'source'
@@ -170,13 +170,13 @@ jobs:
         run: |
           cargo hack check --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm }}
+            --features llvm-${{ matrix.llvm-version }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm }}
+            --features llvm-${{ matrix.llvm-version }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
@@ -192,7 +192,7 @@ jobs:
         run: |
           cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm }},rustc-build-sysroot
+            --features llvm-${{ matrix.llvm-version }},rustc-build-sysroot
 
       # To make things easier for package maintainers, the step of building
       # a custom sysroot can be skipped by omitting the `rustc-build-sysroot`
@@ -210,7 +210,7 @@ jobs:
           cargo xtask build-std
           cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }},rustc-build-sysroot \
-            --features llvm-${{ matrix.llvm }}
+            --features llvm-${{ matrix.llvm-version }}
 
       - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
@@ -221,7 +221,7 @@ jobs:
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features llvm-${{ matrix.llvm }}
+        run: cargo install --path . --no-default-features --features llvm-${{ matrix.llvm-version }}
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
