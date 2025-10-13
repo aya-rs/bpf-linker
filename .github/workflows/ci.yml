@@ -89,8 +89,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: rust-src
 
-      - uses: Swatinem/rust-cache@v2
-
       - name: Check (default features, no system LLVM)
         run: cargo check
 
