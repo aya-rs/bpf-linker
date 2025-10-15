@@ -196,16 +196,8 @@ pub struct LinkerOptions {
     pub cpu: Cpu,
     /// Cpu features.
     pub cpu_features: CString,
-    /// Input files. Can be bitcode, object files with embedded bitcode or archive files.
-    pub inputs: Vec<PathBuf>,
-    /// Where to save the output.
-    pub output: PathBuf,
-    /// The format to output.
-    pub output_type: OutputType,
     /// Optimization level.
     pub optimize: OptLevel,
-    /// Set of symbol names to export.
-    pub export_symbols: HashSet<Cow<'static, str>>,
     /// Whether to aggressively unroll loops. Useful for older kernels that don't support loops.
     pub unroll_loops: bool,
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
@@ -261,9 +253,15 @@ impl Linker {
     }
 
     /// Link and generate the output code.
-    pub fn link(&mut self) -> Result<(), LinkerError> {
+    pub fn link(
+        &mut self,
+        inputs: Vec<PathBuf>,
+        output: &Path,
+        output_type: OutputType,
+        export_symbols: &HashSet<Cow<'static, str>>,
+    ) -> Result<(), LinkerError> {
         self.llvm_init();
-        self.link_modules()?;
+        self.link_modules(inputs)?;
         self.create_target_machine()?;
         if let Some(path) = &self.dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
@@ -274,14 +272,14 @@ impl Linker {
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
-        self.optimize()?;
+        self.optimize(export_symbols)?;
         if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
-        self.codegen()?;
+        self.codegen(output, output_type)?;
         Ok(())
     }
 
@@ -289,10 +287,10 @@ impl Linker {
         self.diagnostic_handler.has_errors
     }
 
-    fn link_modules(&mut self) -> Result<(), LinkerError> {
+    fn link_modules(&mut self, inputs: Vec<PathBuf>) -> Result<(), LinkerError> {
         // buffer used to perform file type detection
         let mut buf = [0u8; 8];
-        for path in self.options.inputs.clone() {
+        for path in inputs {
             let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
 
             // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
@@ -445,9 +443,11 @@ impl Linker {
         Ok(())
     }
 
-    fn optimize(&mut self) -> Result<(), LinkerError> {
+    fn optimize(&mut self, export_symbols: &HashSet<Cow<'static, str>>) -> Result<(), LinkerError> {
+        let mut export_symbols = export_symbols.clone();
+
         if !self.options.disable_memory_builtins {
-            self.options.export_symbols.extend(
+            export_symbols.extend(
                 ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
                     .into_iter()
                     .map(Into::into),
@@ -455,17 +455,12 @@ impl Linker {
         };
         debug!(
             "linking exporting symbols {:?}, opt level {:?}",
-            self.options.export_symbols, self.options.optimize
+            export_symbols, self.options.optimize
         );
         // run optimizations. Will optionally remove noinline attributes, intern all non exported
         // programs and maps and remove dead code.
 
-        let export_symbols = self
-            .options
-            .export_symbols
-            .iter()
-            .map(|s| s.as_bytes().into())
-            .collect();
+        let export_symbols = export_symbols.iter().map(|s| s.as_bytes().into()).collect();
 
         if self.options.btf {
             // if we want to emit BTF, we need to sanitize the debug information
@@ -488,9 +483,9 @@ impl Linker {
         Ok(())
     }
 
-    fn codegen(&mut self) -> Result<(), LinkerError> {
-        let output = CString::new(self.options.output.as_os_str().as_bytes()).unwrap();
-        match self.options.output_type {
+    fn codegen(&mut self, output: &Path, output_type: OutputType) -> Result<(), LinkerError> {
+        let output = CString::new(output.as_os_str().as_bytes()).unwrap();
+        match output_type {
             OutputType::Bitcode => self.write_bitcode(&output),
             OutputType::LlvmAssembly => self.write_ir(&output),
             OutputType::Assembly => self.emit(&output, LLVMCodeGenFileType::LLVMAssemblyFile),
@@ -579,13 +574,7 @@ impl Linker {
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
         }
-        self.module = llvm::create_module(
-            CString::new(self.options.output.file_stem().unwrap().as_bytes())
-                .unwrap()
-                .as_c_str(),
-            context,
-        )
-        .unwrap();
+        self.module = llvm::create_module(c"linked_module", context).unwrap();
     }
 }
 

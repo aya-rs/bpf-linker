@@ -294,11 +294,7 @@ fn main() -> anyhow::Result<()> {
         target,
         cpu,
         cpu_features,
-        inputs,
-        output,
-        output_type,
         optimize,
-        export_symbols,
         unroll_loops,
         ignore_inline_never,
         llvm_args,
@@ -312,7 +308,7 @@ fn main() -> anyhow::Result<()> {
         linker.set_dump_module_path(path);
     }
 
-    linker.link()?;
+    linker.link(inputs, &output, output_type, &export_symbols)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
