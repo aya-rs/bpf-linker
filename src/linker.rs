@@ -270,7 +270,7 @@ impl Linker {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            self.write_ir(&path)?;
+            write_ir(self.module, &path)?;
         };
         optimize(
             &self.options,
@@ -283,47 +283,14 @@ impl Linker {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            self.write_ir(&path)?;
+            write_ir(self.module, &path)?;
         };
-        self.codegen(output, output_type)?;
+        codegen_to_file(self.module, self.target_machine, output, output_type)?;
         Ok(())
     }
 
     pub fn has_errors(&self) -> bool {
         self.diagnostic_handler.has_errors
-    }
-
-    fn codegen(&mut self, output: &Path, output_type: OutputType) -> Result<(), LinkerError> {
-        let output = CString::new(output.as_os_str().as_bytes()).unwrap();
-        match output_type {
-            OutputType::Bitcode => self.write_bitcode(&output),
-            OutputType::LlvmAssembly => self.write_ir(&output),
-            OutputType::Assembly => self.emit(&output, LLVMCodeGenFileType::LLVMAssemblyFile),
-            OutputType::Object => self.emit(&output, LLVMCodeGenFileType::LLVMObjectFile),
-        }
-    }
-
-    fn write_bitcode(&mut self, output: &CStr) -> Result<(), LinkerError> {
-        info!("writing bitcode to {:?}", output);
-
-        if unsafe { LLVMWriteBitcodeToFile(self.module, output.as_ptr()) } == 1 {
-            return Err(LinkerError::WriteBitcodeError);
-        }
-
-        Ok(())
-    }
-
-    fn write_ir(&mut self, output: &CStr) -> Result<(), LinkerError> {
-        info!("writing IR to {:?}", output);
-
-        llvm::write_ir(self.module, output).map_err(LinkerError::WriteIRError)
-    }
-
-    fn emit(&mut self, output: &CStr, output_type: LLVMCodeGenFileType) -> Result<(), LinkerError> {
-        info!("emitting {:?} to {:?}", output_type, output);
-
-        llvm::codegen(self.target_machine, self.module, output, output_type)
-            .map_err(LinkerError::EmitCodeError)
     }
 
     fn llvm_init(&mut self) {
@@ -667,4 +634,56 @@ fn optimize(
     .map_err(LinkerError::OptimizeError)?;
 
     Ok(())
+}
+
+fn codegen_to_file(
+    module: LLVMModuleRef,
+    target_machine: LLVMTargetMachineRef,
+    output: &Path,
+    output_type: OutputType,
+) -> Result<(), LinkerError> {
+    let output = CString::new(output.as_os_str().as_bytes()).unwrap();
+    match output_type {
+        OutputType::Bitcode => write_bitcode(module, &output),
+        OutputType::LlvmAssembly => write_ir(module, &output),
+        OutputType::Assembly => emit(
+            target_machine,
+            module,
+            &output,
+            LLVMCodeGenFileType::LLVMAssemblyFile,
+        ),
+        OutputType::Object => emit(
+            target_machine,
+            module,
+            &output,
+            LLVMCodeGenFileType::LLVMObjectFile,
+        ),
+    }
+}
+
+fn write_bitcode(module: LLVMModuleRef, output: &CStr) -> Result<(), LinkerError> {
+    info!("writing bitcode to {:?}", output);
+
+    if unsafe { LLVMWriteBitcodeToFile(module, output.as_ptr()) } == 1 {
+        return Err(LinkerError::WriteBitcodeError);
+    }
+
+    Ok(())
+}
+
+fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), LinkerError> {
+    info!("writing IR to {:?}", output);
+
+    llvm::write_ir(module, output).map_err(LinkerError::WriteIRError)
+}
+
+fn emit(
+    target_machine: LLVMTargetMachineRef,
+    module: LLVMModuleRef,
+    output: &CStr,
+    output_type: LLVMCodeGenFileType,
+) -> Result<(), LinkerError> {
+    info!("emitting {:?} to {:?}", output_type, output);
+
+    llvm::codegen(target_machine, module, output, output_type).map_err(LinkerError::EmitCodeError)
 }
