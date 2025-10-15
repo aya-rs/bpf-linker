@@ -212,7 +212,6 @@ fn main() -> anyhow::Result<()> {
         emit,
         btf,
         allow_bpf_trap,
-        libs,
         optimize,
         export_symbols,
         log_file,
@@ -227,6 +226,7 @@ fn main() -> anyhow::Result<()> {
         export,
         fatal_errors,
         _debug,
+        libs: _libs,
     } = match Parser::try_parse_from(args) {
         Ok(command_line) => command_line,
         Err(err) => match err.kind() {
@@ -297,7 +297,6 @@ fn main() -> anyhow::Result<()> {
         inputs,
         output,
         output_type,
-        libs,
         optimize,
         export_symbols,
         unroll_loops,

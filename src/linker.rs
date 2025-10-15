@@ -202,7 +202,6 @@ pub struct LinkerOptions {
     pub output: PathBuf,
     /// The format to output.
     pub output_type: OutputType,
-    pub libs: Vec<PathBuf>,
     /// Optimization level.
     pub optimize: OptLevel,
     /// Set of symbol names to export.
