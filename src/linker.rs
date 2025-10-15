@@ -261,7 +261,7 @@ impl Linker {
         export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
         self.llvm_init();
-        self.link_modules(inputs)?;
+        link_modules(self.context, inputs, self.module)?;
         self.create_target_machine()?;
         if let Some(path) = &self.dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
@@ -285,103 +285,6 @@ impl Linker {
 
     pub fn has_errors(&self) -> bool {
         self.diagnostic_handler.has_errors
-    }
-
-    fn link_modules(&mut self, inputs: Vec<PathBuf>) -> Result<(), LinkerError> {
-        // buffer used to perform file type detection
-        let mut buf = [0u8; 8];
-        for path in inputs {
-            let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
-
-            // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
-            // or an invalid file
-            file.read_exact(&mut buf)
-                .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-            file.rewind()
-                .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-            let in_type = detect_input_type(&buf)
-                .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
-
-            match in_type {
-                InputType::Archive => {
-                    info!("linking archive {:?}", path);
-
-                    // Extract the archive and call link_reader() for each item.
-                    let mut archive = Archive::new(file);
-                    while let Some(Ok(item)) = archive.next_entry() {
-                        let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
-                        info!("linking archive item {:?}", name);
-
-                        match self.link_reader(&name, item, None) {
-                            Ok(_) => continue,
-                            Err(LinkerError::InvalidInputType(_)) => {
-                                info!("ignoring archive item {:?}: invalid type", name);
-                                continue;
-                            }
-                            Err(LinkerError::MissingBitcodeSection(_)) => {
-                                warn!("ignoring archive item {:?}: no embedded bitcode", name);
-                                continue;
-                            }
-                            Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
-                        };
-                    }
-                }
-                ty => {
-                    info!("linking file {:?} type {}", path, ty);
-                    match self.link_reader(&path, file, Some(ty)) {
-                        Ok(_) => {}
-                        Err(LinkerError::InvalidInputType(_)) => {
-                            info!("ignoring file {:?}: invalid type", path);
-                            continue;
-                        }
-                        Err(LinkerError::MissingBitcodeSection(_)) => {
-                            warn!("ignoring file {:?}: no embedded bitcode", path);
-                        }
-                        err => return err,
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    // link in a `Read`-er, which can be a file or an archive item
-    fn link_reader(
-        &mut self,
-        path: &Path,
-        mut reader: impl Read,
-        in_type: Option<InputType>,
-    ) -> Result<(), LinkerError> {
-        let mut data = Vec::new();
-        let _: usize = reader
-            .read_to_end(&mut data)
-            .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
-        // in_type is unknown when we're linking an item from an archive file
-        let in_type = in_type
-            .or_else(|| detect_input_type(&data))
-            .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
-
-        let bitcode = match in_type {
-            InputType::Bitcode => data,
-            InputType::Elf => match llvm::find_embedded_bitcode(self.context, &data) {
-                Ok(Some(bitcode)) => bitcode,
-                Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
-                Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
-            },
-            // we need to handle this here since archive files could contain
-            // mach-o files, eg somecrate.rlib containing lib.rmeta which is
-            // mach-o on macos
-            InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
-            // this can't really happen
-            InputType::Archive => panic!("nested archives not supported duh"),
-        };
-
-        if !llvm::link_bitcode_buffer(self.context, self.module, &bitcode) {
-            return Err(LinkerError::LinkModuleError(path.to_owned()));
-        }
-
-        Ok(())
     }
 
     fn create_target_machine(&mut self) -> Result<(), LinkerError> {
@@ -653,4 +556,106 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
             }
         }
     }
+}
+
+fn link_modules(
+    context: LLVMContextRef,
+    inputs: Vec<PathBuf>,
+    module: LLVMModuleRef,
+) -> Result<(), LinkerError> {
+    // buffer used to perform file type detection
+    let mut buf = [0u8; 8];
+    for path in inputs {
+        let mut file = File::open(&path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
+
+        // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
+        // or an invalid file
+        file.read_exact(&mut buf)
+            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+        file.rewind()
+            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+        let in_type =
+            detect_input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+
+        match in_type {
+            InputType::Archive => {
+                info!("linking archive {:?}", path);
+
+                // Extract the archive and call link_reader() for each item.
+                let mut archive = Archive::new(file);
+                while let Some(Ok(item)) = archive.next_entry() {
+                    let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
+                    info!("linking archive item {:?}", name);
+
+                    match link_reader(context, module, &name, item, None) {
+                        Ok(_) => continue,
+                        Err(LinkerError::InvalidInputType(_)) => {
+                            info!("ignoring archive item {:?}: invalid type", name);
+                            continue;
+                        }
+                        Err(LinkerError::MissingBitcodeSection(_)) => {
+                            warn!("ignoring archive item {:?}: no embedded bitcode", name);
+                            continue;
+                        }
+                        Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
+                    };
+                }
+            }
+            ty => {
+                info!("linking file {:?} type {}", path, ty);
+                match link_reader(context, module, &path, file, Some(ty)) {
+                    Ok(_) => {}
+                    Err(LinkerError::InvalidInputType(_)) => {
+                        info!("ignoring file {:?}: invalid type", path);
+                        continue;
+                    }
+                    Err(LinkerError::MissingBitcodeSection(_)) => {
+                        warn!("ignoring file {:?}: no embedded bitcode", path);
+                    }
+                    err => return err,
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// link in a `Read`-er, which can be a file or an archive item
+fn link_reader(
+    context: LLVMContextRef,
+    module: LLVMModuleRef,
+    path: &Path,
+    mut reader: impl Read,
+    in_type: Option<InputType>,
+) -> Result<(), LinkerError> {
+    let mut data = Vec::new();
+    let _: usize = reader
+        .read_to_end(&mut data)
+        .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+    // in_type is unknown when we're linking an item from an archive file
+    let in_type = in_type
+        .or_else(|| detect_input_type(&data))
+        .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
+
+    let bitcode = match in_type {
+        InputType::Bitcode => data,
+        InputType::Elf => match llvm::find_embedded_bitcode(context, &data) {
+            Ok(Some(bitcode)) => bitcode,
+            Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
+            Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
+        },
+        // we need to handle this here since archive files could contain
+        // mach-o files, eg somecrate.rlib containing lib.rmeta which is
+        // mach-o on macos
+        InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
+        // this can't really happen
+        InputType::Archive => panic!("nested archives not supported duh"),
+    };
+
+    if !llvm::link_bitcode_buffer(context, module, &bitcode) {
+        return Err(LinkerError::LinkModuleError(path.to_owned()));
+    }
+
+    Ok(())
 }
