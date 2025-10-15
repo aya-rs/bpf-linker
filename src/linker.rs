@@ -261,7 +261,7 @@ impl Linker {
         export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
         self.llvm_init();
-        link_modules(self.context, inputs, self.module)?;
+        self.module = link_modules(self.context, inputs)?;
         self.target_machine = create_target_machine(&self.options, self.module)?;
         if let Some(path) = &self.dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
@@ -351,7 +351,6 @@ impl Linker {
             LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
             LLVMEnablePrettyStackTrace();
         }
-        self.module = llvm::create_module(c"linked_module", context).unwrap();
     }
 }
 
@@ -491,8 +490,9 @@ fn create_target_machine(
 fn link_modules(
     context: LLVMContextRef,
     inputs: Vec<PathBuf>,
-    module: LLVMModuleRef,
-) -> Result<(), LinkerError> {
+) -> Result<LLVMModuleRef, LinkerError> {
+    let module = llvm::create_module(c"linked_module", context).unwrap();
+
     // buffer used to perform file type detection
     let mut buf = [0u8; 8];
     for path in inputs {
@@ -542,13 +542,13 @@ fn link_modules(
                     Err(LinkerError::MissingBitcodeSection(_)) => {
                         warn!("ignoring file {:?}: no embedded bitcode", path);
                     }
-                    err => return err,
+                    Err(err) => return Err(err),
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(module)
 }
 
 // link in a `Read`-er, which can be a file or an archive item
