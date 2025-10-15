@@ -5,7 +5,7 @@ mod types;
 use std::{
     borrow::Cow,
     collections::HashSet,
-    ffi::{c_void, CStr, CString},
+    ffi::{CStr, CString},
     os::raw::c_char,
     ptr, slice, str,
 };
@@ -16,9 +16,9 @@ use llvm_sys::{
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
         LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
-        LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity, LLVMGetEnumAttributeKindForName,
-        LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2,
-        LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
+        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
+        LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2,
+        LLVMSetVisibility,
     },
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
@@ -29,7 +29,7 @@ use llvm_sys::{
         LLVMGetSectionName, LLVMGetSectionSize, LLVMMoveToNextSection,
         LLVMObjectFileCopySectionIterator, LLVMObjectFileIsSectionIteratorAtEnd,
     },
-    prelude::{LLVMDiagnosticInfoRef, LLVMModuleRef, LLVMValueRef},
+    prelude::{LLVMModuleRef, LLVMValueRef},
     support::LLVMParseCommandLineOptions,
     target::{
         LLVMInitializeBPFAsmParser, LLVMInitializeBPFAsmPrinter, LLVMInitializeBPFDisassembler,
@@ -265,18 +265,6 @@ pub(crate) trait LLVMDiagnosticHandler {
         severity: llvm_sys::LLVMDiagnosticSeverity,
         message: Cow<'_, str>,
     );
-}
-
-pub(crate) extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
-    info: LLVMDiagnosticInfoRef,
-    handler: *mut c_void,
-) {
-    let severity = unsafe { LLVMGetDiagInfoSeverity(info) };
-    let message = Message {
-        ptr: unsafe { LLVMGetDiagInfoDescription(info) },
-    };
-    let handler = handler.cast::<T>();
-    unsafe { &mut *handler }.handle_diagnostic(severity, message.as_string_lossy());
 }
 
 pub(crate) extern "C" fn fatal_error(reason: *const c_char) {
