@@ -14,7 +14,7 @@ use std::{
     feature = "rust-llvm-21"
 ))]
 use aya_rustc_llvm_proxy as _;
-use bpf_linker::{Cpu, Linker, LinkerOptions, OptLevel, OutputType};
+use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
 use clap::{
     builder::{PathBufValueParser, TypedValueParser as _},
     error::ErrorKind,
@@ -308,7 +308,11 @@ fn main() -> anyhow::Result<()> {
         linker.set_dump_module_path(path);
     }
 
-    linker.link(inputs, &output, output_type, &export_symbols)?;
+    let inputs = inputs
+        .iter()
+        .map(|p| LinkerInput::new_from_file(p.as_path()));
+
+    linker.link_to_file(inputs, &output, output_type, &export_symbols)?;
 
     if fatal_errors && linker.has_errors() {
         return Err(anyhow::anyhow!(
