@@ -272,7 +272,13 @@ impl Linker {
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
-        self.optimize(export_symbols)?;
+        optimize(
+            &self.options,
+            self.context,
+            self.target_machine,
+            self.module,
+            export_symbols,
+        )?;
         if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
@@ -285,46 +291,6 @@ impl Linker {
 
     pub fn has_errors(&self) -> bool {
         self.diagnostic_handler.has_errors
-    }
-
-    fn optimize(&mut self, export_symbols: &HashSet<Cow<'static, str>>) -> Result<(), LinkerError> {
-        let mut export_symbols = export_symbols.clone();
-
-        if !self.options.disable_memory_builtins {
-            export_symbols.extend(
-                ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
-                    .into_iter()
-                    .map(Into::into),
-            );
-        };
-        debug!(
-            "linking exporting symbols {:?}, opt level {:?}",
-            export_symbols, self.options.optimize
-        );
-        // run optimizations. Will optionally remove noinline attributes, intern all non exported
-        // programs and maps and remove dead code.
-
-        let export_symbols = export_symbols.iter().map(|s| s.as_bytes().into()).collect();
-
-        if self.options.btf {
-            // if we want to emit BTF, we need to sanitize the debug information
-            llvm::DISanitizer::new(self.context, self.module).run(&export_symbols);
-        } else {
-            // if we don't need BTF emission, we can strip DI
-            let ok = llvm::strip_debug_info(self.module);
-            debug!("Stripping DI, changed={}", ok);
-        }
-
-        llvm::optimize(
-            self.target_machine,
-            self.module,
-            self.options.optimize,
-            self.options.ignore_inline_never,
-            &export_symbols,
-        )
-        .map_err(LinkerError::OptimizeError)?;
-
-        Ok(())
     }
 
     fn codegen(&mut self, output: &Path, output_type: OutputType) -> Result<(), LinkerError> {
@@ -653,6 +619,52 @@ fn link_reader(
     if !llvm::link_bitcode_buffer(context, module, &bitcode) {
         return Err(LinkerError::LinkModuleError(path.to_owned()));
     }
+
+    Ok(())
+}
+
+fn optimize(
+    options: &LinkerOptions,
+    context: LLVMContextRef,
+    target_machine: LLVMTargetMachineRef,
+    module: LLVMModuleRef,
+    export_symbols: &HashSet<Cow<'static, str>>,
+) -> Result<(), LinkerError> {
+    let mut export_symbols = export_symbols.clone();
+
+    if !options.disable_memory_builtins {
+        export_symbols.extend(
+            ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
+                .into_iter()
+                .map(Into::into),
+        );
+    };
+    debug!(
+        "linking exporting symbols {:?}, opt level {:?}",
+        export_symbols, options.optimize
+    );
+    // run optimizations. Will optionally remove noinline attributes, intern all non exported
+    // programs and maps and remove dead code.
+
+    let export_symbols = export_symbols.iter().map(|s| s.as_bytes().into()).collect();
+
+    if options.btf {
+        // if we want to emit BTF, we need to sanitize the debug information
+        llvm::DISanitizer::new(context, module).run(&export_symbols);
+    } else {
+        // if we don't need BTF emission, we can strip DI
+        let ok = llvm::strip_debug_info(module);
+        debug!("Stripping DI, changed={}", ok);
+    }
+
+    llvm::optimize(
+        target_machine,
+        module,
+        options.optimize,
+        options.ignore_inline_never,
+        &export_symbols,
+    )
+    .map_err(LinkerError::OptimizeError)?;
 
     Ok(())
 }
