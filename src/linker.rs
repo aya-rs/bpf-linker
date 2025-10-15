@@ -6,26 +6,18 @@ use std::{
     io::{self, Read, Seek as _},
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    pin::Pin,
-    ptr,
     str::{self, FromStr},
 };
 
 use ar::Archive;
 use llvm_sys::{
-    bit_writer::LLVMWriteBitcodeToFile,
-    core::{
-        LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler, LLVMDisposeModule,
-        LLVMGetTarget,
-    },
     error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
-    prelude::{LLVMContextRef, LLVMModuleRef},
-    target_machine::{LLVMCodeGenFileType, LLVMDisposeTargetMachine, LLVMTargetMachineRef},
+    target_machine::LLVMCodeGenFileType,
 };
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::llvm;
+use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine};
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -77,6 +69,10 @@ pub enum LinkerError {
     /// The input object file does not have embedded bitcode.
     #[error("no bitcode section found in {0}")]
     MissingBitcodeSection(PathBuf),
+
+    /// LLVM cannot create a module for linking.
+    #[error("failed to create module")]
+    CreateModuleError,
 }
 
 /// BPF Cpu type
@@ -221,10 +217,8 @@ pub struct LinkerOptions {
 /// BPF Linker
 pub struct Linker {
     options: LinkerOptions,
-    context: LLVMContextRef,
-    module: LLVMModuleRef,
-    target_machine: LLVMTargetMachineRef,
-    diagnostic_handler: Pin<Box<DiagnosticHandler>>,
+    context: LLVMContext,
+    diagnostic_handler: llvm::InstalledDiagnosticHandler<DiagnosticHandler>,
     dump_module: Option<PathBuf>,
 }
 
@@ -236,8 +230,6 @@ impl Linker {
         Self {
             options,
             context,
-            module: ptr::null_mut(),
-            target_machine: ptr::null_mut(),
             diagnostic_handler,
             dump_module: None,
         }
@@ -256,58 +248,51 @@ impl Linker {
 
     /// Link and generate the output code.
     pub fn link(
-        &mut self,
+        &self,
         inputs: Vec<PathBuf>,
         output: &Path,
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
-        self.module = link_modules(self.context, inputs)?;
-        self.target_machine = create_target_machine(&self.options, self.module)?;
-        if let Some(path) = &self.dump_module {
+        let Self {
+            options,
+            context,
+            dump_module,
+            ..
+        } = self;
+
+        let mut module = link_modules(context, inputs)?;
+        let target_machine = create_target_machine(options, &module)?;
+        if let Some(path) = dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
         }
-        if let Some(path) = &self.dump_module {
+        if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            write_ir(self.module, &path)?;
+            module
+                .write_ir_to_path(path)
+                .map_err(LinkerError::WriteIRError)?;
         };
         optimize(
-            &self.options,
-            self.context,
-            self.target_machine,
-            self.module,
+            options,
+            context,
+            &target_machine,
+            &mut module,
             export_symbols,
         )?;
         if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
-            let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            write_ir(self.module, &path)?;
+            module
+                .write_ir_to_path(path)
+                .map_err(LinkerError::WriteIRError)?;
         };
-        codegen_to_file(self.module, self.target_machine, output, output_type)?;
+        codegen_to_file(&module, &target_machine, output, output_type)?;
         Ok(())
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostic_handler.has_errors
-    }
-}
-
-impl Drop for Linker {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.target_machine.is_null() {
-                LLVMDisposeTargetMachine(self.target_machine);
-            }
-            if !self.module.is_null() {
-                LLVMDisposeModule(self.module);
-            }
-            if !self.context.is_null() {
-                LLVMContextDispose(self.context);
-            }
-        }
+        self.diagnostic_handler.with_view(|h| h.has_errors)
     }
 }
 
@@ -372,7 +357,12 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
     }
 }
 
-fn llvm_init(options: &LinkerOptions) -> (LLVMContextRef, Pin<Box<DiagnosticHandler>>) {
+fn llvm_init(
+    options: &LinkerOptions,
+) -> (
+    LLVMContext,
+    llvm::InstalledDiagnosticHandler<DiagnosticHandler>,
+) {
     let mut args = Vec::<Cow<'_, CStr>>::new();
     args.push(c"bpf-linker".into());
     // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
@@ -410,24 +400,14 @@ fn llvm_init(options: &LinkerOptions) -> (LLVMContextRef, Pin<Box<DiagnosticHand
     }
     args.extend(options.llvm_args.iter().map(Into::into));
     info!("LLVM command line: {:?}", args);
-    llvm::init(args.as_slice(), c"BPF linker");
 
-    let context = unsafe { LLVMContextCreate() };
+    llvm::init(&args, c"BPF linker");
 
-    let mut diagnostic_handler = Box::pin(DiagnosticHandler::default());
+    let mut context = LLVMContext::new();
+
+    let diagnostic_handler = context.set_diagnostic_handler(DiagnosticHandler::default());
 
     unsafe {
-        let handler_ptr = {
-            // SAFETY: `diagnostic_handler` is pinned for the lifetime of `Linker`, and we use
-            // the mutable reference only to obtain a stable raw pointer for LLVM’s callback.
-            let handler = diagnostic_handler.as_mut().get_unchecked_mut();
-            ptr::from_mut(handler).cast()
-        };
-        LLVMContextSetDiagnosticHandler(
-            context,
-            Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-            handler_ptr,
-        );
         LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
         LLVMEnablePrettyStackTrace();
     }
@@ -437,8 +417,8 @@ fn llvm_init(options: &LinkerOptions) -> (LLVMContextRef, Pin<Box<DiagnosticHand
 
 fn create_target_machine(
     options: &LinkerOptions,
-    module: LLVMModuleRef,
-) -> Result<LLVMTargetMachineRef, LinkerError> {
+    module: &LLVMModule<'_>,
+) -> Result<LLVMTargetMachine, LinkerError> {
     let LinkerOptions {
         target,
         cpu,
@@ -462,7 +442,7 @@ fn create_target_machine(
         // case 1
         Some(c_triple) => (c_triple.as_c_str(), llvm::target_from_triple(c_triple)),
         None => {
-            let c_triple = unsafe { LLVMGetTarget(module) };
+            let c_triple = module.get_target();
             let c_triple = unsafe { CStr::from_ptr(c_triple) };
             if c_triple.to_bytes().starts_with(b"bpf") {
                 // case 2
@@ -485,17 +465,19 @@ fn create_target_machine(
         cpu_features.to_string_lossy(),
     );
 
-    let target_machine = llvm::create_target_machine(target, triple, cpu.as_c_str(), cpu_features)
+    let target_machine = LLVMTargetMachine::new(target, triple, cpu.as_c_str(), cpu_features)
         .ok_or_else(|| LinkerError::InvalidTarget(triple.to_string_lossy().to_string()))?;
 
     Ok(target_machine)
 }
 
-fn link_modules(
-    context: LLVMContextRef,
+fn link_modules<'ctx>(
+    context: &'ctx LLVMContext,
     inputs: Vec<PathBuf>,
-) -> Result<LLVMModuleRef, LinkerError> {
-    let module = llvm::create_module(c"linked_module", context).unwrap();
+) -> Result<LLVMModule<'ctx>, LinkerError> {
+    let mut module = context
+        .create_module(c"linked_module")
+        .ok_or(LinkerError::CreateModuleError)?;
 
     // buffer used to perform file type detection
     let mut buf = [0u8; 8];
@@ -521,7 +503,7 @@ fn link_modules(
                     let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
                     info!("linking archive item {:?}", name);
 
-                    match link_reader(context, module, &name, item, None) {
+                    match link_reader(context, &mut module, &name, item, None) {
                         Ok(_) => continue,
                         Err(LinkerError::InvalidInputType(_)) => {
                             info!("ignoring archive item {:?}: invalid type", name);
@@ -537,7 +519,7 @@ fn link_modules(
             }
             ty => {
                 info!("linking file {:?} type {}", path, ty);
-                match link_reader(context, module, &path, file, Some(ty)) {
+                match link_reader(context, &mut module, &path, file, Some(ty)) {
                     Ok(_) => {}
                     Err(LinkerError::InvalidInputType(_)) => {
                         info!("ignoring file {:?}: invalid type", path);
@@ -556,9 +538,9 @@ fn link_modules(
 }
 
 // link in a `Read`-er, which can be a file or an archive item
-fn link_reader(
-    context: LLVMContextRef,
-    module: LLVMModuleRef,
+fn link_reader<'ctx>(
+    context: &'ctx LLVMContext,
+    module: &mut LLVMModule<'ctx>,
     path: &Path,
     mut reader: impl Read,
     in_type: Option<InputType>,
@@ -594,11 +576,11 @@ fn link_reader(
     Ok(())
 }
 
-fn optimize(
+fn optimize<'ctx>(
     options: &LinkerOptions,
-    context: LLVMContextRef,
-    target_machine: LLVMTargetMachineRef,
-    module: LLVMModuleRef,
+    context: &'ctx LLVMContext,
+    target_machine: &LLVMTargetMachine,
+    module: &mut LLVMModule<'ctx>,
     export_symbols: &HashSet<Cow<'static, str>>,
 ) -> Result<(), LinkerError> {
     let mut export_symbols = export_symbols.clone();
@@ -624,7 +606,7 @@ fn optimize(
         llvm::DISanitizer::new(context, module).run(&export_symbols);
     } else {
         // if we don't need BTF emission, we can strip DI
-        let ok = llvm::strip_debug_info(module);
+        let ok = module.strip_debug_info();
         debug!("Stripping DI, changed={}", ok);
     }
 
@@ -641,53 +623,37 @@ fn optimize(
 }
 
 fn codegen_to_file(
-    module: LLVMModuleRef,
-    target_machine: LLVMTargetMachineRef,
+    module: &LLVMModule<'_>,
+    target_machine: &LLVMTargetMachine,
     output: &Path,
     output_type: OutputType,
 ) -> Result<(), LinkerError> {
-    let output = CString::new(output.as_os_str().as_bytes()).unwrap();
     match output_type {
-        OutputType::Bitcode => write_bitcode(module, &output),
-        OutputType::LlvmAssembly => write_ir(module, &output),
-        OutputType::Assembly => emit(
-            target_machine,
-            module,
-            &output,
-            LLVMCodeGenFileType::LLVMAssemblyFile,
-        ),
-        OutputType::Object => emit(
-            target_machine,
-            module,
-            &output,
-            LLVMCodeGenFileType::LLVMObjectFile,
-        ),
+        OutputType::Bitcode => {
+            info!("writing bitcode to {:?}", output);
+            module
+                .write_bitcode_to_path(output)
+                .map_err(|_| LinkerError::WriteBitcodeError)
+        }
+        OutputType::LlvmAssembly => {
+            info!("writing IR to {:?}", output);
+            module
+                .write_ir_to_path(output)
+                .map_err(LinkerError::WriteIRError)
+        }
+        OutputType::Assembly => {
+            info!("emitting {:?} to {:?}", output_type, output);
+
+            target_machine
+                .emit_to_file(module, output, LLVMCodeGenFileType::LLVMAssemblyFile)
+                .map_err(LinkerError::EmitCodeError)
+        }
+        OutputType::Object => {
+            info!("emitting {:?} to {:?}", output_type, output);
+
+            target_machine
+                .emit_to_file(module, output, LLVMCodeGenFileType::LLVMObjectFile)
+                .map_err(LinkerError::EmitCodeError)
+        }
     }
-}
-
-fn write_bitcode(module: LLVMModuleRef, output: &CStr) -> Result<(), LinkerError> {
-    info!("writing bitcode to {:?}", output);
-
-    if unsafe { LLVMWriteBitcodeToFile(module, output.as_ptr()) } == 1 {
-        return Err(LinkerError::WriteBitcodeError);
-    }
-
-    Ok(())
-}
-
-fn write_ir(module: LLVMModuleRef, output: &CStr) -> Result<(), LinkerError> {
-    info!("writing IR to {:?}", output);
-
-    llvm::write_ir(module, output).map_err(LinkerError::WriteIRError)
-}
-
-fn emit(
-    target_machine: LLVMTargetMachineRef,
-    module: LLVMModuleRef,
-    output: &CStr,
-    output_type: LLVMCodeGenFileType,
-) -> Result<(), LinkerError> {
-    info!("emitting {:?} to {:?}", output_type, output);
-
-    llvm::codegen(target_machine, module, output, output_type).map_err(LinkerError::EmitCodeError)
 }
