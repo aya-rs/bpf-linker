@@ -231,12 +231,14 @@ pub struct Linker {
 impl Linker {
     /// Create a new linker instance with the given options.
     pub fn new(options: LinkerOptions) -> Self {
+        let (context, diagnostic_handler) = llvm_init(&options);
+
         Self {
             options,
-            context: ptr::null_mut(),
+            context,
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
-            diagnostic_handler: Box::pin(DiagnosticHandler::default()),
+            diagnostic_handler,
             dump_module: None,
         }
     }
@@ -260,7 +262,6 @@ impl Linker {
         output_type: OutputType,
         export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(), LinkerError> {
-        self.llvm_init();
         self.module = link_modules(self.context, inputs)?;
         self.target_machine = create_target_machine(&self.options, self.module)?;
         if let Some(path) = &self.dump_module {
@@ -291,66 +292,6 @@ impl Linker {
 
     pub fn has_errors(&self) -> bool {
         self.diagnostic_handler.has_errors
-    }
-
-    fn llvm_init(&mut self) {
-        let mut args = Vec::<Cow<'_, CStr>>::new();
-        args.push(c"bpf-linker".into());
-        // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
-        // where the layout is larger than 64 bits, but the LLVM BPF target only supports
-        // up to 64 bits return values. Since the accessors are tiny in terms of code, we
-        // avoid the issue by annotating them with #[inline(always)]. If they are classified
-        // as cold though - and they often are starting from LLVM17 - #[inline(always)]
-        // is ignored and the BPF target fails codegen.
-        args.push(c"--cold-callsite-rel-freq=0".into());
-        if self.options.unroll_loops {
-            // setting cmdline arguments is the only way to customize the unroll pass with the
-            // C API.
-            args.extend([
-                c"--unroll-runtime".into(),
-                c"--unroll-runtime-multi-exit".into(),
-                CString::new(format!("--unroll-max-upperbound={}", u32::MAX))
-                    .unwrap()
-                    .into(),
-                CString::new(format!("--unroll-threshold={}", u32::MAX))
-                    .unwrap()
-                    .into(),
-            ]);
-        }
-        if !self.options.disable_expand_memcpy_in_order {
-            args.push(c"--bpf-expand-memcpy-in-order".into());
-        }
-        if !self.options.allow_bpf_trap {
-            // TODO: Remove this once ksyms support is guaranteed.
-            // LLVM introduces __bpf_trap calls at points where __builtin_trap would normally be
-            // emitted. This is currently not supported by aya because __bpf_trap requires a .ksyms
-            // section, but this is not trivial to support. In the meantime, using this flag
-            // returns LLVM to the old behaviour, which did not introduce these calls and therefore
-            // does not require the .ksyms section.
-            args.push(c"--bpf-disable-trap-unreachable".into());
-        }
-        args.extend(self.options.llvm_args.iter().map(Into::into));
-        info!("LLVM command line: {:?}", args);
-        llvm::init(args.as_slice(), c"BPF linker");
-
-        let context = unsafe { LLVMContextCreate() };
-        self.context = context;
-
-        unsafe {
-            let handler_ptr = {
-                // SAFETY: `diagnostic_handler` is pinned for the lifetime of `Linker`, and we use
-                // the mutable reference only to obtain a stable raw pointer for LLVM’s callback.
-                let handler = self.diagnostic_handler.as_mut().get_unchecked_mut();
-                ptr::from_mut(handler).cast()
-            };
-            LLVMContextSetDiagnosticHandler(
-                context,
-                Some(llvm::diagnostic_handler::<DiagnosticHandler>),
-                handler_ptr,
-            );
-            LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
-            LLVMEnablePrettyStackTrace();
-        }
     }
 }
 
@@ -429,6 +370,69 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
             }
         }
     }
+}
+
+fn llvm_init(options: &LinkerOptions) -> (LLVMContextRef, Pin<Box<DiagnosticHandler>>) {
+    let mut args = Vec::<Cow<'_, CStr>>::new();
+    args.push(c"bpf-linker".into());
+    // Disable cold call site detection. Many accessors in aya-ebpf return Result<T, E>
+    // where the layout is larger than 64 bits, but the LLVM BPF target only supports
+    // up to 64 bits return values. Since the accessors are tiny in terms of code, we
+    // avoid the issue by annotating them with #[inline(always)]. If they are classified
+    // as cold though - and they often are starting from LLVM17 - #[inline(always)]
+    // is ignored and the BPF target fails codegen.
+    args.push(c"--cold-callsite-rel-freq=0".into());
+    if options.unroll_loops {
+        // setting cmdline arguments is the only way to customize the unroll pass with the
+        // C API.
+        args.extend([
+            c"--unroll-runtime".into(),
+            c"--unroll-runtime-multi-exit".into(),
+            CString::new(format!("--unroll-max-upperbound={}", u32::MAX))
+                .unwrap()
+                .into(),
+            CString::new(format!("--unroll-threshold={}", u32::MAX))
+                .unwrap()
+                .into(),
+        ]);
+    }
+    if !options.disable_expand_memcpy_in_order {
+        args.push(c"--bpf-expand-memcpy-in-order".into());
+    }
+    if !options.allow_bpf_trap {
+        // TODO: Remove this once ksyms support is guaranteed.
+        // LLVM introduces __bpf_trap calls at points where __builtin_trap would normally be
+        // emitted. This is currently not supported by aya because __bpf_trap requires a .ksyms
+        // section, but this is not trivial to support. In the meantime, using this flag
+        // returns LLVM to the old behaviour, which did not introduce these calls and therefore
+        // does not require the .ksyms section.
+        args.push(c"--bpf-disable-trap-unreachable".into());
+    }
+    args.extend(options.llvm_args.iter().map(Into::into));
+    info!("LLVM command line: {:?}", args);
+    llvm::init(args.as_slice(), c"BPF linker");
+
+    let context = unsafe { LLVMContextCreate() };
+
+    let mut diagnostic_handler = Box::pin(DiagnosticHandler::default());
+
+    unsafe {
+        let handler_ptr = {
+            // SAFETY: `diagnostic_handler` is pinned for the lifetime of `Linker`, and we use
+            // the mutable reference only to obtain a stable raw pointer for LLVM’s callback.
+            let handler = diagnostic_handler.as_mut().get_unchecked_mut();
+            ptr::from_mut(handler).cast()
+        };
+        LLVMContextSetDiagnosticHandler(
+            context,
+            Some(llvm::diagnostic_handler::<DiagnosticHandler>),
+            handler_ptr,
+        );
+        LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
+        LLVMEnablePrettyStackTrace();
+    }
+
+    (context, diagnostic_handler)
 }
 
 fn create_target_machine(
