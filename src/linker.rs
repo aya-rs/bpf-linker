@@ -211,8 +211,6 @@ pub struct LinkerOptions {
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
     /// support function calls.
     pub ignore_inline_never: bool,
-    /// Write the linked module IR before and after optimization.
-    pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<CString>,
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
@@ -235,6 +233,7 @@ pub struct Linker {
     module: LLVMModuleRef,
     target_machine: LLVMTargetMachineRef,
     diagnostic_handler: Pin<Box<DiagnosticHandler>>,
+    dump_module: Option<PathBuf>,
 }
 
 impl Linker {
@@ -246,7 +245,19 @@ impl Linker {
             module: ptr::null_mut(),
             target_machine: ptr::null_mut(),
             diagnostic_handler: Box::pin(DiagnosticHandler::default()),
+            dump_module: None,
         }
+    }
+
+    /// Set the directory where the linker will dump the linked LLVM IR before and after
+    /// optimization, for debugging and inspection purposes.
+    ///
+    /// When set:
+    /// - The directory is created if it does not already exist.
+    /// - A "pre-opt.ll" file is written with the IR before optimization.
+    /// - A "post-opt.ll" file is written with the IR after optimization.
+    pub fn set_dump_module_path(&mut self, path: impl AsRef<Path>) {
+        self.dump_module = Some(path.as_ref().to_path_buf())
     }
 
     /// Link and generate the output code.
@@ -254,17 +265,17 @@ impl Linker {
         self.llvm_init();
         self.link_modules()?;
         self.create_target_machine()?;
-        if let Some(path) = &self.options.dump_module {
+        if let Some(path) = &self.dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
         }
-        if let Some(path) = &self.options.dump_module {
+        if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();
             self.write_ir(&path)?;
         };
         self.optimize()?;
-        if let Some(path) = &self.options.dump_module {
+        if let Some(path) = &self.dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             let path = CString::new(path.as_os_str().as_bytes()).unwrap();

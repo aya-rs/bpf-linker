@@ -301,13 +301,16 @@ fn main() -> anyhow::Result<()> {
         export_symbols,
         unroll_loops,
         ignore_inline_never,
-        dump_module,
         llvm_args,
         disable_expand_memcpy_in_order,
         disable_memory_builtins,
         btf,
         allow_bpf_trap,
     });
+
+    if let Some(path) = dump_module {
+        linker.set_dump_module_path(path);
+    }
 
     linker.link()?;
 
