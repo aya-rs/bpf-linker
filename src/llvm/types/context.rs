@@ -10,12 +10,12 @@ use std::{
 use llvm_sys::{
     core::{
         LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler,
-        LLVMModuleCreateWithNameInContext,
+        LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity, LLVMModuleCreateWithNameInContext,
     },
-    prelude::LLVMContextRef,
+    prelude::{LLVMContextRef, LLVMDiagnosticInfoRef},
 };
 
-use crate::llvm::{diagnostic_handler, types::module::LLVMModule, LLVMDiagnosticHandler};
+use crate::llvm::{types::module::LLVMModule, LLVMDiagnosticHandler, Message};
 
 pub(crate) struct LLVMContext {
     context: LLVMContextRef,
@@ -96,4 +96,16 @@ impl<T: LLVMDiagnosticHandler> InstalledDiagnosticHandler<T> {
     pub(crate) fn with_view<R, F: FnOnce(&T) -> R>(&self, f: F) -> R {
         f(Pin::as_ref(&self.inner).get_ref())
     }
+}
+
+extern "C" fn diagnostic_handler<T: LLVMDiagnosticHandler>(
+    info: LLVMDiagnosticInfoRef,
+    handler: *mut c_void,
+) {
+    let severity = unsafe { LLVMGetDiagInfoSeverity(info) };
+    let message = Message {
+        ptr: unsafe { LLVMGetDiagInfoDescription(info) },
+    };
+    let handler = handler.cast::<T>();
+    unsafe { &mut *handler }.handle_diagnostic(severity, message.as_string_lossy());
 }
