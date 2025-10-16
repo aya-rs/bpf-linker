@@ -5,11 +5,11 @@ use std::{
 
 use llvm_sys::target_machine::{
     LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMCodeModel, LLVMCreateTargetMachine,
-    LLVMDisposeTargetMachine, LLVMRelocMode, LLVMTargetMachineEmitToFile, LLVMTargetMachineRef,
-    LLVMTargetRef,
+    LLVMDisposeTargetMachine, LLVMRelocMode, LLVMTargetMachineEmitToFile,
+    LLVMTargetMachineEmitToMemoryBuffer, LLVMTargetMachineRef, LLVMTargetRef,
 };
 
-use crate::llvm::{types::module::LLVMModule, Message};
+use crate::llvm::{types::module::LLVMModule, MemoryBuffer, Message};
 
 pub(crate) struct LLVMTargetMachine {
     target_machine: LLVMTargetMachineRef,
@@ -72,6 +72,30 @@ impl LLVMTargetMachine {
         } else {
             Err(message.as_string_lossy().to_string())
         }
+    }
+
+    pub(crate) fn emit_to_memory_buffer(
+        &self,
+        module: &LLVMModule<'_>,
+        output_type: LLVMCodeGenFileType,
+    ) -> Result<MemoryBuffer, String> {
+        let mut out_buf = std::ptr::null_mut();
+        let (ret, message) = Message::with(|message| unsafe {
+            LLVMTargetMachineEmitToMemoryBuffer(
+                self.target_machine,
+                module.module,
+                output_type,
+                message,
+                &mut out_buf,
+            )
+        });
+        if ret != 0 {
+            return Err(message.as_string_lossy().to_string());
+        }
+
+        Ok(MemoryBuffer {
+            memory_buffer: out_buf,
+        })
     }
 }
 
