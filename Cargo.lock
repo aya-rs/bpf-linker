@@ -111,6 +111,7 @@ dependencies = [
  "aya-rustc-llvm-proxy",
  "clap",
  "compiletest_rs",
+ "errno",
  "gimli",
  "libc",
  "llvm-sys 191.0.0",
@@ -344,9 +345,9 @@ dependencies = [
 
 [[package]]
 name = "errno"
-version = "0.3.12"
+version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",

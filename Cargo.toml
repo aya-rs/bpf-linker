@@ -34,6 +34,7 @@ llvm-sys-21 = { package = "llvm-sys", features = ["disable-alltargets-init"], ve
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
 tracing = "0.1"
+errno = "0.3.14"
 
 [dev-dependencies]
 compiletest_rs = { version = "0.11.0" }
