@@ -3,7 +3,8 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, Read, Seek as _},
+    io::{self, Read, Seek},
+    ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     str::{self, FromStr},
@@ -17,7 +18,7 @@ use llvm_sys::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine};
+use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine, MemoryBuffer};
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -141,6 +142,59 @@ pub enum OptLevel {
     SizeMin,
 }
 
+pub struct FileInput<'a> {
+    path: &'a Path,
+}
+
+pub struct BufferInput<'a> {
+    name: &'a str,
+    bytes: &'a [u8],
+}
+
+pub enum LinkerInput<'a> {
+    File(FileInput<'a>),
+    Buffer(BufferInput<'a>),
+}
+
+impl<'a> LinkerInput<'a> {
+    pub fn new_from_file(path: &'a Path) -> Self {
+        LinkerInput::File(FileInput { path })
+    }
+
+    pub fn new_from_buffer(name: &'a str, bytes: &'a [u8]) -> Self {
+        LinkerInput::Buffer(BufferInput { name, bytes })
+    }
+}
+
+enum InputReader<'a> {
+    File {
+        path: &'a Path,
+        file: File,
+    },
+    Buffer {
+        name: &'a str,
+        cursor: io::Cursor<&'a [u8]>,
+    },
+}
+
+impl Seek for InputReader<'_> {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        match self {
+            InputReader::File { file, .. } => file.seek(pos),
+            InputReader::Buffer { cursor, .. } => cursor.seek(pos),
+        }
+    }
+}
+
+impl Read for InputReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            InputReader::File { file, .. } => file.read(buf),
+            InputReader::Buffer { cursor, .. } => cursor.read(buf),
+        }
+    }
+}
+
 /// Linker input type
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum InputType {
@@ -192,16 +246,8 @@ pub struct LinkerOptions {
     pub cpu: Cpu,
     /// Cpu features.
     pub cpu_features: CString,
-    /// Input files. Can be bitcode, object files with embedded bitcode or archive files.
-    pub inputs: Vec<PathBuf>,
-    /// Where to save the output.
-    pub output: PathBuf,
-    /// The format to output.
-    pub output_type: OutputType,
     /// Optimization level.
     pub optimize: OptLevel,
-    /// Set of symbol names to export.
-    pub export_symbols: HashSet<Cow<'static, str>>,
     /// Whether to aggressively unroll loops. Useful for older kernels that don't support loops.
     pub unroll_loops: bool,
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
@@ -254,8 +300,137 @@ impl Linker {
         self.dump_module = Some(path.as_ref().to_path_buf())
     }
 
+    /// Link and generate the output code to file.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use std::{collections::HashSet, path::Path, borrow::Cow, ffi::CString};
+    /// # use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let path = Path::new("/path/to/object-or-bitcode");
+    /// let bytes: &[u8] = &[]; // An in memory object/bitcode
+    /// # let options = LinkerOptions {
+    /// #     target: None,
+    /// #     cpu: Cpu::Generic,
+    /// #     cpu_features: CString::default(),
+    /// #     optimize: OptLevel::Default,
+    /// #     unroll_loops: false,
+    /// #     ignore_inline_never: false,
+    /// #     llvm_args: vec![],
+    /// #     disable_expand_memcpy_in_order: false,
+    /// #     disable_memory_builtins: false,
+    /// #     allow_bpf_trap: false,
+    /// #     btf: false,
+    /// # };
+    /// # let linker = Linker::new(options);
+    ///
+    /// let export_symbols = ["my_sym_1", "my_sym_2"];
+    ///
+    /// linker.link_to_file(
+    ///     [
+    ///         LinkerInput::new_from_file(path),
+    ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
+    ///     ],
+    ///     "/path/to/output",
+    ///     OutputType::Object,
+    ///     export_symbols,
+    /// )?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn link_to_file<'i, I, P, E, S>(
+        &self,
+        inputs: I,
+        output: P,
+        output_type: OutputType,
+        export_symbols: E,
+    ) -> Result<(), LinkerError>
+    where
+        I: IntoIterator<Item = LinkerInput<'i>>,
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        P: AsRef<Path>,
+    {
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
+        codegen_to_file(
+            &linked_module,
+            &target_machine,
+            output.as_ref(),
+            output_type,
+        )?;
+        Ok(())
+    }
+
+    /// Link and generate the output code to an in-memory buffer.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use std::{collections::HashSet, path::Path, borrow::Cow, ffi::CString};
+    /// # use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let path = Path::new("/path/to/object-or-bitcode");
+    /// let bytes: &[u8] = &[]; // An in memory object/bitcode
+    /// # let options = LinkerOptions {
+    /// #     target: None,
+    /// #     cpu: Cpu::Generic,
+    /// #     cpu_features: CString::default(),
+    /// #     optimize: OptLevel::Default,
+    /// #     unroll_loops: false,
+    /// #     ignore_inline_never: false,
+    /// #     llvm_args: vec![],
+    /// #     disable_expand_memcpy_in_order: false,
+    /// #     disable_memory_builtins: false,
+    /// #     allow_bpf_trap: false,
+    /// #     btf: false,
+    /// # };
+    /// # let linker = Linker::new(options);
+    ///
+    /// let export_symbols = ["my_sym_1", "my_sym_2"];
+    ///
+    /// let out_buf = linker.link_to_buffer(
+    ///     [
+    ///         LinkerInput::new_from_file(path),
+    ///         LinkerInput::new_from_buffer("my buffer", bytes), // In memory buffer needs a name
+    ///     ],
+    ///     OutputType::Bitcode,
+    ///     export_symbols,
+    /// )?;
+    ///
+    /// // Use the buffer as slice of u8
+    /// let bytes = out_buf.as_slice();
+    /// println!("Linked {} bytes into memory)", bytes.len());
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn link_to_buffer<'i, I, E, S>(
+        &self,
+        inputs: I,
+        output_type: OutputType,
+        export_symbols: E,
+    ) -> Result<LinkerOutput, LinkerError>
+    where
+        I: IntoIterator<Item = LinkerInput<'i>>,
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
+        codegen_to_buffer(&linked_module, &target_machine, output_type)
+    }
+
     /// Link and generate the output code.
-    pub fn link(&mut self) -> Result<(), LinkerError> {
+    fn link<'ctx, 'i, I, E, S>(
+        &'ctx self,
+        inputs: I,
+        export_symbols: E,
+    ) -> Result<(LLVMModule<'ctx>, LLVMTargetMachine), LinkerError>
+    where
+        I: IntoIterator<Item = LinkerInput<'i>>,
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         let Self {
             options,
             context,
@@ -263,10 +438,34 @@ impl Linker {
             ..
         } = self;
 
-        let mut module = link_modules(context, &options.inputs)?;
+        let inputs = inputs
+            .into_iter()
+            .map(|value| match value {
+                LinkerInput::File(file_input) => {
+                    let FileInput { path } = file_input;
+
+                    let file = File::open(path)
+                        .map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
+                    Ok(InputReader::File { path, file })
+                }
+                LinkerInput::Buffer(buffer_input) => {
+                    let BufferInput { name, bytes } = buffer_input;
+
+                    Ok(InputReader::Buffer {
+                        name,
+                        cursor: io::Cursor::new(bytes),
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut module = link_modules(context, inputs)?;
+
         let target_machine = create_target_machine(options, &module)?;
-        if let Some(path) = &dump_module {
-            std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
+
+        if let Some(path) = dump_module {
+            std::fs::create_dir_all(path)
+                .map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
         }
         if let Some(path) = dump_module {
             // dump IR before optimization
@@ -280,22 +479,17 @@ impl Linker {
             context,
             &target_machine,
             &mut module,
-            &options.export_symbols,
+            export_symbols,
         )?;
         if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             module
-                .write_ir_to_path(path)
+                .write_ir_to_path(&path)
                 .map_err(LinkerError::WriteIRError)?;
         };
-        codegen(
-            &module,
-            &target_machine,
-            &options.output,
-            options.output_type,
-        )?;
-        Ok(())
+
+        Ok((module, target_machine))
     }
 
     pub fn has_errors(&self) -> bool {
@@ -303,24 +497,32 @@ impl Linker {
     }
 }
 
-fn link_modules<'ctx>(
+fn link_modules<'ctx, 'i, I>(
     context: &'ctx LLVMContext,
-    inputs: &[PathBuf],
-) -> Result<LLVMModule<'ctx>, LinkerError> {
+    inputs: I,
+) -> Result<LLVMModule<'ctx>, LinkerError>
+where
+    I: IntoIterator<Item = InputReader<'i>>,
+{
     let mut module = context
         .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
     // buffer used to perform file type detection
     let mut buf = [0u8; 8];
-    for path in inputs {
-        let mut file = File::open(path).map_err(|e| LinkerError::IoError(path.clone(), e))?;
+    for mut input in inputs {
+        let path = match input {
+            InputReader::File { path, .. } => path.into(),
+            InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
+        };
 
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
         // or an invalid file
-        file.read_exact(&mut buf)
+        input
+            .read_exact(&mut buf)
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-        file.rewind()
+        input
+            .rewind()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
         let in_type =
             detect_input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
@@ -330,7 +532,7 @@ fn link_modules<'ctx>(
                 info!("linking archive {:?}", path);
 
                 // Extract the archive and call link_reader() for each item.
-                let mut archive = Archive::new(file);
+                let mut archive = Archive::new(input);
                 while let Some(Ok(item)) = archive.next_entry() {
                     let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
                     info!("linking archive item {:?}", name);
@@ -345,15 +547,13 @@ fn link_modules<'ctx>(
                             warn!("ignoring archive item {:?}: no embedded bitcode", name);
                             continue;
                         }
-                        Err(_) => {
-                            return Err(LinkerError::LinkArchiveModuleError(path.clone(), name))
-                        }
+                        Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
                     };
                 }
             }
             ty => {
                 info!("linking file {:?} type {}", path, ty);
-                match link_reader(context, &mut module, path, file, Some(ty)) {
+                match link_reader(context, &mut module, &path, input, Some(ty)) {
                     Ok(_) => {}
                     Err(LinkerError::InvalidInputType(_)) => {
                         info!("ignoring file {:?}: invalid type", path);
@@ -466,13 +666,17 @@ fn create_target_machine(
     Ok(target_machine)
 }
 
-fn optimize<'ctx>(
+fn optimize<'ctx, E, S>(
     options: &LinkerOptions,
     context: &'ctx LLVMContext,
     target_machine: &LLVMTargetMachine,
     module: &mut LLVMModule<'ctx>,
-    export_symbols: &HashSet<Cow<'static, str>>,
-) -> Result<(), LinkerError> {
+    export_symbols: E,
+) -> Result<(), LinkerError>
+where
+    E: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let LinkerOptions {
         disable_memory_builtins,
         optimize,
@@ -481,8 +685,10 @@ fn optimize<'ctx>(
         ..
     } = options;
 
-    let mut export_symbols: HashSet<Cow<'_, [u8]>> =
-        export_symbols.iter().map(|s| s.as_bytes().into()).collect();
+    let mut export_symbols: HashSet<Cow<'_, [u8]>> = export_symbols
+        .into_iter()
+        .map(|s| Cow::Owned(s.as_ref().as_bytes().to_vec()))
+        .collect();
 
     if !disable_memory_builtins {
         export_symbols.extend(
@@ -519,7 +725,7 @@ fn optimize<'ctx>(
     Ok(())
 }
 
-fn codegen(
+fn codegen_to_file(
     module: &LLVMModule<'_>,
     target_machine: &LLVMTargetMachine,
     output: &Path,
@@ -540,6 +746,27 @@ fn codegen(
             .emit_to_file(module, output, LLVMCodeGenFileType::LLVMObjectFile)
             .map_err(LinkerError::EmitCodeError),
     }
+}
+
+fn codegen_to_buffer(
+    module: &LLVMModule<'_>,
+    target_machine: &LLVMTargetMachine,
+    output_type: OutputType,
+) -> Result<LinkerOutput, LinkerError> {
+    let memory_buffer = match output_type {
+        OutputType::Bitcode => module.write_bitcode_to_memory(),
+        OutputType::LlvmAssembly => module.write_ir_to_memory(),
+        OutputType::Assembly => target_machine
+            .emit_to_memory_buffer(module, LLVMCodeGenFileType::LLVMAssemblyFile)
+            .map_err(LinkerError::EmitCodeError)?,
+        OutputType::Object => target_machine
+            .emit_to_memory_buffer(module, LLVMCodeGenFileType::LLVMObjectFile)
+            .map_err(LinkerError::EmitCodeError)?,
+    };
+
+    Ok(LinkerOutput {
+        inner: memory_buffer,
+    })
 }
 
 fn llvm_init(
@@ -657,5 +884,29 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
                 None
             }
         }
+    }
+}
+
+pub struct LinkerOutput {
+    inner: MemoryBuffer,
+}
+
+impl LinkerOutput {
+    pub fn as_slice(&self) -> &[u8] {
+        self.inner.as_slice()
+    }
+}
+
+impl AsRef<[u8]> for LinkerOutput {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl Deref for LinkerOutput {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
     }
 }
