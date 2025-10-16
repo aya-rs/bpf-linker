@@ -44,6 +44,7 @@ use llvm_sys::{
 use tracing::{debug, error};
 pub(crate) use types::{
     context::{InstalledDiagnosticHandler, LLVMContext},
+    memory_buffer::MemoryBuffer,
     module::LLVMModule,
     target_machine::LLVMTargetMachine,
 };
