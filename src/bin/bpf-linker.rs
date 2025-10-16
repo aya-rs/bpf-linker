@@ -117,9 +117,9 @@ struct CommandLine {
     #[clap(long)]
     allow_bpf_trap: bool,
 
-    /// Add a directory to the library search path
+    /// UNUSED: it only exists for compatibility with rustc
     #[clap(short = 'L', number_of_values = 1)]
-    libs: Vec<PathBuf>,
+    _libs: Vec<PathBuf>,
 
     /// Optimization level. 0-3, s, or z
     #[clap(short = 'O', default_value = "2")]
@@ -212,7 +212,6 @@ fn main() -> anyhow::Result<()> {
         emit,
         btf,
         allow_bpf_trap,
-        libs,
         optimize,
         export_symbols,
         log_file,
@@ -227,6 +226,7 @@ fn main() -> anyhow::Result<()> {
         export,
         fatal_errors,
         _debug,
+        _libs,
     } = match Parser::try_parse_from(args) {
         Ok(command_line) => command_line,
         Err(err) => match err.kind() {
@@ -297,7 +297,6 @@ fn main() -> anyhow::Result<()> {
         inputs,
         output,
         output_type,
-        libs,
         optimize,
         export_symbols,
         unroll_loops,
