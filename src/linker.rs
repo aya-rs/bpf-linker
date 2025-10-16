@@ -207,8 +207,6 @@ pub struct LinkerOptions {
     /// Remove `noinline` attributes from functions. Useful for kernels before 5.8 that don't
     /// support function calls.
     pub ignore_inline_never: bool,
-    /// Write the linked module IR before and after optimization.
-    pub dump_module: Option<PathBuf>,
     /// Extra command line args to pass to LLVM.
     pub llvm_args: Vec<CString>,
     /// Disable passing --bpf-expand-memcpy-in-order to LLVM.
@@ -229,6 +227,7 @@ pub struct Linker {
     options: LinkerOptions,
     context: LLVMContext,
     diagnostic_handler: llvm::InstalledDiagnosticHandler<DiagnosticHandler>,
+    dump_module: Option<PathBuf>,
 }
 
 impl Linker {
@@ -240,21 +239,36 @@ impl Linker {
             options,
             context,
             diagnostic_handler,
+            dump_module: None,
         }
+    }
+
+    /// Set the directory where the linker will dump the linked LLVM IR before and after
+    /// optimization, for debugging and inspection purposes.
+    ///
+    /// When set:
+    /// - The directory is created if it does not already exist.
+    /// - A "pre-opt.ll" file is written with the IR before optimization.
+    /// - A "post-opt.ll" file is written with the IR after optimization.
+    pub fn set_dump_module_path(&mut self, path: impl AsRef<Path>) {
+        self.dump_module = Some(path.as_ref().to_path_buf())
     }
 
     /// Link and generate the output code.
     pub fn link(&mut self) -> Result<(), LinkerError> {
         let Self {
-            options, context, ..
+            options,
+            context,
+            dump_module,
+            ..
         } = self;
 
         let mut module = link_modules(context, &options.inputs)?;
         let target_machine = create_target_machine(options, &module)?;
-        if let Some(path) = &options.dump_module {
+        if let Some(path) = &dump_module {
             std::fs::create_dir_all(path).map_err(|err| LinkerError::IoError(path.clone(), err))?;
         }
-        if let Some(path) = &options.dump_module {
+        if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("pre-opt.ll");
             module
@@ -268,7 +282,7 @@ impl Linker {
             &mut module,
             &options.export_symbols,
         )?;
-        if let Some(path) = &options.dump_module {
+        if let Some(path) = dump_module {
             // dump IR before optimization
             let path = path.join("post-opt.ll");
             module
