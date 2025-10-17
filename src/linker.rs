@@ -692,13 +692,14 @@ fn optimize<'ctx>(
         ..
     } = options;
 
-    let mut export_symbols = export_symbols.clone();
+    let mut export_symbols: HashSet<Cow<'_, [u8]>> =
+        export_symbols.iter().map(|s| s.as_bytes().into()).collect();
 
     if !disable_memory_builtins {
         export_symbols.extend(
             ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
                 .into_iter()
-                .map(Into::into),
+                .map(|s| s.as_bytes().into()),
         );
     };
     debug!(
@@ -707,8 +708,6 @@ fn optimize<'ctx>(
     );
     // run optimizations. Will optionally remove noinline attributes, intern all non exported
     // programs and maps and remove dead code.
-
-    let export_symbols = export_symbols.iter().map(|s| s.as_bytes().into()).collect();
 
     if *btf {
         // if we want to emit BTF, we need to sanitize the debug information
