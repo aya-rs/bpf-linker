@@ -177,30 +177,6 @@ enum InputReader<'a> {
     },
 }
 
-impl<'a> TryFrom<LinkerInput<'a>> for InputReader<'a> {
-    type Error = LinkerError;
-
-    fn try_from(value: LinkerInput<'a>) -> Result<Self, Self::Error> {
-        match value {
-            LinkerInput::File(file_input) => {
-                let FileInput { path } = file_input;
-
-                let file =
-                    File::open(path).map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
-                Ok(InputReader::File { path, file })
-            }
-            LinkerInput::Buffer(buffer_input) => {
-                let BufferInput { name, bytes } = buffer_input;
-
-                Ok(InputReader::Buffer {
-                    name,
-                    cursor: io::Cursor::new(bytes),
-                })
-            }
-        }
-    }
-}
-
 impl Seek for InputReader<'_> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match self {
@@ -376,12 +352,6 @@ impl Linker {
     where
         I: IntoIterator<Item = LinkerInput<'i>>,
     {
-        // Catch non existing files
-        let inputs = inputs
-            .into_iter()
-            .map(InputReader::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-
         let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_file(&linked_module, &target_machine, output, output_type)?;
         Ok(())
@@ -442,12 +412,6 @@ impl Linker {
     where
         I: IntoIterator<Item = LinkerInput<'i>>,
     {
-        // Catch non existing files
-        let inputs = inputs
-            .into_iter()
-            .map(InputReader::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-
         let (linked_module, target_machine) = self.link(inputs, export_symbols)?;
         codegen_to_buffer(&linked_module, &target_machine, output_type)
     }
@@ -459,7 +423,7 @@ impl Linker {
         export_symbols: &HashSet<Cow<'static, str>>,
     ) -> Result<(LLVMModule<'ctx>, LLVMTargetMachine), LinkerError>
     where
-        I: IntoIterator<Item = InputReader<'i>>,
+        I: IntoIterator<Item = LinkerInput<'i>>,
     {
         let Self {
             options,
@@ -467,6 +431,27 @@ impl Linker {
             dump_module,
             ..
         } = self;
+
+        let inputs = inputs
+            .into_iter()
+            .map(|value| match value {
+                LinkerInput::File(file_input) => {
+                    let FileInput { path } = file_input;
+
+                    let file = File::open(path)
+                        .map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
+                    Ok(InputReader::File { path, file })
+                }
+                LinkerInput::Buffer(buffer_input) => {
+                    let BufferInput { name, bytes } = buffer_input;
+
+                    Ok(InputReader::Buffer {
+                        name,
+                        cursor: io::Cursor::new(bytes),
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut module = link_modules(context, inputs)?;
 
