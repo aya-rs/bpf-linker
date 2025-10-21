@@ -225,3 +225,33 @@ jobs:
         if: matrix.rust == 'nightly'
         working-directory: aya
         run: cargo xtask integration-test local
+
+      - name: Report disk usage (final)
+        if: always()
+        run: |
+          set -euo pipefail
+
+          label=final
+          workspace=${GITHUB_WORKSPACE:-$PWD}
+
+          echo "::group::Disk usage snapshot (${label}) – filesystems"
+          df -h
+          echo "::endgroup::"
+
+          report_dir() {
+            local dir="$1"
+            local depth="$2"
+
+            [[ -d "$dir" ]] || return
+
+            echo "::group::Disk usage snapshot (${label}) – ${dir}"
+            du -x -BM -s "$dir" | awk '{ printf("total: %s\t%s\n", $1, $2) }'
+            du -x -BM --max-depth="$depth" "$dir" 2>/dev/null | sort -nr | head -n 20
+            echo "::endgroup::"
+          }
+
+          report_dir "$workspace" 2
+          report_dir "$HOME/.cargo" 2
+          report_dir "$HOME/.rustup" 1
+          report_dir /tmp 1
+          report_dir /var/cache/apt/archives 1
