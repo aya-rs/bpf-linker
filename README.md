@@ -44,11 +44,11 @@ cargo install bpf-linker --no-default-features
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
 
-# Usage
+## Usage
 
-## Rust
+### Rust
 
-### Nightly
+#### Nightly
 
 To compile your eBPF crate just run:
 
@@ -67,7 +67,7 @@ target = "bpfel-unknown-none"
 build-std = ["core"]
 ```
 
-#### (Experimental) BTF support
+##### (Experimental) BTF support
 
 To emit [BTF debug information](https://www.kernel.org/doc/html/next/bpf/btf.html),
 set the following rustflags:
@@ -101,7 +101,7 @@ build-std = ["core"]
 After that, the BPF object file present in `target/bpfel-unknown-none/release`
 should contain a BTF section.
 
-## Clang
+### Clang
 
 For a simple example of how to use the linker with clang see [this
 gist](https://gist.github.com/alessandrod/ed6f11ba41bcd8a19d8655e57a00350b). In
@@ -113,7 +113,7 @@ The
 [Makefile](https://gist.github.com/alessandrod/ed6f11ba41bcd8a19d8655e57a00350b#file-makefile)
 shows how to compile the C code and then link it.
 
-# Usage
+### CLI syntax
 
 ```
 bpf-linker
