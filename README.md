@@ -33,13 +33,37 @@ cargo install bpf-linker
 
 ### Using external LLVM
 
+#### System packages
+
 On Debian based distributions you need to install the `llvm-21-dev`, `libclang-21-dev`
 and `libpolly-21-dev` packages, from the official LLVM repo at https://apt.llvm.org.
+
+Different operating systems and their distributions might or might not provide
+LLVM packages in recent version. If there is no package for your system, you
+might want to try other methods.
 
 Once you have installed LLVM 21 you can install the linker running:
 
 ```sh
 cargo install bpf-linker --no-default-features --features llvm-21
+```
+
+#### Building LLVM from source
+
+LLVM can be built from source using the `build-llvm` xtask, included in
+bpf-linker sources. After cloning this repository, executing the xtask can will
+install the necessary LLVM artifacts in the directory provided in the
+`--install-dir` argument:
+
+```sh
+cargo xtask build-llvm --install-dir /tmp/bpf-linker-llvm
+```
+
+After that, bpf-linker can be build with the `LLVM_SYS_211_PREFIX` environment
+variable pointing to that directory:
+
+```sh
+LLVM_SYS_211_PREFIX cargo install --path .
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
