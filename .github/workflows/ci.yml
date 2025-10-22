@@ -180,12 +180,12 @@ jobs:
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
-      # The default workaround is to use the `rustc-build-sysroot` feature,
-      # which builds a custom sysroot with the required BPF standard library
-      # before running compiler tests.
       #
-      # `RUSTC_BOOTSTRAP` is needed to make rustc-build-sysroot work on stable
-      # Rust.
+      # The default workaround is to use the `rustc-build-sysroot` crate to
+      # build a custom sysroot with the required BPF standard library before
+      # running compiler tests.
+      #
+      # `RUSTC_BOOTSTRAP` is needed to use `rustc-build-sysroot` on stable Rust.
       - name: Test (sysroot built on demand)
         env:
           RUSTC_BOOTSTRAP: 1
@@ -194,22 +194,30 @@ jobs:
             --exclude-features ${{ matrix.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }},rustc-build-sysroot
 
-      # To make things easier for package maintainers, the step of building
-      # a custom sysroot can be skipped by omitting the `rustc-build-sysroot`
-      # feature. In that case, the sysroot provided by the current toolchain
-      # is expected to already contain the prebuilt standard library.
+      # To make things easier for package maintainers, the step of building a
+      # custom sysroot can be skipped by setting the `BPF_SYSROOT_SKIP`
+      # environment variable to the path of the prebuilt BPF sysroot.
+      #
       # Test this configuration by prebuilding the BPF standard library
       # manually.
       #
       # `RUSTC_BOOTSTRAP` is needed to make `xtask build-std` work on stable
       # Rust.
       - name: Test (prebuilt BPF standard library)
-        env:
-          RUSTC_BOOTSTRAP: 1
         run: |
-          cargo xtask build-std
-          cargo hack test --feature-powerset \
-            --exclude-features ${{ matrix.exclude-features }},rustc-build-sysroot \
+          set -euxo pipefail
+
+          RUSTC_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
+          BPFEL_SYSROOT_DIR="${{ github.workspace }}/bpf-sysroot"
+          RUSTC_BOOTSTRAP=1 cargo xtask build-std \
+            --rustc-src "$RUSTC_SRC" \
+            --sysroot-dir "$BPFEL_SYSROOT_DIR" \
+            --target bpfel-unknown-none
+
+          # Omit `rustc-build-sysroot` feature to test the prebuilt sysroot.
+          # Omit `default` because it includes `rustc-build-sysroot`.
+          BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
+            --exclude-features ${{ matrix.exclude-features }},default,rustc-build-sysroot \
             --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v5
