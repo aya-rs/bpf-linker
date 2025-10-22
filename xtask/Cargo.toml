@@ -6,7 +6,12 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+flate2 = { workspace = true, features = ["rust_backend"] }
+indicatif = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
 rustc-build-sysroot = { workspace = true }
+tar = { workspace = true }
+walkdir = { workspace = true }
 
 [lints]
 workspace = true
