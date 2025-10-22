@@ -33,8 +33,13 @@ cargo install bpf-linker
 
 ### Using external LLVM
 
+#### System packages
+
 On Debian based distributions you need to install the `llvm-21-dev`, `libclang-21-dev`
 and `libpolly-21-dev` packages, from the official LLVM repo at https://apt.llvm.org.
+
+You may need to build LLVM from source if a recent version is not available
+through any package manager that supports your platform.
 
 Once you have installed LLVM 21 you can install the linker running:
 
@@ -42,7 +47,47 @@ Once you have installed LLVM 21 you can install the linker running:
 cargo install bpf-linker --no-default-features --features llvm-21
 ```
 
+#### Building LLVM from source
+
+LLVM can be built from source using the `xtask build-llvm` subcommand, included
+in bpf-linker sources.
+
+First, the LLVM sources offered in [our fork][llvm-fork] need to be cloned,
+using the branch matching the Rust toolchain you want to use. For current
+nightly:
+
+```sh
+git clone -b rustc/21.1-2025-08-01 https://github.com/aya-rs/llvm-project ./llvm-project
+```
+
+If in doubt about which branch to use, check the LLVM version used by your Rust
+compiler:
+
+```sh
+rustc [+toolchain] --version -v | grep LLVM
+```
+
+When the sources are ready, the LLVM artifacts can be built and installed in
+the directory provided in the `--install-prefix` argument, using `--build-dir`
+to store the state of the build.
+
+```sh
+cargo xtask llvm build \
+    --src-dir ./llvm-project \
+    --build-dir ./llvm-build \
+    --install-prefix ./llvm-install
+```
+
+After that, bpf-linker can be built with the `LLVM_SYS_211_PREFIX` environment
+variable pointing to that directory:
+
+```sh
+LLVM_SYS_211_PREFIX=./llvm-install cargo install --path .
+```
+
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
+
+[llvm-fork]: https://github.com/aya-rs/llvm-project
 
 ## Usage
 
