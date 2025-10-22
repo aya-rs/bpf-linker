@@ -135,8 +135,8 @@ impl DIType<'_> {
 
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
-    pub(crate) fn offset_in_bits(&self) -> usize {
-        unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) as usize }
+    pub(crate) fn offset_in_bits(&self) -> u64 {
+        unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) }
     }
 }
 

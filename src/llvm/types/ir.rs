@@ -253,7 +253,7 @@ impl MDNode<'_> {
 
 pub(crate) struct MetadataEntries {
     entries: *mut LLVMValueMetadataEntry,
-    count: usize,
+    count: u32,
 }
 
 impl MetadataEntries {
@@ -268,14 +268,17 @@ impl MetadataEntries {
             return None;
         }
 
-        Some(Self { entries, count })
+        Some(Self {
+            entries,
+            count: count.try_into().unwrap(),
+        })
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (LLVMMetadataRef, u32)> + '_ {
         (0..self.count).map(move |index| unsafe {
             (
-                LLVMValueMetadataEntriesGetMetadata(self.entries, index as u32),
-                LLVMValueMetadataEntriesGetKind(self.entries, index as u32),
+                LLVMValueMetadataEntriesGetMetadata(self.entries, index),
+                LLVMValueMetadataEntriesGetKind(self.entries, index),
             )
         })
     }
