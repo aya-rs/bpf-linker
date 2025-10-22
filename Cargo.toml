@@ -82,6 +82,7 @@ anyhow = { version = "1.0.100", default-features = false }
 clap = { version = "4.5.49", features = ["derive"] }
 # dev deps
 rustc-build-sysroot = { version = "0.5.11", default-features = false }
+walkdir = { version = "2.5.0", default-features = false }
 
 [workspace.lints.clippy]
 all = "warn"
