@@ -81,6 +81,11 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
+      - uses: jlumbroso/free-disk-space@main
+        with:          
+          # This option would remove LLVM/clang.
+          large-packages: false
+
       - uses: actions/checkout@v5
 
       - name: Install Rust ${{ matrix.rust }}
