@@ -238,7 +238,7 @@ impl<'ctx> DISanitizer<'ctx> {
                 self.visit_item(Item::Operand(Operand {
                     parent: value_ref,
                     value: operand,
-                    index: index as u32,
+                    index: index.try_into().unwrap(),
                 }))
             }
         }
@@ -411,12 +411,17 @@ struct Operand {
 
 impl Operand {
     fn replace(&mut self, value: LLVMValueRef) {
+        let Self {
+            parent,
+            value: _,
+            index,
+        } = self;
         unsafe {
-            if !LLVMIsAMDNode(self.parent).is_null() {
+            if !LLVMIsAMDNode(*parent).is_null() {
                 let value = LLVMValueAsMetadata(value);
-                LLVMReplaceMDNodeOperandWith(self.parent, self.index, value);
-            } else if !LLVMIsAUser(self.parent).is_null() {
-                LLVMSetOperand(self.parent, self.index, value);
+                LLVMReplaceMDNodeOperandWith(*parent, *index, value);
+            } else if !LLVMIsAUser(*parent).is_null() {
+                LLVMSetOperand(*parent, *index, value);
             }
         }
     }
