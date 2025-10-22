@@ -30,6 +30,12 @@ jobs:
           key: ${{ steps.cache-key.outputs.cache-key }}
           lookup-only: true
 
+      - uses: actions/checkout@v5
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+
       - name: Install Tools
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
@@ -51,51 +57,11 @@ jobs:
           ref: ${{ steps.ls-remote.outputs.sha }}
           path: llvm-project
 
-      - name: Configure LLVM
+      - name: Build LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          cmake \
-            -S llvm-project/llvm \
-            -B llvm-build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/llvm-install" \
-            -DLLVM_BUILD_LLVM_DYLIB=ON \
-            -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_ENABLE_PROJECTS= \
-            -DLLVM_ENABLE_RUNTIMES= \
-            -DLLVM_INSTALL_UTILS=ON \
-            -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DLLVM_TARGETS_TO_BUILD=BPF \
-            -DLLVM_USE_LINKER=lld
-
-      - name: Install LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        env:
-          # Create symlinks rather than copies to conserve disk space. At the time of this writing,
-          # GitHub-hosted runners have 14GB of SSD space
-          # (https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources).
-          #
-          # Since the LLVM build creates a bunch of symlinks (and this setting does not turn those
-          # into symlinks-to-symlinks), use absolute symlinks so we can distinguish the two cases.
-          CMAKE_INSTALL_MODE: ABS_SYMLINK
-        run: cmake --build llvm-build --target install
-
-      - name: Rewrite LLVM Symlinks
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        # Move targets over the symlinks that point to them.
-        #
-        # This whole dance would be simpler if CMake supported CMAKE_INSTALL_MODE=MOVE.
-        run: |
-          set -euxo pipefail
-          find llvm-install -type l -execdir sh -eux -c '
-            for link in "$@"; do
-              target=$(readlink "$link")
-              case $target in
-                /*) mv "$target" "$link" ;;
-              esac
-            done
-          ' sh {} +
+          cargo xtask build-llvm \
+            --src-dir llvm-project \
+            --build-dir llvm-build \
+            --install-prefix "${{ github.workspace }}/llvm-install"
