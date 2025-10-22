@@ -16,10 +16,10 @@ use llvm_sys::{
 };
 
 use crate::llvm::{
+    Message,
     iter::IterBasicBlocks as _,
     symbol_name,
     types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
-    Message,
 };
 
 pub(crate) fn replace_name(

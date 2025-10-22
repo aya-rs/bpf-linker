@@ -643,7 +643,10 @@ fn create_target_machine(
                 (c_triple, llvm::target_from_module(module))
             } else {
                 // case 3.
-                info!("detected non-bpf input target {:?} and no explicit output --target specified, selecting `bpf'", c_triple);
+                info!(
+                    "detected non-bpf input target {:?} and no explicit output --target specified, selecting `bpf'",
+                    c_triple
+                );
                 let c_triple = c"bpf";
                 (c_triple, llvm::target_from_triple(c_triple))
             }

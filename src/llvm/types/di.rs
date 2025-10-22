@@ -12,8 +12,8 @@ use llvm_sys::{
 };
 
 use crate::llvm::{
-    types::ir::{MDNode, Metadata},
     LLVMGetMDString,
+    types::ir::{MDNode, Metadata},
 };
 
 fn mdstring<'a>(mdstring: LLVMValueRef) -> &'a [u8] {

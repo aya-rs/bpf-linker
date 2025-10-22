@@ -6,7 +6,7 @@ use llvm_sys::target_machine::{
     LLVMTargetMachineEmitToMemoryBuffer, LLVMTargetMachineRef, LLVMTargetRef,
 };
 
-use crate::llvm::{types::module::LLVMModule, MemoryBuffer, Message};
+use crate::llvm::{MemoryBuffer, Message, types::module::LLVMModule};
 
 pub(crate) struct LLVMTargetMachine {
     target_machine: LLVMTargetMachineRef,

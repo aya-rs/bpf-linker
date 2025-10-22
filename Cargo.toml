@@ -13,7 +13,7 @@ categories = [
 ]
 repository = "https://github.com/aya-rs/bpf-linker"
 readme = "README.md"
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
 # cli deps
@@ -75,6 +75,9 @@ rustc-build-sysroot = []
 
 [workspace]
 members = ["xtask"]
+
+[workspace.package]
+edition = "2024"
 
 [workspace.dependencies]
 # cli deps

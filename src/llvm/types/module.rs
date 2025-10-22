@@ -11,7 +11,7 @@ use llvm_sys::{
     prelude::LLVMModuleRef,
 };
 
-use crate::llvm::{types::context::LLVMContext, MemoryBuffer, Message};
+use crate::llvm::{MemoryBuffer, Message, types::context::LLVMContext};
 
 pub(crate) struct LLVMModule<'ctx> {
     pub(super) module: LLVMModuleRef,

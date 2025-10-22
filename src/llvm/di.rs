@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::Hasher as _,
     io::Write as _,
     marker::PhantomData,
@@ -9,13 +9,13 @@ use std::{
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
-use tracing::{span, trace, warn, Level};
+use tracing::{Level, span, trace, warn};
 
 use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{iter::*, types::di::DISubprogram, LLVMContext, LLVMModule};
+use crate::llvm::{LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found across kernel versions to ensure
@@ -108,7 +108,10 @@ impl<'ctx> DISanitizer<'ctx> {
                                                     .to_string();
                                                 trace!(
                                                     "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it",
-                                                    filename = file.filename().map_or( "<unknown>".into(), String::from_utf8_lossy),
+                                                    filename = file.filename().map_or(
+                                                        "<unknown>".into(),
+                                                        String::from_utf8_lossy
+                                                    ),
                                                     line = di_composite_type.line(),
                                                 );
                                                 self.skipped_types_lossy.push(name);
