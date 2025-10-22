@@ -39,7 +39,7 @@ and `libpolly-21-dev` packages, from the official LLVM repo at https://apt.llvm.
 Once you have installed LLVM 21 you can install the linker running:
 
 ```sh
-cargo install bpf-linker --no-default-features
+cargo install bpf-linker --no-default-features --features llvm-21
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
