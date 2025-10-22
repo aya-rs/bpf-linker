@@ -20,7 +20,7 @@ jobs:
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
       - id: cache-key
-        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-3" >> "$GITHUB_OUTPUT"
 
       - name: Cache
         id: cache-llvm
