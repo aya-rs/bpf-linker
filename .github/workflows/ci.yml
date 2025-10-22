@@ -79,6 +79,7 @@ jobs:
 
     env:
       RUST_BACKTRACE: full
+      LLVM_FEATURES: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-dynamic
 
     steps:
       - uses: jlumbroso/free-disk-space@main
@@ -173,13 +174,13 @@ jobs:
         run: |
           cargo hack check --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm-version }}
+            --features ${{ env.LLVM_FEATURES }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm-version }}
+            --features ${{ env.LLVM_FEATURES }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
@@ -195,7 +196,7 @@ jobs:
         run: |
           cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features llvm-${{ matrix.llvm-version }},rustc-build-sysroot
+            --features ${{ env.LLVM_FEATURES }},rustc-build-sysroot
 
       # To make things easier for package maintainers, the step of building
       # a custom sysroot can be skipped by omitting the `rustc-build-sysroot`
@@ -213,7 +214,7 @@ jobs:
           cargo xtask build-std
           cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }},rustc-build-sysroot \
-            --features llvm-${{ matrix.llvm-version }}
+            --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
@@ -224,7 +225,7 @@ jobs:
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features llvm-${{ matrix.llvm-version }}
+        run: cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES }}
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
