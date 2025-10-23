@@ -16,13 +16,13 @@ use std::{
 use aya_rustc_llvm_proxy as _;
 use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
 use clap::{
+    Parser,
     builder::{PathBufValueParser, TypedValueParser as _},
     error::ErrorKind,
-    Parser,
 };
 use thiserror::Error;
-use tracing::{info, Level};
-use tracing_subscriber::{fmt::MakeWriter, prelude::*, EnvFilter};
+use tracing::{Level, info};
+use tracing_subscriber::{EnvFilter, fmt::MakeWriter, prelude::*};
 use tracing_tree::HierarchicalLayer;
 
 #[derive(Debug, Error)]

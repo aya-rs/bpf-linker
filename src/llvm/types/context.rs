@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    ffi::{c_void, CStr},
+    ffi::{CStr, c_void},
     marker::PhantomData,
     pin::Pin,
     ptr,
@@ -15,7 +15,7 @@ use llvm_sys::{
     prelude::{LLVMContextRef, LLVMDiagnosticInfoRef},
 };
 
-use crate::llvm::{types::module::LLVMModule, LLVMDiagnosticHandler, Message};
+use crate::llvm::{LLVMDiagnosticHandler, Message, types::module::LLVMModule};
 
 pub(crate) struct LLVMContext {
     context: LLVMContextRef,

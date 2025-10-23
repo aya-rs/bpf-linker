@@ -13,6 +13,7 @@ use std::{
 pub(crate) use di::DISanitizer;
 use iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _};
 use llvm_sys::{
+    LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
         LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
@@ -39,7 +40,6 @@ use llvm_sys::{
     transforms::pass_builder::{
         LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
     },
-    LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
 };
 use tracing::{debug, error};
 pub(crate) use types::{
@@ -62,7 +62,13 @@ pub(crate) fn init(args: &[Cow<'_, CStr>], overview: &CStr) {
     }
 
     let c_ptrs = args.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
-    unsafe { LLVMParseCommandLineOptions(c_ptrs.len() as i32, c_ptrs.as_ptr(), overview.as_ptr()) };
+    unsafe {
+        LLVMParseCommandLineOptions(
+            c_ptrs.len().try_into().unwrap(),
+            c_ptrs.as_ptr(),
+            overview.as_ptr(),
+        )
+    };
 }
 
 pub(crate) fn find_embedded_bitcode(
@@ -93,7 +99,7 @@ pub(crate) fn find_embedded_bitcode(
             let name = unsafe { CStr::from_ptr(name) };
             if name == c".llvmbc" {
                 let buf = unsafe { LLVMGetSectionContents(iter) };
-                let size = unsafe { LLVMGetSectionSize(iter) } as usize;
+                let size = unsafe { LLVMGetSectionSize(iter) }.try_into().unwrap();
                 ret = Some(unsafe { slice::from_raw_parts(buf.cast(), size).to_vec() });
                 break;
             }

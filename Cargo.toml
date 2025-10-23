@@ -13,7 +13,7 @@ categories = [
 ]
 repository = "https://github.com/aya-rs/bpf-linker"
 readme = "README.md"
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
 # cli deps
@@ -76,6 +76,9 @@ rustc-build-sysroot = []
 [workspace]
 members = ["xtask"]
 
+[workspace.package]
+edition = "2024"
+
 [workspace.dependencies]
 # cli deps
 anyhow = { version = "1.0.100", default-features = false }
@@ -89,8 +92,8 @@ all = "warn"
 as_ptr_cast_mut = "warn"
 as_underscore = "warn"
 cast_lossless = "warn"
-#cast_possible_truncation = "warn"
-#cast_possible_wrap = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
 cast_precision_loss = "warn"
 cast_sign_loss = "warn"
 char_lit_as_u8 = "warn"

@@ -1,8 +1,6 @@
-use std::{
-    env, ffi::OsString, fs, os::unix::ffi::OsStringExt as _, path::PathBuf, process::Command,
-};
+use std::{ffi::OsString, fs, path::PathBuf, process::Command};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};
 use walkdir::WalkDir;
 
@@ -23,7 +21,13 @@ impl Target {
 
 #[derive(clap::Parser)]
 struct BuildStd {
-    #[arg(long, value_enum, default_value_t = Target::BpfelUnknownNone)]
+    #[arg(long)]
+    rustc_src: PathBuf,
+
+    #[arg(long)]
+    sysroot_dir: PathBuf,
+
+    #[arg(long, value_enum)]
     target: Target,
 }
 
@@ -56,32 +60,14 @@ struct CommandLine {
     subcommand: XtaskSubcommand,
 }
 
-fn sysroot_dir() -> Result<PathBuf> {
-    let mut rustc = Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
-    let output = rustc
-        .args(["--print", "sysroot"])
-        .output()
-        .with_context(|| format!("failed to derermine rustc sysroot: {rustc:?}"))?;
-    if !output.status.success() {
-        bail!("failed to determine rustc sysroot: {output:?}");
-    }
-    Ok(PathBuf::from(OsString::from_vec(
-        output.stdout.trim_ascii().to_vec(),
-    )))
-}
-
 fn build_std(options: BuildStd) -> Result<()> {
-    let BuildStd { target } = options;
+    let BuildStd {
+        rustc_src,
+        sysroot_dir,
+        target,
+    } = options;
 
-    let sysroot_dir = sysroot_dir()?;
-    let source_dir = sysroot_dir
-        .join("lib")
-        .join("rustlib")
-        .join("src")
-        .join("rust")
-        .join("library");
     let target = target.as_str();
-    let rustlibdir = sysroot_dir.join("lib").join("rustlib").join(target);
     let sysroot_status =
         match rustc_build_sysroot::SysrootBuilder::new(sysroot_dir.as_path(), target)
             // Do a full sysroot build.
@@ -91,14 +77,14 @@ fn build_std(options: BuildStd) -> Result<()> {
             // Include debug symbols in order to generate correct BTF types for
             // the core types as well.
             .rustflag("-Cdebuginfo=2")
-            .build_from_source(&source_dir)?
+            .build_from_source(&rustc_src)?
         {
             SysrootStatus::AlreadyCached => "was already built",
             SysrootStatus::SysrootBuilt => "built successfully",
         };
     println!(
         "Standard library for target {target} {sysroot_status}: {}",
-        rustlibdir.display()
+        sysroot_dir.display()
     );
     Ok(())
 }
