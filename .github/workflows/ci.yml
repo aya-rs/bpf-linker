@@ -187,12 +187,10 @@ jobs:
       #
       # `RUSTC_BOOTSTRAP` is needed to use `rustc-build-sysroot` on stable Rust.
       - name: Test (sysroot built on demand)
-        env:
-          RUSTC_BOOTSTRAP: 1
         run: |
-          cargo hack test --feature-powerset \
+          RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }},rustc-build-sysroot
+            --features ${{ env.LLVM_FEATURES }}
 
       # To make things easier for package maintainers, the step of building a
       # custom sysroot can be skipped by setting the `BPF_SYSROOT_SKIP`
@@ -214,10 +212,8 @@ jobs:
             --sysroot-dir "$BPFEL_SYSROOT_DIR" \
             --target bpfel-unknown-none
 
-          # Omit `rustc-build-sysroot` feature to test the prebuilt sysroot.
-          # Omit `default` because it includes `rustc-build-sysroot`.
           BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
-            --exclude-features ${{ matrix.exclude-features }},default,rustc-build-sysroot \
+            --exclude-features ${{ matrix.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v5
