@@ -128,11 +128,9 @@ fn compile_test() {
     let root_dir = env::var_os("CARGO_MANIFEST_DIR")
         .expect("could not determine the root directory of the project");
     let root_dir = Path::new(&root_dir);
-    let bpf_sysroot = env::var_os("BPFEL_SYSROOT_DIR");
-    let bpf_sysroot = if !cfg!(feature = "rustc-build-sysroot") {
-        PathBuf::from(bpf_sysroot.expect("BPFEL_SYSROOT_DIR is not set"))
+    let bpf_sysroot = if let Some(bpf_sysroot) = env::var_os("BPFEL_SYSROOT_DIR") {
+        PathBuf::from(bpf_sysroot)
     } else {
-        assert_eq!(bpf_sysroot, None);
         let rustc = Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
         let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc)
             .expect("could not determine sysroot source directory");

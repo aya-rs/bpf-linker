@@ -69,9 +69,7 @@ rust-llvm-21 = [
 default = [
     "llvm-21",
     "rust-llvm-21",
-    "rustc-build-sysroot",
 ]
-rustc-build-sysroot = []
 
 [workspace]
 members = ["xtask"]
