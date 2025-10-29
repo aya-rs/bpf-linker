@@ -16,10 +16,11 @@ use llvm_sys::{
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
-        LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
-        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
-        LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2,
-        LLVMSetVisibility,
+        LLVMCountBasicBlocks, LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer,
+        LLVMDisposeMessage, LLVMGetEnumAttributeKindForName, LLVMGetMDString,
+        LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2, LLVMIsAFunction,
+        LLVMIsAGlobalVariable, LLVMIsDeclaration, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage,
+        LLVMSetModuleInlineAsm2, LLVMSetSection, LLVMSetVisibility,
     },
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
@@ -41,6 +42,7 @@ use llvm_sys::{
         LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
     },
 };
+use log::info;
 use tracing::{debug, error};
 pub(crate) use types::{
     context::{InstalledDiagnosticHandler, LLVMContext},
@@ -261,6 +263,28 @@ pub(crate) fn internalize(
     export_symbols: &HashSet<Cow<'_, [u8]>>,
 ) {
     if !name.starts_with(b"llvm.") && !export_symbols.contains(name) {
+        if unsafe { !LLVMIsAFunction(value).is_null() } {
+            let num_blocks = unsafe { LLVMCountBasicBlocks(value) };
+            if num_blocks == 0 {
+                unsafe { LLVMSetSection(value, c".ksyms".as_ptr()) };
+                info!(
+                    "not internalizing undefined function {}",
+                    str::from_utf8(name).unwrap_or("<invalid utf8>")
+                );
+                return;
+            }
+        }
+        if unsafe { !LLVMIsAGlobalVariable(value).is_null() } {
+            if unsafe { LLVMIsDeclaration(value) != 0 } {
+                unsafe { LLVMSetSection(value, c".ksyms".as_ptr()) };
+                info!(
+                    "not internalizing undefined global variable {}",
+                    str::from_utf8(name).unwrap_or("<invalid utf8>")
+                );
+                return;
+            }
+        }
+
         unsafe { LLVMSetLinkage(value, LLVMLinkage::LLVMInternalLinkage) };
         unsafe { LLVMSetVisibility(value, LLVMVisibility::LLVMDefaultVisibility) };
     }
