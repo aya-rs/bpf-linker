@@ -74,6 +74,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d67af77d68a931ecd5cbd8a3b5987d63a1d1d1278f7f6a60ae33db485cdebb69"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,6 +114,7 @@ version = "0.9.15"
 dependencies = [
  "anyhow",
  "ar",
+ "assert_matches",
  "aya-rustc-llvm-proxy",
  "clap",
  "compiletest_rs",
@@ -119,6 +126,7 @@ dependencies = [
  "log",
  "regex",
  "rustc-build-sysroot",
+ "rustversion",
  "thiserror 2.0.17",
  "tracing",
  "tracing-appender",

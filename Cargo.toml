@@ -22,6 +22,7 @@ clap = { workspace = true }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-tree = "0.4"
+rustversion = { version = "1.0.17", default-features = false }
 
 # lib deps
 ar = { version = "0.9.0" }
@@ -36,6 +37,7 @@ thiserror = { version = "2.0.12" }
 tracing = "0.1"
 
 [dev-dependencies]
+assert_matches = "1.5.0"
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.1", default-features = false }
 rustc-build-sysroot = { workspace = true }
