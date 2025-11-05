@@ -5,8 +5,7 @@ use llvm_sys::{
     core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
         LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
-        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMGetDINodeTag,
     },
     prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
@@ -108,60 +107,6 @@ unsafe fn di_type_name<'a>(metadata_ref: LLVMMetadataRef) -> Option<&'a [u8]> {
     (!ptr.is_null()).then(|| unsafe { slice::from_raw_parts(ptr.cast(), len) })
 }
 
-/// Represents the debug information for a primitive type in LLVM IR.
-pub(crate) struct DIType<'ctx> {
-    pub(super) metadata_ref: LLVMMetadataRef,
-    pub(super) value_ref: LLVMValueRef,
-    _marker: PhantomData<&'ctx ()>,
-}
-
-impl DIType<'_> {
-    /// Constructs a new [`DIType`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `value` corresponds to a valid
-    /// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
-        Self {
-            metadata_ref,
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Returns the offset of the type in bits. This offset is used in case the
-    /// type is a member of a composite type.
-    pub(crate) fn offset_in_bits(&self) -> u64 {
-        unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) }
-    }
-}
-
-impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
-    fn from(di_derived_type: DIDerivedType<'_>) -> Self {
-        unsafe { Self::from_value_ref(di_derived_type.value_ref) }
-    }
-}
-
-/// Represents the operands for a [`DIDerivedType`]. The enum values correspond
-/// to the operand indices within metadata nodes.
-#[repr(u32)]
-enum DIDerivedTypeOperand {
-    /// [`DIType`] representing a base type of the given derived type.
-    /// Reference in [LLVM 20][llvm-20] and [LLVM 21][llvm-21].
-    ///
-    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1106
-    /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386
-    ///
-    #[cfg(feature = "llvm-20")]
-    BaseType = 3,
-    #[cfg(feature = "llvm-21")]
-    BaseType = 5,
-}
-
 /// Represents the debug information for a derived type in LLVM IR.
 ///
 /// The types derived from other types usually add a level of indirection or an
@@ -188,14 +133,6 @@ impl DIDerivedType<'_> {
             metadata_ref,
             value_ref,
             _marker: PhantomData,
-        }
-    }
-
-    /// Returns the base type of this derived type.
-    pub(crate) fn base_type(&self) -> Metadata<'_> {
-        unsafe {
-            let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
-            Metadata::from_value_ref(value)
         }
     }
 
