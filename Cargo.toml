@@ -68,6 +68,10 @@ which = { version = "8.0.0", default-features = false, features = [
 workspace = true
 
 [features]
+# Sanitize the LLVM debug info to ensure that the BTF produced by BPF backend
+# will be accepted by the kernel.
+di-sanitizer = []
+
 llvm-20 = ["dep:llvm-sys-20"]
 llvm-21 = ["dep:llvm-sys-21"]
 
@@ -82,7 +86,12 @@ llvm-link-static = []
 # Skip LLVM linking.
 no-llvm-linking = []
 
-default = ["llvm-21", "rust-llvm-21"]
+default = [
+  "di-sanitizer",
+
+  "llvm-21",
+  "rust-llvm-21"
+]
 
 [workspace]
 members = ["xtask"]
