@@ -167,6 +167,26 @@ fn compile_test() {
             cfg.llvm_filecheck_preprocess = Some(btf_dump);
         }),
     );
+    #[cfg(feature = "di-sanitizer")]
+    {
+        run_mode(
+            target,
+            "assembly",
+            &bpf_sysroot,
+            Some(|cfg: &mut compiletest_rs::Config| {
+                cfg.src_base = PathBuf::from("tests/sanitizer/assembly");
+            }),
+        );
+        run_mode(
+            target,
+            "assembly",
+            &bpf_sysroot,
+            Some(|cfg: &mut compiletest_rs::Config| {
+                cfg.src_base = PathBuf::from("tests/sanitizer/btf");
+                cfg.llvm_filecheck_preprocess = Some(btf_dump);
+            }),
+        );
+    }
     // The `tests/nightly` directory contains tests which require unstable compiler
     // features through the `-Z` argument in `compile-flags`.
     if is_nightly() {
