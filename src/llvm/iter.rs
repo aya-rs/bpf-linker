@@ -1,13 +1,20 @@
 use std::marker::PhantomData;
 
+#[cfg(feature = "di-sanitizer")]
 use llvm_sys::{
     core::{
-        LLVMGetFirstBasicBlock, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias,
-        LLVMGetFirstInstruction, LLVMGetLastBasicBlock, LLVMGetLastFunction, LLVMGetLastGlobal,
-        LLVMGetLastGlobalAlias, LLVMGetLastInstruction, LLVMGetNextBasicBlock, LLVMGetNextFunction,
-        LLVMGetNextGlobal, LLVMGetNextGlobalAlias, LLVMGetNextInstruction,
+        LLVMGetFirstBasicBlock, LLVMGetFirstInstruction, LLVMGetLastBasicBlock,
+        LLVMGetLastInstruction, LLVMGetNextBasicBlock, LLVMGetNextInstruction,
     },
-    prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef},
+    prelude::LLVMBasicBlockRef,
+};
+use llvm_sys::{
+    core::{
+        LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias, LLVMGetLastFunction,
+        LLVMGetLastGlobal, LLVMGetLastGlobalAlias, LLVMGetNextFunction, LLVMGetNextGlobal,
+        LLVMGetNextGlobalAlias,
+    },
+    prelude::{LLVMModuleRef, LLVMValueRef},
 };
 
 macro_rules! llvm_iterator {
@@ -90,6 +97,7 @@ llvm_iterator! {
     LLVMGetNextFunction,
 }
 
+#[cfg(feature = "di-sanitizer")]
 llvm_iterator!(
     IterBasicBlocks,
     BasicBlockIter,
@@ -101,6 +109,7 @@ llvm_iterator!(
     LLVMGetNextBasicBlock
 );
 
+#[cfg(feature = "di-sanitizer")]
 llvm_iterator!(
     IterInstructions,
     InstructionsIter,

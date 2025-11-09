@@ -53,29 +53,33 @@ jobs:
           - rust: 1.86.0
             llvm-version: 19
             llvm-from: apt
+            features: di-sanitizer,llvm-19,llvm-sys-19/force-dynamic
             exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
           - rust: 1.89.0
             llvm-version: 20
             llvm-from: apt
+            features: di-sanitizer,llvm-20,llvm-sys-20/force-dynamic
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
           - rust: beta
             llvm-version: 21
             llvm-from: apt
+            features: di-sanitizer,llvm-21,llvm-sys-21/force-dynamic
             exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
             llvm-version: 21
             llvm-from: apt
+            features: di-sanitizer,llvm-21,llvm-sys-21/force-dynamic
             exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
             llvm-version: 21
             llvm-from: source
-            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            features: llvm-21,llvm-sys-21/force-dynamic
+            exclude-features: di-sanitizer,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
     name: rustc=${{ matrix.rust }} llvm-version=${{ matrix.llvm-version }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
     env:
       RUST_BACKTRACE: full
-      LLVM_FEATURES: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-dynamic
 
     steps:
       - uses: actions/checkout@v5
@@ -165,13 +169,13 @@ jobs:
         run: |
           cargo hack check --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ matrix.features }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ matrix.features }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
@@ -185,7 +189,7 @@ jobs:
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ matrix.features }}
 
       # To make things easier for package maintainers, the step of building a
       # custom sysroot can be skipped by setting the `BPFEL_SYSROOT_DIR`
@@ -209,18 +213,21 @@ jobs:
 
           BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ matrix.features }}
 
       - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
         with:
-          repository: aya-rs/aya
+          # FIXME: Switch to upstream after https://github.com/aya-rs/aya/pull/1382
+          # is merged.
+          repository: vadorovsky/aya
+          ref: btf-sanitize-name
           path: aya
           submodules: recursive
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES }}
+        run: cargo install --path . --no-default-features --features ${{ matrix.features }}
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'

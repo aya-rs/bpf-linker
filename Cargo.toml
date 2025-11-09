@@ -48,8 +48,9 @@ workspace = true
 name = "bpf-linker"
 
 [features]
-llvm-19 = ["dep:llvm-sys-19"]
-llvm-20 = ["dep:llvm-sys-20"]
+di-sanitizer = []
+llvm-19 = ["dep:llvm-sys-19", "di-sanitizer"]
+llvm-20 = ["dep:llvm-sys-20", "di-sanitizer"]
 llvm-21 = ["dep:llvm-sys-21"]
 rust-llvm-19 = [
     "dep:aya-rustc-llvm-proxy",
@@ -69,6 +70,11 @@ rust-llvm-21 = [
 default = [
     "llvm-21",
     "rust-llvm-21",
+    # Remove once Rust nightly and Linux distributions update to LLVM 21.1.5,
+    # that contains fixes making the sanitizer obsolete[0].
+    #
+    # [0] https://github.com/llvm/llvm-project/pull/165154
+    "di-sanitizer"
 ]
 
 [workspace]
