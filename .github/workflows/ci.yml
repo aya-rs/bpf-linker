@@ -50,14 +50,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - rust: 1.86.0
-            llvm-version: 19
-            llvm-from: apt
-            exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
-          - rust: 1.89.0
+          - rust: 1.90.0
             llvm-version: 20
             llvm-from: apt
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+          - rust: 1.91.0
+            llvm-version: 21
+            llvm-from: apt
+            exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: beta
             llvm-version: 21
             llvm-from: apt
