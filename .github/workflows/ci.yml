@@ -75,7 +75,8 @@ jobs:
 
     env:
       RUST_BACKTRACE: full
-      LLVM_FEATURES: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-dynamic
+      LLVM_FEATURES_DYNAMIC: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-dynamic
+      LLVM_FEATURES_STATIC: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-static
 
     steps:
       - uses: actions/checkout@v5
@@ -96,28 +97,28 @@ jobs:
         run: cargo install btfdump
 
       - name: Install prerequisites
-        # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
-        # enum values was added in clang 15[1] which isn't in `$PATH`.
-        #
         # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
-        #
-        # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
-        #
-        # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
         run: |
           set -euxo pipefail
           sudo apt update
           sudo apt -y install gcc-multilib
-          echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
-      - name: Install LLVM
-        if: matrix.llvm-from == 'apt'
+      - name: Install clang
+        # We use clang in compiletests to test linking of bitcode produced by
+        # both C and Rust. The major version of clang must match the version of
+        # LLVM that bpf-linker is using.
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm-version }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
+          sudo apt -y install clang-${{ matrix.llvm-version }}
+
+      - name: Install LLVM libraries and headers
+        if: matrix.llvm-from == 'apt'
+        run: |
+          set -euxo pipefail
           # TODO(vadorovsky): Remove the requirement of libpolly.
           #
           # Packages from apt.llvm.org are being built all at once, with one
@@ -165,13 +166,13 @@ jobs:
         run: |
           cargo hack check --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
@@ -185,7 +186,7 @@ jobs:
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # To make things easier for package maintainers, the step of building a
       # custom sysroot can be skipped by setting the `BPFEL_SYSROOT_DIR`
@@ -209,7 +210,7 @@ jobs:
 
           BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
             --exclude-features ${{ matrix.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v5
         if: matrix.rust == 'nightly'
@@ -220,7 +221,16 @@ jobs:
 
       - name: Install
         if: matrix.rust == 'nightly'
-        run: cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES }}
+        # `LD_LIBRARY_PATH` set to a custom LLVM build messes up with clang,
+        # that is linked to system-wide LLVM with larger configuration than our
+        # custom build, causing errors like:
+        #   /usr/bin/clang-21: symbol lookup error: /usr/lib/llvm-21/bin/../lib/libclang-cpp.so.21.1:
+        #     undefined symbol: _ZTIN4llvm5MachO13RecordVisitorE, version
+        # Unset the variable and link the custom LLVM statically.
+        run: |
+          set -euxo pipefail
+          echo "LD_LIBRARY_PATH=" >> $GITHUB_ENV
+          cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Run aya integration tests
         if: matrix.rust == 'nightly'
