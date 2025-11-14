@@ -36,6 +36,7 @@ thiserror = { version = "2.0.12" }
 tracing = "0.1"
 
 [dev-dependencies]
+assert_matches = "1.5.0"
 compiletest_rs = { version = "0.11.0" }
 regex = { version = "1.11.1", default-features = false }
 rustc-build-sysroot = { workspace = true }

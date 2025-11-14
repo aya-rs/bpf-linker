@@ -18,7 +18,29 @@ use llvm_sys::{
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine, MemoryBuffer};
+use crate::llvm::{
+    self, LLVMContext, LLVMModule, LLVMTargetMachine, LlvmVersionDetectionError, MemoryBuffer,
+};
+
+#[cfg(feature = "llvm-19")]
+const SUPPORTED_LLVM_MAJOR: u32 = 19;
+#[cfg(feature = "llvm-20")]
+const SUPPORTED_LLVM_MAJOR: u32 = 20;
+#[cfg(feature = "llvm-21")]
+const SUPPORTED_LLVM_MAJOR: u32 = 21;
+
+#[cfg(any(
+    all(feature = "llvm-19", not(feature = "rust-llvm-19")),
+    all(feature = "llvm-20", not(feature = "rust-llvm-20")),
+    all(feature = "llvm-21", not(feature = "rust-llvm-21")),
+))]
+const SUGGESTED_FEATURE_PREFIX: &str = "llvm-";
+#[cfg(any(
+    feature = "rust-llvm-19",
+    feature = "rust-llvm-20",
+    feature = "rust-llvm-21",
+))]
+const SUGGESTED_FEATURE_PREFIX: &str = "rust-llvm-";
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -74,6 +96,27 @@ pub enum LinkerError {
     /// LLVM cannot create a module for linking.
     #[error("failed to create module")]
     CreateModuleError,
+
+    /// The LLVM version embedded in the input bitcode is not supported.
+    #[error(
+        "bitcode {path} was built with LLVM {bitcode_version}, but this bpf-linker
+supports LLVM {linker_version}; please re-install bpf-linker with
+`cargo install --force bpf-linker --no-default-features --features
+{SUGGESTED_FEATURE_PREFIX}{bitcode_version}`"
+    )]
+    LlvmVersionMismatch {
+        path: PathBuf,
+        bitcode_version: String,
+        linker_version: u32,
+    },
+
+    /// Failed to determine the LLVM version for a bitcode input.
+    #[error("failed to determine LLVM version for `{path}`: {kind}")]
+    LlvmVersionDetectionError {
+        path: PathBuf,
+        #[source]
+        kind: LlvmVersionDetectionError,
+    },
 }
 
 /// BPF Cpu type
@@ -602,11 +645,21 @@ fn link_reader<'ctx>(
         InputType::Archive => panic!("nested archives not supported duh"),
     };
 
-    if !llvm::link_bitcode_buffer(context, module, &bitcode) {
-        return Err(LinkerError::LinkModuleError(path.to_owned()));
+    match llvm::link_bitcode_buffer(context, module, &bitcode, Some(SUPPORTED_LLVM_MAJOR)) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(LinkerError::LinkModuleError(path.to_owned())),
+        Err(LlvmVersionDetectionError::VersionMismatch {
+            bitcode_version, ..
+        }) => Err(LinkerError::LlvmVersionMismatch {
+            path: path.to_owned(),
+            bitcode_version,
+            linker_version: SUPPORTED_LLVM_MAJOR,
+        }),
+        Err(kind) => Err(LinkerError::LlvmVersionDetectionError {
+            path: path.to_owned(),
+            kind,
+        }),
     }
-
-    Ok(())
 }
 
 fn create_target_machine(

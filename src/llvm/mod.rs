@@ -1,3 +1,4 @@
+mod bitcode;
 mod di;
 mod iter;
 mod types;
@@ -49,7 +50,71 @@ pub(crate) use types::{
     target_machine::LLVMTargetMachine,
 };
 
-use crate::OptLevel;
+use crate::{OptLevel, llvm::bitcode::BitcodeError};
+
+#[derive(Debug, thiserror::Error)]
+pub enum LlvmVersionDetectionError {
+    #[error("failed to retrieve LLVM version from bitcode: {0}")]
+    Bitcode(#[from] BitcodeError),
+    #[error("unexpected bitcode producer string `{producer}`")]
+    UnexpectedProducerString { producer: String },
+    #[error("invalid major version `{major}`")]
+    InvalidMajor {
+        major: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    #[error(
+        "bitcode built with LLVM {bitcode_major} ({bitcode_version}), expected LLVM {expected_major}"
+    )]
+    VersionMismatch {
+        bitcode_major: u32,
+        bitcode_version: String,
+        expected_major: u32,
+    },
+}
+
+/// Parses the `llvm.ident` record to return its `(major, full_version)` tuple.
+pub(crate) fn bitcode_llvm_version(
+    buffer: &[u8],
+) -> Result<(u32, String), LlvmVersionDetectionError> {
+    let producer = bitcode::identification_string(buffer)?;
+    parse_llvm_version_from_producer(&producer)
+}
+
+fn parse_llvm_version_from_producer(
+    producer: &str,
+) -> Result<(u32, String), LlvmVersionDetectionError> {
+    let remainder = producer.strip_prefix("LLVM").ok_or_else(|| {
+        LlvmVersionDetectionError::UnexpectedProducerString {
+            producer: producer.to_owned(),
+        }
+    })?;
+
+    let remainder = remainder.trim_start_matches(' ');
+    let version: String = remainder
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+
+    if version.is_empty() {
+        return Err(LlvmVersionDetectionError::UnexpectedProducerString {
+            producer: producer.to_owned(),
+        });
+    }
+
+    let major_part = version.split('.').next().unwrap_or(&version);
+
+    let major =
+        major_part
+            .parse::<u32>()
+            .map_err(|source| LlvmVersionDetectionError::InvalidMajor {
+                major: major_part.to_owned(),
+                source,
+            })?;
+
+    Ok((major, version))
+}
 
 pub(crate) fn init(args: &[Cow<'_, CStr>], overview: &CStr) {
     unsafe {
@@ -113,12 +178,23 @@ pub(crate) fn find_embedded_bitcode(
     Ok(ret)
 }
 
-#[must_use]
 pub(crate) fn link_bitcode_buffer<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     buffer: &[u8],
-) -> bool {
+    expected_major: Option<u32>,
+) -> Result<bool, LlvmVersionDetectionError> {
+    if let Some(expected_major) = expected_major {
+        let (major, version) = bitcode_llvm_version(buffer)?;
+        if major != expected_major {
+            return Err(LlvmVersionDetectionError::VersionMismatch {
+                bitcode_major: major,
+                bitcode_version: version,
+                expected_major,
+            });
+        }
+    }
+
     let mut linked = false;
     let buffer_name = c"mem_buffer";
     let buffer = unsafe {
@@ -138,7 +214,7 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
 
     unsafe { LLVMDisposeMemoryBuffer(buffer) };
 
-    linked
+    Ok(linked)
 }
 
 pub(crate) fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String> {
@@ -312,5 +388,29 @@ impl Drop for Message {
                 LLVMDisposeMessage(ptr);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+
+    use super::{LlvmVersionDetectionError, parse_llvm_version_from_producer};
+
+    #[test]
+    fn parses_major_minor_patch_version() {
+        let parsed = parse_llvm_version_from_producer("LLVM21.1.4+libcxx").unwrap();
+        assert_eq!(parsed, (21, String::from("21.1.4")));
+    }
+
+    #[test]
+    fn errors_when_prefix_missing() {
+        let err = parse_llvm_version_from_producer("rustc version 1.90")
+            .expect_err("expected producer parsing error");
+        assert_matches!(
+            err,
+            LlvmVersionDetectionError::UnexpectedProducerString { producer }
+                if producer == "rustc version 1.90"
+        );
     }
 }
