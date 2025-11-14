@@ -46,8 +46,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
-    # We don't use ubuntu-latest because we care about the apt packages available.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform.os }}
     # We work with two git repositories in this workflow:
     # - bpf-linker
     # - aya (for integration tests)
@@ -76,15 +75,22 @@ jobs:
           - rust: nightly
             llvm: 21
             exclude-features: llvm-20,rust-llvm-20
+        platform:
+          # We don't use ubuntu-latest because we care about the apt packages available.
+          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
         llvm-from:
           - packages
         include:
+          # Currently we build LLVM from source only for Linux x86_64.
           - toolchain:
               rust: nightly
               llvm: 21
               exclude-features: llvm-20,rust-llvm-20
+            platform:
+              os: ubuntu-22.04
             llvm-from: source
-    name: rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
+    name: os=${{ matrix.platform.os }} rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
     env:
