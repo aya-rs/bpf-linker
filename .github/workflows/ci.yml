@@ -47,7 +47,7 @@ jobs:
 
   build:
     # We don't use ubuntu-latest because we care about the apt packages available.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -67,15 +67,21 @@ jobs:
           - rust: nightly
             llvm: 21
             exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+        platform:
+          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
         llvm-from:
           - packages
         include:
+          # Currently we build LLVM from source only for Linux x86_64.
           - toolchain:
               rust: nightly
               llvm: 21
               exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            platform:
+              os: ubuntu-22.04
             llvm-from: source
-    name: rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
+    name: os=${{ matrix.platform.os }} rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
     env:
@@ -102,19 +108,20 @@ jobs:
         run: cargo install btfdump
 
       - name: Install prerequisites
-        # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
-        # enum values was added in clang 15[1] which isn't in `$PATH`.
-        #
+        if: runner.arch == 'X86'
         # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
-        #
-        # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
-        #
-        # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
         run: |
           set -euxo pipefail
           sudo apt update
           sudo apt -y install gcc-multilib
-          echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
+
+      - name: Add clang 15 to PATH
+        # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
+        # enum values was added in clang 15[1] which isn't in `$PATH`.
+        #
+        # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
+        # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
+        run: echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
       - name: Install LLVM
         if: matrix.llvm-from == 'packages'
