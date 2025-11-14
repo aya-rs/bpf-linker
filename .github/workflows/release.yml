@@ -1,38 +1,54 @@
 name: Release
 
 on:
+  pull_request:
+
   release:
     types: [published]
 
 permissions: {}
 
 jobs:
-  llvm:
-    uses: ./.github/workflows/llvm.yml
-
   upload-bins:
-    # TODO: Build for macos someday.
-    runs-on: ubuntu-22.04
-    needs: llvm
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      matrix:
+        platform:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            extra-features: deps-link-static
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            extra-features: deps-link-static
+    env:
+      RUST_CI_LLVM_INSTALL_DIR: /tmp/rustc-llvm
     steps:
-      - name: Restore LLVM
-        uses: actions/cache/restore@v4
-        with:
-          path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
-          fail-on-cache-miss: true
-
-      - name: Add LLVM to PATH
-        run: |
-          echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
-          echo "$PATH"
-
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM from Rust CI
+        run: |
+          set -euxo pipefail
+          sudo mkdir -p $RUST_CI_LLVM_INSTALL_DIR
+          rustc_date="$(curl -s https://static.rust-lang.org/dist/channel-rust-nightly-date.txt)"
+          rustc_sha="$(curl -s "https://static.rust-lang.org/dist/$rustc_date/channel-rust-nightly-git-commit-hash.txt")"
+          wget -q -O - "https://ci-artifacts.rust-lang.org/rustc-builds/$rustc_sha/rust-dev-nightly-${{ matrix.platform.target }}.tar.xz" | \
+            sudo tar -xJ --strip-components 2 -C $RUST_CI_LLVM_INSTALL_DIR
+          echo "${RUST_CI_LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
 
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bpf-linker
-          features: llvm-link-static
+          features: llvm-21,llvm-link-static,${{ matrix.platform.extra-features }}
+          no-default-features: true
+          dry-run: ${{ github.event_name != 'release' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report disk usage
+        if: ${{ always() }}
+        uses: ./.github/actions/report-disk-usage
