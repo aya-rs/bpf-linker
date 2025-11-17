@@ -51,42 +51,42 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        toolchain:
           - rust: 1.86.0
-            llvm-version: 19
-            llvm-from: apt
+            llvm: 19
             exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
           - rust: 1.89.0
-            llvm-version: 20
-            llvm-from: apt
+            llvm: 20
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
           - rust: beta
-            llvm-version: 21
-            llvm-from: apt
+            llvm: 21
             exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: nightly
-            llvm-version: 21
-            llvm-from: apt
+            llvm: 21
             exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
-          - rust: nightly
-            llvm-version: 21
+        llvm-from:
+          - packages
+        include:
+          - toolchain:
+              rust: nightly
+              llvm: 21
+              exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
             llvm-from: source
-            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
-    name: rustc=${{ matrix.rust }} llvm-version=${{ matrix.llvm-version }} llvm-from=${{ matrix.llvm-from }}
+    name: rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
     env:
       RUST_BACKTRACE: full
-      LLVM_FEATURES: llvm-${{ matrix.llvm-version }}
+      LLVM_FEATURES: llvm-${{ matrix.toolchain.llvm }}
       LLVM_EXCLUDE_FEATURES: llvm-deps-link-static,llvm-link-static,no-llvm-linking
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust ${{ matrix.rust }}
+      - name: Install Rust ${{ matrix.toolchain.rust }}
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ matrix.toolchain.rust }}
           components: rust-src
 
       - name: Check (default features, no system LLVM)
@@ -114,15 +114,15 @@ jobs:
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
       - name: Install LLVM
-        if: matrix.llvm-from == 'apt'
+        if: matrix.llvm-from == 'packages'
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.llvm-version }} main | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.toolchain.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
-          sudo apt -y install llvm-${{ matrix.llvm-version }}-dev
-          echo /usr/lib/llvm-${{ matrix.llvm-version }}/bin >> $GITHUB_PATH
+          sudo apt -y install llvm-${{ matrix.toolchain.llvm }}-dev
+          echo /usr/lib/llvm-${{ matrix.toolchain.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
         if: matrix.llvm-from == 'source'
@@ -154,13 +154,13 @@ jobs:
       - name: Check
         run: |
           cargo hack check --feature-powerset \
-            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
-            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       # Toolchains provided by rustup include standard library artifacts
@@ -174,7 +174,7 @@ jobs:
       - name: Test (sysroot built on demand)
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
-            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       # To make things easier for package maintainers, the step of building a
@@ -198,22 +198,22 @@ jobs:
             --target bpfel-unknown-none
 
           BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
-            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v6
-        if: matrix.rust == 'nightly'
+        if: matrix.toolchain.rust == 'nightly'
         with:
           repository: aya-rs/aya
           path: aya
           submodules: recursive
 
       - name: Install
-        if: matrix.rust == 'nightly'
+        if: matrix.toolchain.rust == 'nightly'
         run: cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES }}
 
       - name: Run aya integration tests
-        if: matrix.rust == 'nightly'
+        if: matrix.toolchain.rust == 'nightly'
         working-directory: aya
         run: cargo xtask integration-test local
 
