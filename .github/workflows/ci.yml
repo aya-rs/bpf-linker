@@ -65,6 +65,8 @@ jobs:
             llvm: 21
             exclude-features: llvm-20,rust-llvm-20
         platform:
+          - os: macos-latest
+          - os: macos-15-intel
           - os: ubuntu-22.04
           - os: ubuntu-22.04-arm
         llvm-from:
@@ -105,6 +107,7 @@ jobs:
         run: cargo install btfdump
 
       - name: Add clang to PATH
+        if: runner.os == 'Linux'
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
         #
@@ -115,8 +118,8 @@ jobs:
           set -euxo pipefail
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
-      - name: Install LLVM
-        if: matrix.llvm-from == 'packages'
+      - name: Install LLVM (Linux, packages)
+        if: matrix.llvm-from == 'packages' && runner.os == 'Linux'
         run: |
           set -euxo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -126,6 +129,14 @@ jobs:
           sudo apt -y install llvm-${{ matrix.llvm-version }}-dev
           echo /usr/lib/llvm-${{ matrix.llvm-version }}/bin >> $GITHUB_PATH
           echo /usr/lib/llvm-${{ matrix.toolchain.llvm }}/bin >> $GITHUB_PATH
+
+      - name: Install LLVM (macOS, packages)
+        if: matrix.llvm-from == 'packages' && runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          brew install llvm@${{ matrix.toolchain.llvm }}
+          echo $(brew --prefix llvm@${{ matrix.toolchain.llvm }})/bin >> $GITHUB_PATH
+          echo "DYLD_LIBRARY_PATH=$(brew --prefix llvm@${{ matrix.toolchain.llvm }})/lib" >> $GITHUB_ENV
 
       - name: Restore LLVM
         if: matrix.llvm-from == 'source'
@@ -205,18 +216,18 @@ jobs:
             --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v6
-        if: matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         with:
           repository: aya-rs/aya
           path: aya
           submodules: recursive
 
       - name: Install
-        if: matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         run: cargo install --path . --no-default-features --features ${{ env.LLVM_FEATURES }}
 
       - name: Run aya integration tests
-        if: matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         working-directory: aya
         run: cargo xtask integration-test local
 
