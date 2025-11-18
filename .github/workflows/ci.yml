@@ -55,9 +55,12 @@ jobs:
           - rust: 1.86.0
             llvm: 19
             exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
-          - rust: 1.89.0
+          - rust: 1.90.0
             llvm: 20
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+          - rust: stable
+            llvm: 21
+            exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
           - rust: beta
             llvm: 21
             exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
