@@ -14,6 +14,7 @@ categories = [
 repository = "https://github.com/aya-rs/bpf-linker"
 readme = "README.md"
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 # cli deps
@@ -113,6 +114,7 @@ members = ["xtask"]
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.86"
 
 [workspace.dependencies]
 # cli deps
