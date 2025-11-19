@@ -1,7 +1,20 @@
-use std::{ffi::OsString, fs, path::PathBuf, process::Command};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fmt::Write as _,
+    fs,
+    os::unix::ffi::OsStrExt as _,
+    path::PathBuf,
+    process::Command,
+};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
+use reqwest::{
+    blocking::Client,
+    header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT},
+};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};
+use serde::Deserialize;
 use walkdir::WalkDir;
 
 #[derive(Clone, clap::ValueEnum)]
@@ -44,6 +57,13 @@ struct BuildLlvm {
     install_prefix: PathBuf,
 }
 
+#[derive(clap::Args)]
+struct RustcLlvmCommitOptions {
+    /// GitHub token used for API requests. Reads from `GITHUB_TOKEN` when unset.
+    #[arg(long = "github-token", env = "GITHUB_TOKEN")]
+    github_token: String,
+}
+
 #[derive(clap::Subcommand)]
 enum XtaskSubcommand {
     /// Builds the Rust standard library for the given target in the current
@@ -51,6 +71,9 @@ enum XtaskSubcommand {
     BuildStd(BuildStd),
     /// Manages and builds LLVM.
     BuildLlvm(BuildLlvm),
+    /// Finds the commit in github.com/rust-lang/rust that can be used for
+    /// downloading LLVM for the current Rust toolchain.
+    RustcLlvmCommit(RustcLlvmCommitOptions),
 }
 
 /// Additional build commands for bpf-linker.
@@ -180,10 +203,141 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct SearchIssuesResponse {
+    items: Vec<IssueItem>,
+}
+
+#[derive(Deserialize)]
+struct IssueItem {
+    number: u64,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct PullRequest {
+    merge_commit_sha: Option<String>,
+}
+
+/// Finds a commit in the [Rust GitHub repository][rust-repo] that corresponds
+/// to an update of LLVM and can be used to download libLLVM from Rust CI.
+///
+/// [rust-repo]: https://github.com/rust-lang/rust
+fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
+    let RustcLlvmCommitOptions { github_token } = options;
+    let toolchain = env::var_os("RUSTUP_TOOLCHAIN");
+
+    let mut rustc_cmd = Command::new("rustc");
+    if let Some(toolchain) = toolchain {
+        let mut toolchain_arg = OsString::new();
+        toolchain_arg.push(toolchain);
+        let _: &mut Command = rustc_cmd.arg(toolchain_arg);
+    }
+    let output = rustc_cmd
+        .args(["--version", "--verbose"])
+        .output()
+        .with_context(|| format!("failed to run {rustc_cmd:?}"))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "{rustc_cmd:?} failed with status {}",
+            output.status
+        ));
+    }
+    let llvm_version: Vec<_> = output
+        .stdout
+        .split(|&b| b == b'\n')
+        .filter_map(|line| line.strip_prefix(b"LLVM version: "))
+        .collect();
+    let llvm_version = match llvm_version.as_slice() {
+        [] => anyhow::bail!("failed to find `LLVM version:` line in {rustc_cmd:?} output"),
+        [llvm_version] => llvm_version,
+        paths => {
+            let mut msg = String::new();
+            write!(
+                &mut msg,
+                "found multiple `LLVM version:` lines in {rustc_cmd:?} output: ["
+            )?;
+            let mut paths = paths.iter().peekable();
+            while let Some(path) = paths.next() {
+                write!(&mut msg, "{}", OsStr::from_bytes(path).display())?;
+                if paths.peek().is_some() {
+                    write!(&mut msg, ", ")?;
+                }
+            }
+            write!(&mut msg, "]")?;
+            return Err(anyhow::Error::msg(msg));
+        }
+    };
+
+    //.ok_or_else(|| anyhow!("failed to find `LLVM version:` line in {rustc_cmd:?} output"))?;
+    // reqwest does not accept raw bytes.
+    let llvm_version = str::from_utf8(llvm_version).with_context(|| {
+        format!(
+            "llvm version is not valid UTF-8: {}",
+            OsStr::from_bytes(llvm_version).display()
+        )
+    })?;
+
+    let pr_title = format!("Update LLVM to {llvm_version}");
+    let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
+
+    let headers: HeaderMap = [
+        // GitHub requires a User-Agent header; requests without one get a 403.
+        // Any non-empty value works, but we provide an identifier for this tool.
+        (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
+        (ACCEPT, "application/vnd.github+json".parse().unwrap()),
+        (
+            AUTHORIZATION,
+            format!("Bearer {github_token}").parse().unwrap(),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let client = Client::builder()
+        .default_headers(headers)
+        .build()
+        .with_context(|| "failed to build an HTTP client")?;
+
+    const ISSUES_URL: &str = "https://api.github.com/search/issues";
+    let resp = client
+        .get(ISSUES_URL)
+        .query(&[("q", query)])
+        .send()
+        .with_context(|| format!("failed to send the request to {ISSUES_URL}"))?
+        .error_for_status()
+        .with_context(|| format!("HTTP request to {ISSUES_URL} returned an error status"))?;
+
+    let body: SearchIssuesResponse = resp.json()?;
+    let pr = body
+        .items
+        .into_iter()
+        .find(|item| item.title == pr_title)
+        .ok_or_else(|| anyhow!("failed to find an LLVM bump PR titled \"{pr_title}\""))?;
+    let pr_number = pr.number;
+
+    let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
+    let resp = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("failed to send the request to {url}"))?
+        .error_for_status()
+        .with_context(|| format!("HTTP request to {url} returned an error status"))?;
+    let pr: PullRequest = resp.json()?;
+
+    let bors_sha = pr
+        .merge_commit_sha
+        .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
+    println!("{bors_sha}");
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let CommandLine { subcommand } = clap::Parser::parse();
     match subcommand {
         XtaskSubcommand::BuildStd(options) => build_std(options),
         XtaskSubcommand::BuildLlvm(options) => build_llvm(options),
+        XtaskSubcommand::RustcLlvmCommit(options) => rustc_llvm_commit(options),
     }
 }
