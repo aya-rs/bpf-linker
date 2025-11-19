@@ -106,9 +106,11 @@ edition = "2024"
 [workspace.dependencies]
 # cli deps
 anyhow = { version = "1.0.100", default-features = false }
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive", "env"] }
 # dev deps
+reqwest = { version = "0.12.24", default-features = false }
 rustc-build-sysroot = { version = "0.5.11", default-features = false }
+serde = { version = "1.0.228", default-features = false }
 walkdir = { version = "2.5.0", default-features = false }
 
 [workspace.lints.clippy]

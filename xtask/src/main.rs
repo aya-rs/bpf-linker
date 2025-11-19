@@ -1,7 +1,12 @@
-use std::{ffi::OsString, fs, path::PathBuf, process::Command};
+use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
+use reqwest::{
+    blocking::Client,
+    header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT},
+};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};
+use serde::Deserialize;
 use walkdir::WalkDir;
 
 #[derive(Clone, clap::ValueEnum)]
@@ -44,6 +49,13 @@ struct BuildLlvm {
     install_prefix: PathBuf,
 }
 
+#[derive(clap::Args)]
+struct RustcLlvmCommitOptions {
+    /// GitHub token used for API requests. Reads from `GITHUB_TOKEN` when unset.
+    #[arg(long = "github-token", env = "GITHUB_TOKEN")]
+    github_token: String,
+}
+
 #[derive(clap::Subcommand)]
 enum XtaskSubcommand {
     /// Builds the Rust standard library for the given target in the current
@@ -51,6 +63,9 @@ enum XtaskSubcommand {
     BuildStd(BuildStd),
     /// Manages and builds LLVM.
     BuildLlvm(BuildLlvm),
+    /// Finds the commit in github.com/rust-lang/rust that can be used for
+    /// downloading LLVM for the current Rust toolchain.
+    RustcLlvmCommit(RustcLlvmCommitOptions),
 }
 
 /// Additional build commands for bpf-linker.
@@ -180,10 +195,111 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct SearchIssuesResponse {
+    items: Vec<IssueItem>,
+}
+
+#[derive(Deserialize)]
+struct IssueItem {
+    number: u64,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct PullRequest {
+    merge_commit_sha: Option<String>,
+}
+
+/// Returns the LLVM version used by the current Rust toolchain.
+fn get_llvm_version(toolchain: Option<OsString>) -> Result<String> {
+    let mut rustc_cmd = Command::new("rustc");
+    if let Some(toolchain) = toolchain.filter(|toolchain| !toolchain.is_empty()) {
+        let mut toolchain_arg = OsString::new();
+        toolchain_arg.push(toolchain);
+        let _cmd = rustc_cmd.arg(toolchain_arg);
+    }
+    let _cmd = rustc_cmd.args(["--version", "--verbose"]);
+    let output = rustc_cmd
+        .output()
+        .with_context(|| format!("failed to run {rustc_cmd:?}"))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "{rustc_cmd:?} failed with status {}",
+            output.status
+        ));
+    }
+
+    let stdout = String::from_utf8(output.stdout).context("rustc output was not valid UTF-8")?;
+
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("LLVM version: ") {
+            return Ok(rest.trim().to_string());
+        }
+    }
+
+    Err(anyhow!(
+        "could not find `LLVM version:` line in {rustc_cmd:?} output"
+    ))
+}
+
+/// Finds a commit in the [Rust GitHub repository][rust-repo] that corresponds
+/// to an update of LLVM and can be used to download libLLVM from Rust CI.
+///
+/// [rust-repo]: https://github.com/rust-lang/rust
+fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
+    let RustcLlvmCommitOptions { github_token } = options;
+    let toolchain = env::var_os("RUSTUP_TOOLCHAIN");
+    let llvm_version = get_llvm_version(toolchain)?;
+
+    let headers: HeaderMap = [
+        (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
+        (ACCEPT, "application/vnd.github+json".parse().unwrap()),
+        (
+            AUTHORIZATION,
+            format!("Bearer {github_token}").parse().unwrap(),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let client = Client::builder().default_headers(headers).build()?;
+
+    let query =
+        format!(r#"repo:rust-lang/rust is:pr is:closed in:title "Update LLVM to {llvm_version}""#);
+    let resp = client
+        .get("https://api.github.com/search/issues")
+        .query(&[("q", query)])
+        .send()?
+        .error_for_status()?;
+
+    let body: SearchIssuesResponse = resp.json()?;
+    let pr = body
+        .items
+        .into_iter()
+        .find(|item| item.title == format!("Update LLVM to {llvm_version}"))
+        .ok_or_else(|| {
+            anyhow!("Could not find an LLVM bump PR titled \"Update LLVM to {llvm_version}\"")
+        })?;
+    let pr_number = pr.number;
+
+    let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
+    let resp = client.get(url).send()?.error_for_status()?;
+    let pr: PullRequest = resp.json()?;
+
+    let bors_sha = pr
+        .merge_commit_sha
+        .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
+    println!("{bors_sha}");
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let CommandLine { subcommand } = clap::Parser::parse();
     match subcommand {
         XtaskSubcommand::BuildStd(options) => build_std(options),
         XtaskSubcommand::BuildLlvm(options) => build_llvm(options),
+        XtaskSubcommand::RustcLlvmCommit(options) => rustc_llvm_commit(options),
     }
 }
