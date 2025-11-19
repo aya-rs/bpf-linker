@@ -6,7 +6,9 @@ edition.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 rustc-build-sysroot = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 walkdir = { workspace = true }
 
 [lints]
