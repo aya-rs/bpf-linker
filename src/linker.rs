@@ -206,6 +206,8 @@ enum InputType {
     MachO,
     /// Archive file. (.a)
     Archive,
+    /// IR file (.ll)
+    Ir,
 }
 
 impl std::fmt::Display for InputType {
@@ -218,6 +220,7 @@ impl std::fmt::Display for InputType {
                 Self::Elf => "elf",
                 Self::MachO => "Mach-O",
                 Self::Archive => "archive",
+                Self::Ir => "ir",
             }
         )
     }
@@ -508,7 +511,7 @@ where
         .ok_or(LinkerError::CreateModuleError)?;
 
     // buffer used to perform file type detection
-    let mut buf = [0u8; 8];
+    let mut buf = [0u8; 1024];
     for mut input in inputs {
         let path = match input {
             InputReader::File { path, .. } => path.into(),
@@ -517,14 +520,14 @@ where
 
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
         // or an invalid file
-        input
-            .read_exact(&mut buf)
+        let bytes_read = input
+            .read(&mut buf)
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
         input
             .rewind()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-        let in_type =
-            detect_input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+        let in_type = detect_input_type(&buf[..bytes_read])
+            .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
             InputType::Archive => {
@@ -587,13 +590,29 @@ fn link_reader<'ctx>(
         .or_else(|| detect_input_type(&data))
         .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
-    let bitcode = match in_type {
-        InputType::Bitcode => data,
-        InputType::Elf => match llvm::find_embedded_bitcode(context, &data) {
-            Ok(Some(bitcode)) => bitcode,
-            Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
-            Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
-        },
+    match in_type {
+        InputType::Bitcode => {
+            if !llvm::link_bitcode_buffer(context, module, &data) {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
+        InputType::Ir => {
+            data.push(0); // force push null terminator
+            let data = CStr::from_bytes_with_nul(&data).unwrap();
+            if !llvm::link_ir_buffer(context, module, data) {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
+        InputType::Elf => {
+            let bitcode = match llvm::find_embedded_bitcode(context, &data) {
+                Ok(Some(bitcode)) => bitcode,
+                Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
+                Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
+            };
+            if !llvm::link_bitcode_buffer(context, module, &bitcode) {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
         // we need to handle this here since archive files could contain
         // mach-o files, eg somecrate.rlib containing lib.rmeta which is
         // mach-o on macos
@@ -601,10 +620,6 @@ fn link_reader<'ctx>(
         // this can't really happen
         InputType::Archive => panic!("nested archives not supported duh"),
     };
-
-    if !llvm::link_bitcode_buffer(context, module, &bitcode) {
-        return Err(LinkerError::LinkModuleError(path.to_owned()));
-    }
 
     Ok(())
 }
@@ -882,11 +897,30 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
         _ => {
             if &data[..8] == b"!<arch>\x0A" {
                 Some(InputType::Archive)
+            } else if is_llvm_ir(data) {
+                Some(InputType::Ir)
             } else {
                 None
             }
         }
     }
+}
+
+fn is_llvm_ir(data: &[u8]) -> bool {
+    // Trim whitespace from the start of the data
+    let trimmed = match data.iter().position(|b| !b.is_ascii_whitespace()) {
+        Some(position) => &data[position..],
+        None => return false,
+    };
+
+    // Checking for the presence of key keywords in the header
+    trimmed.starts_with(b"; ModuleID")
+        || trimmed.starts_with(b"target triple")
+        || trimmed.starts_with(b"target datalayout")
+        || trimmed.starts_with(b"source_filename")
+        || trimmed.starts_with(b"target ")
+        || trimmed.starts_with(b"define")
+        || trimmed.starts_with(b"!llvm")
 }
 
 pub struct LinkerOutput {
