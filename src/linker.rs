@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, Read, Seek},
+    io::{self, BufRead as _, BufReader, Cursor, Read, Seek, SeekFrom},
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -42,6 +42,10 @@ pub enum LinkerError {
     /// Linking a module failed.
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
+
+    /// Parsing an IR module failed.
+    #[error("failure parsing IR module `{0}`: {1}")]
+    IRParseError(PathBuf, String),
 
     /// Linking a module included in an archive failed.
     #[error("failure linking module {1} from {0}")]
@@ -173,12 +177,12 @@ enum InputReader<'a> {
     },
     Buffer {
         name: &'a str,
-        cursor: io::Cursor<&'a [u8]>,
+        cursor: Cursor<&'a [u8]>,
     },
 }
 
 impl Seek for InputReader<'_> {
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         match self {
             InputReader::File { file, .. } => file.seek(pos),
             InputReader::Buffer { cursor, .. } => cursor.seek(pos),
@@ -206,6 +210,8 @@ enum InputType {
     MachO,
     /// Archive file. (.a)
     Archive,
+    /// IR file (.ll)
+    Ir,
 }
 
 impl std::fmt::Display for InputType {
@@ -218,6 +224,7 @@ impl std::fmt::Display for InputType {
                 Self::Elf => "elf",
                 Self::MachO => "Mach-O",
                 Self::Archive => "archive",
+                Self::Ir => "ir",
             }
         )
     }
@@ -450,7 +457,7 @@ impl Linker {
 
                     Ok(InputReader::Buffer {
                         name,
-                        cursor: io::Cursor::new(bytes),
+                        cursor: Cursor::new(bytes),
                     })
                 }
             })
@@ -507,24 +514,19 @@ where
         .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
-    // buffer used to perform file type detection
-    let mut buf = [0u8; 8];
     for mut input in inputs {
-        let path = match input {
-            InputReader::File { path, .. } => path.into(),
+        let path = match &input {
+            InputReader::File { path, .. } => (*path).into(),
             InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
         };
 
-        // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
-        // or an invalid file
-        input
-            .read_exact(&mut buf)
-            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+        let in_type = detect_input_type(&mut input)
+            .map_err(|e| LinkerError::IoError(path.clone(), e))?
+            .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+
         input
             .rewind()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-        let in_type =
-            detect_input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
             InputType::Archive => {
@@ -575,25 +577,47 @@ fn link_reader<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    mut reader: impl Read,
+    mut reader: impl Read + Seek,
     in_type: Option<InputType>,
 ) -> Result<(), LinkerError> {
     let mut data = Vec::new();
+
     let _: usize = reader
         .read_to_end(&mut data)
         .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
-    // in_type is unknown when we're linking an item from an archive file
-    let in_type = in_type
-        .or_else(|| detect_input_type(&data))
-        .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
-    let bitcode = match in_type {
-        InputType::Bitcode => data,
-        InputType::Elf => match llvm::find_embedded_bitcode(context, &data) {
-            Ok(Some(bitcode)) => bitcode,
-            Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
-            Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
-        },
+    // in_type is unknown when we're linking an item from an archive file
+    let in_type = match in_type {
+        Some(ty) => ty,
+        None => detect_input_type(&mut reader)
+            .map_err(|e| LinkerError::IoError(path.to_owned(), e))?
+            .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?,
+    };
+
+    match in_type {
+        InputType::Bitcode => {
+            if !llvm::link_bitcode_buffer(context, module, &data) {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
+        InputType::Ir => {
+            let data = CString::new(data).unwrap();
+            if !llvm::link_ir_buffer(context, module, &data)
+                .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))?
+            {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
+        InputType::Elf => {
+            let bitcode = match llvm::find_embedded_bitcode(context, &data) {
+                Ok(Some(bitcode)) => bitcode,
+                Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
+                Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
+            };
+            if !llvm::link_bitcode_buffer(context, module, &bitcode) {
+                return Err(LinkerError::LinkModuleError(path.to_owned()));
+            }
+        }
         // we need to handle this here since archive files could contain
         // mach-o files, eg somecrate.rlib containing lib.rmeta which is
         // mach-o on macos
@@ -601,10 +625,6 @@ fn link_reader<'ctx>(
         // this can't really happen
         InputType::Archive => panic!("nested archives not supported duh"),
     };
-
-    if !llvm::link_bitcode_buffer(context, module, &bitcode) {
-        return Err(LinkerError::LinkModuleError(path.to_owned()));
-    }
 
     Ok(())
 }
@@ -870,23 +890,61 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     }
 }
 
-fn detect_input_type(data: &[u8]) -> Option<InputType> {
-    if data.len() < 8 {
-        return None;
+fn detect_input_type(reader: &mut (impl Read + Seek)) -> Result<Option<InputType>, io::Error> {
+    let mut header = [0u8; 8];
+    let bytes_read = reader.read(&mut header)?;
+
+    if bytes_read < 4 {
+        return Ok(None);
     }
 
-    match &data[..4] {
-        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
-        b"\x7FELF" => Some(InputType::Elf),
-        b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
+    match &header[..4] {
+        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Ok(Some(InputType::Bitcode)),
+        b"\x7FELF" => Ok(Some(InputType::Elf)),
+        b"\xcf\xfa\xed\xfe" => Ok(Some(InputType::MachO)),
         _ => {
-            if &data[..8] == b"!<arch>\x0A" {
-                Some(InputType::Archive)
+            if bytes_read >= 8 && &header[..8] == b"!<arch>\x0A" {
+                Ok(Some(InputType::Archive))
+            } else if is_llvm_ir(reader)? {
+                Ok(Some(InputType::Ir))
             } else {
-                None
+                Ok(None)
             }
         }
     }
+}
+
+fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Result<bool, io::Error> {
+    const PREFIXES: &[&[u8]] = &[
+        b"; ModuleID",
+        b"source_filename",
+        b"target datalayout",
+        b"target triple",
+        b"define ",
+        b"declare ",
+        b"!llvm",
+    ];
+
+    // rewind to start since reader is passed in arbitrary position
+    reader.rewind()?;
+
+    let mut reader = BufReader::new(reader);
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            return Ok(false);
+        }
+        let skip = buf.iter().take_while(|b| b.is_ascii_whitespace()).count();
+        if skip < buf.len() {
+            reader.consume(skip);
+            break;
+        }
+        let len = buf.len();
+        reader.consume(len);
+    }
+    // now at first non-whitespace byte
+    let buf = reader.fill_buf()?;
+    Ok(PREFIXES.iter().any(|p| buf.starts_with(p)))
 }
 
 pub struct LinkerOutput {

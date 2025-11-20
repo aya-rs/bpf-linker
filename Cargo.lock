@@ -119,6 +119,7 @@ dependencies = [
  "log",
  "regex",
  "rustc-build-sysroot",
+ "tempfile",
  "thiserror 2.0.17",
  "tracing",
  "tracing-appender",
