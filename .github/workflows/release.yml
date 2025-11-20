@@ -33,6 +33,6 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bpf-linker
-          features: llvm-sys/force-static
+          features: llvm-link-static
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
