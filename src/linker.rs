@@ -4,6 +4,7 @@ use std::{
     ffi::{CStr, CString, OsStr},
     fs,
     io::{self, Read as _},
+    mem,
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -42,6 +43,10 @@ pub enum LinkerError {
     /// Linking a module failed.
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
+
+    /// Parsing an IR module failed.
+    #[error("failure parsing IR module `{0}`: {1}")]
+    IRParseError(PathBuf, String),
 
     /// Linking a module included in an archive failed.
     #[error("failure linking module {1} from {0}")]
@@ -168,6 +173,8 @@ enum InputType {
     MachO,
     /// Archive file. (.a)
     Archive,
+    /// IR file (.ll)
+    Ir,
 }
 
 impl std::fmt::Display for InputType {
@@ -180,6 +187,7 @@ impl std::fmt::Display for InputType {
                 Self::Elf => "elf",
                 Self::MachO => "Mach-O",
                 Self::Archive => "archive",
+                Self::Ir => "ir",
             }
         )
     }
@@ -488,7 +496,7 @@ where
                         }
                     };
 
-                    match link_data(context, &mut module, &name, &buf, in_type) {
+                    match link_data(context, &mut module, &name, &mut buf, in_type) {
                         Ok(()) => continue,
                         Err(LinkerError::InvalidInputType(name)) => {
                             info!("ignoring archive item {}: invalid type", name.display());
@@ -513,7 +521,7 @@ where
             }
             ty => {
                 info!("linking file {} type {}", path.display(), ty);
-                match link_data(context, &mut module, &path, input, ty) {
+                match link_data(context, &mut module, &path, &mut input.to_vec(), ty) {
                     Ok(()) => {}
                     Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
@@ -535,7 +543,7 @@ fn link_data<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    data: &[u8],
+    data: &mut Vec<u8>,
     in_type: InputType,
 ) -> Result<(), LinkerError> {
     let bitcode = match in_type {
@@ -551,6 +559,20 @@ fn link_data<'ctx>(
         InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
         // this can't really happen
         InputType::Archive => panic!("nested archives not supported duh"),
+        InputType::Ir => {
+            let data = CString::new(mem::take(data)).expect("null byte in IR data");
+            let c_str = data.as_c_str();
+
+            return llvm::link_ir_buffer(context, module, c_str)
+                .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))
+                .and_then(|linked| {
+                    if linked {
+                        Ok(())
+                    } else {
+                        Err(LinkerError::LinkModuleError(path.to_owned()))
+                    }
+                });
+        }
     };
 
     if !llvm::link_bitcode_buffer(context, module, &bitcode) {
@@ -825,7 +847,6 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
     if data.len() < 8 {
         return None;
     }
-
     match &data[..4] {
         b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
         b"\x7FELF" => Some(InputType::Elf),
@@ -833,11 +854,29 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
         _ => {
             if &data[..8] == b"!<arch>\x0A" {
                 Some(InputType::Archive)
+            } else if is_llvm_ir(data) {
+                Some(InputType::Ir)
             } else {
                 None
             }
         }
     }
+}
+
+fn is_llvm_ir(data: &[u8]) -> bool {
+    const PREFIXES: &[&[u8]] = &[
+        b"; ModuleID",
+        b"source_filename",
+        b"target datalayout",
+        b"target triple",
+        b"define ",
+        b"declare ",
+        b"!llvm",
+    ];
+
+    let trimmed = data.trim_ascii_start();
+
+    PREFIXES.iter().any(|p| trimmed.starts_with(p))
 }
 
 pub struct LinkerOutput {
