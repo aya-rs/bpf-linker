@@ -29,7 +29,7 @@ jobs:
           components: clippy, rust-src
 
       - name: Run clippy
-        run: cargo clippy --features llvm-21,llvm-sys-21/no-llvm-linking --all-targets --workspace -- --deny warnings
+        run: cargo clippy --features llvm-21,no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
     runs-on: ubuntu-latest
@@ -86,7 +86,8 @@ jobs:
 
     env:
       RUST_BACKTRACE: full
-      LLVM_FEATURES: llvm-${{ matrix.toolchain.llvm }},llvm-sys-${{ matrix.toolchain.llvm }}/force-dynamic
+      LLVM_FEATURES: llvm-${{ matrix.toolchain.llvm }}
+      LLVM_EXCLUDE_FEATURES: llvm-link-static,no-llvm-linking
 
     steps:
       - uses: actions/checkout@v6
@@ -125,20 +126,7 @@ jobs:
           echo -e deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${{ matrix.toolchain.llvm }} main | sudo tee /etc/apt/sources.list.d/llvm.list
 
           sudo apt update
-          # TODO(vadorovsky): Remove the requirement of libpolly.
-          #
-          # Packages from apt.llvm.org are being built all at once, with one
-          # cmake build with superset of options, then different binaries and
-          # libraries are being included in different packages.
-          #
-          # That results in `llvm-config --libname --link-static` mentioning
-          # libpolly, even if it's not installed. The output of that command is
-          # being used in build.rs of llvm-sys, so building llvm-sys on such
-          # system is complaining about lack of libpolly.
-          #
-          # Hopefully that nightmare goes away once we switch to binstalls and
-          # ditch the system LLVM option.
-          sudo apt -y install llvm-${{ matrix.toolchain.llvm }}-dev libpolly-${{ matrix.toolchain.llvm }}-dev
+          sudo apt -y install llvm-${{ matrix.toolchain.llvm }}-dev
           echo /usr/lib/llvm-${{ matrix.toolchain.llvm }}/bin >> $GITHUB_PATH
 
       - name: Restore LLVM
@@ -171,13 +159,13 @@ jobs:
       - name: Check
         run: |
           cargo hack check --feature-powerset \
-            --exclude-features ${{ matrix.toolchain.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       - name: Build
         run: |
           cargo hack build --feature-powerset \
-            --exclude-features ${{ matrix.toolchain.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       # Toolchains provided by rustup include standard library artifacts
@@ -191,7 +179,7 @@ jobs:
       - name: Test (sysroot built on demand)
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
-            --exclude-features ${{ matrix.toolchain.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       # To make things easier for package maintainers, the step of building a
@@ -215,7 +203,7 @@ jobs:
             --target bpfel-unknown-none
 
           BPFEL_SYSROOT_DIR="$BPFEL_SYSROOT_DIR" cargo hack test --feature-powerset \
-            --exclude-features ${{ matrix.toolchain.exclude-features }} \
+            --exclude-features ${{ env.LLVM_EXCLUDE_FEATURES }},${{ matrix.toolchain.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
       - uses: actions/checkout@v6
