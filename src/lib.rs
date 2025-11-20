@@ -4,6 +4,9 @@
 
 #![expect(unused_crate_dependencies, reason = "used in bin")]
 
+#[cfg(any(feature = "rust-llvm-20", feature = "rust-llvm-21"))]
+use aya_rustc_llvm_proxy as _;
+
 macro_rules! assert_unique_features {
     () => {};
     ($first:tt $(,$rest:tt)*) => {
