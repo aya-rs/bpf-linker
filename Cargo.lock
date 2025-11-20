@@ -117,6 +117,7 @@ dependencies = [
  "llvm-sys 201.0.1",
  "llvm-sys 211.0.0",
  "log",
+ "object",
  "regex",
  "rustc-build-sysroot",
  "thiserror 2.0.17",
@@ -724,6 +725,15 @@ checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
 dependencies = [
  "hermit-abi",
  "libc",
+]
+
+[[package]]
+name = "object"
+version = "0.37.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
