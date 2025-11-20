@@ -5,6 +5,7 @@ use llvm_sys::{
     prelude::LLVMMemoryBufferRef,
 };
 
+#[derive(Debug)]
 pub(crate) struct MemoryBuffer {
     memory_buffer: LLVMMemoryBufferRef,
 }
