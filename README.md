@@ -35,8 +35,8 @@ cargo install bpf-linker
 
 #### System packages
 
-On Debian based distributions you need to install the `llvm-21-dev`, `libclang-21-dev`
-and `libpolly-21-dev` packages, from the official LLVM repo at https://apt.llvm.org.
+On Debian based distributions you need to install the `llvm-21-dev` and `libclang-21-dev`
+packages, from the official LLVM repo at https://apt.llvm.org.
 
 You may need to build LLVM from source if a recent version is not available
 through any package manager that supports your platform.
