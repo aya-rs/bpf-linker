@@ -912,9 +912,6 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
 
 fn is_llvm_ir(data: &[u8]) -> bool {
     let trimmed = data.trim_ascii_start();
-    if trimmed.is_empty() {
-        return false;
-    }
 
     let prefixes: &[&[u8]] = &[
         b"; ModuleID",
