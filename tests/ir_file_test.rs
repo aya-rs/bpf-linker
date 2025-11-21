@@ -100,4 +100,3 @@ fn test_invalid_ir_file() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
-

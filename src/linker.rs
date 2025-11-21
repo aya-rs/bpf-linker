@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, Read, Seek},
+    io::{self, BufRead, BufReader, Read, Seek},
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -510,24 +510,27 @@ where
         .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
-    // buffer used to perform file type detection
-    let mut buf = [0u8; 1024];
-    for mut input in inputs {
+    for input in inputs {
         let path = match input {
             InputReader::File { path, .. } => path.into(),
             InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
         };
 
-        // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
-        // or an invalid file
-        let bytes_read = input
-            .read(&mut buf)
+        let mut buf = BufReader::new(input);
+
+        // Peek at the buffer to determine file type
+        let preview = buf
+            .fill_buf()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
+
+        let in_type = detect_input_type(preview)
+            .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+
+        // Get back the inner reader to rewind it
+        let mut input = buf.into_inner();
         input
             .rewind()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-        let in_type = detect_input_type(&buf[..bytes_read])
-            .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
             InputType::Archive => {
@@ -597,9 +600,10 @@ fn link_reader<'ctx>(
             }
         }
         InputType::Ir => {
-            data.push(0); // force push null terminator
-            let data = CStr::from_bytes_with_nul(&data).unwrap();
-            if !llvm::link_ir_buffer(context, module, data) {
+            let data = CString::new(data).unwrap();
+            if !llvm::link_ir_buffer(context, module, &data)
+                .map_err(|_| LinkerError::LinkModuleError(path.to_owned()))?
+            {
                 return Err(LinkerError::LinkModuleError(path.to_owned()));
             }
         }
@@ -907,20 +911,22 @@ fn detect_input_type(data: &[u8]) -> Option<InputType> {
 }
 
 fn is_llvm_ir(data: &[u8]) -> bool {
-    // Trim whitespace from the start of the data
-    let trimmed = match data.iter().position(|b| !b.is_ascii_whitespace()) {
-        Some(position) => &data[position..],
-        None => return false,
-    };
+    let trimmed = data.trim_ascii_start();
+    if trimmed.is_empty() {
+        return false;
+    }
 
-    // Checking for the presence of key keywords in the header
-    trimmed.starts_with(b"; ModuleID")
-        || trimmed.starts_with(b"target triple")
-        || trimmed.starts_with(b"target datalayout")
-        || trimmed.starts_with(b"source_filename")
-        || trimmed.starts_with(b"target ")
-        || trimmed.starts_with(b"define")
-        || trimmed.starts_with(b"!llvm")
+    let prefixes: &[&[u8]] = &[
+        b"; ModuleID",
+        b"target triple",
+        b"target datalayout",
+        b"source_filename",
+        b"target ",
+        b"define",
+        b"!llvm",
+    ];
+
+    prefixes.iter().any(|prefix| trimmed.starts_with(prefix))
 }
 
 pub struct LinkerOutput {

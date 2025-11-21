@@ -17,9 +17,9 @@ use llvm_sys::{
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
         LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
-        LLVMDisposeModule, LLVMGetEnumAttributeKindForName, LLVMGetMDString,
-        LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex,
-        LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
+        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
+        LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2,
+        LLVMSetVisibility,
     },
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
@@ -141,13 +141,12 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
 
     linked
 }
-#[must_use]
+
 pub(crate) fn link_ir_buffer<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     buffer: &CStr,
-) -> bool {
-    let mut linked = false;
+) -> Result<bool, String> {
     let buffer_name = c"ir_buffer";
     let buffer = buffer.to_bytes();
     let mem_buffer = unsafe {
@@ -155,33 +154,26 @@ pub(crate) fn link_ir_buffer<'ctx>(
             buffer.as_ptr().cast(),
             buffer.len(),
             buffer_name.as_ptr(),
-            1,
+            1, // LLVM internally sets RequiresTerminator=true
         )
     };
 
     let mut temp_module = ptr::null_mut();
-    let mut error_msg = ptr::null_mut();
-
-    if unsafe {
+    let (ret, message) = Message::with(|error_msg| unsafe {
         LLVMParseIRInContext(
             context.as_mut_ptr(),
             mem_buffer,
             &mut temp_module,
-            &mut error_msg,
+            error_msg,
         )
-    } == 0
-    {
-        linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
-    } else {
-        if !error_msg.is_null() {
-            unsafe { LLVMDisposeMessage(error_msg) };
-        }
-        if !temp_module.is_null() {
-            unsafe { LLVMDisposeModule(temp_module) };
-        }
-    }
+    });
 
-    linked
+    if ret == 0 {
+        let linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
+        Ok(linked)
+    } else {
+        Err(message.as_string_lossy().to_string())
+    }
 }
 
 pub(crate) fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String> {
