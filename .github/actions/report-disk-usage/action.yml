@@ -1,0 +1,30 @@
+name: Report disk usage
+description: Print disk usage for key directories on the runner
+runs:
+  using: composite
+  steps:
+    - name: Report disk usage
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        printf "\n== Filesystems ==\n"
+        df -h
+
+        report_dir() {
+          local dir="$1"
+          local depth="$2"
+
+          [[ -d "$dir" ]] || return
+
+          printf "\n== %s ==\n" "$dir"
+          sudo -n du -x -h -d "$depth" "$dir" 2>/dev/null | sort -h -r | head -n 20
+        }
+
+        report_dir "${{ github.workspace }}" 2
+        report_dir "$HOME/.cargo" 2
+        report_dir "$HOME/.rustup" 1
+        report_dir /tmp 1
+        if [[ "${RUNNER_OS:-}" == "Linux" ]]; then
+          report_dir /var/cache/apt/archives 1
+        fi
