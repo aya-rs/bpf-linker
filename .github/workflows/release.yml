@@ -27,7 +27,7 @@ jobs:
           echo "${{ github.workspace }}/llvm-install/bin" >> $GITHUB_PATH
           echo "$PATH"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
 
       - uses: taiki-e/upload-rust-binary-action@v1

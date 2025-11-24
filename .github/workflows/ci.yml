@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -80,7 +80,7 @@ jobs:
       LLVM_FEATURES: llvm-${{ matrix.llvm-version }},llvm-sys-${{ matrix.llvm-version }}/force-dynamic
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@master
@@ -213,7 +213,7 @@ jobs:
             --exclude-features ${{ matrix.exclude-features }} \
             --features ${{ env.LLVM_FEATURES }}
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         if: matrix.rust == 'nightly'
         with:
           repository: aya-rs/aya
