@@ -32,7 +32,7 @@ jobs:
           key: ${{ steps.cache-key.outputs.cache-key }}
           lookup-only: true
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         if: steps.cache-llvm.outputs.cache-hit != 'true'
 
       - uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,7 @@ jobs:
 
       - name: Checkout LLVM Source
         if: steps.cache-llvm.outputs.cache-hit != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: aya-rs/llvm-project
           ref: ${{ steps.ls-remote.outputs.sha }}
