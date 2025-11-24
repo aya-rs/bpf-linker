@@ -6,6 +6,8 @@ on:
       cache-key:
         value: ${{ jobs.llvm.outputs.cache-key }}
 
+permissions: {}
+
 jobs:
   llvm:
     runs-on: ubuntu-22.04

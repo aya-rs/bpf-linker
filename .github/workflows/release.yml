@@ -4,6 +4,8 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   llvm:
     uses: ./.github/workflows/llvm.yml

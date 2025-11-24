@@ -11,6 +11,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions: {}
+
 jobs:
   llvm:
     uses: ./.github/workflows/llvm.yml
