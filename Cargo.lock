@@ -113,7 +113,6 @@ dependencies = [
  "compiletest_rs",
  "gimli",
  "libc",
- "llvm-sys 191.0.0",
  "llvm-sys 201.0.1",
  "llvm-sys 211.0.0",
  "log",
@@ -619,20 +618,6 @@ name = "litemap"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
-
-[[package]]
-name = "llvm-sys"
-version = "191.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "893cddf1adf0354b93411e413553dd4daf5c43195d73f1acfa1e394bdd371456"
-dependencies = [
- "anyhow",
- "cc",
- "lazy_static",
- "libc",
- "regex-lite",
- "semver",
-]
 
 [[package]]
 name = "llvm-sys"

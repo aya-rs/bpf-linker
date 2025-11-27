@@ -151,12 +151,12 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
 #[repr(u32)]
 enum DIDerivedTypeOperand {
     /// [`DIType`] representing a base type of the given derived type.
-    /// Reference in [LLVM 19-20][llvm-19] and [LLVM 21][llvm-21].
+    /// Reference in [LLVM 20][llvm-20] and [LLVM 21][llvm-21].
     ///
-    /// [llvm-19]: https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/IR/DebugInfoMetadata.h#L1084
+    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1106
     /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386
     ///
-    #[cfg(any(feature = "llvm-19", feature = "llvm-20"))]
+    #[cfg(feature = "llvm-20")]
     BaseType = 3,
     #[cfg(feature = "llvm-21")]
     BaseType = 5,
@@ -219,12 +219,12 @@ impl DIDerivedType<'_> {
 /// correspond to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DICompositeTypeOperand {
-    /// Elements of the composite type. Reference in [LLVM 19-20][llvm-19] and
+    /// Elements of the composite type. Reference in [LLVM 20][llvm-20] and
     /// [LLVM 21][llvm-21].
     ///
-    /// [llvm-19]: https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/IR/DebugInfoMetadata.h#L1299
+    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1332
     /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813
-    #[cfg(any(feature = "llvm-19", feature = "llvm-20"))]
+    #[cfg(feature = "llvm-20")]
     Elements = 4,
     #[cfg(feature = "llvm-21")]
     Elements = 6,
@@ -260,10 +260,6 @@ impl DICompositeType<'_> {
 
     /// Returns an iterator over elements (struct fields, enum variants, etc.)
     /// of the composite type.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "replace as u32 with cast_unsigned when we no longer support LLVM 19"
-    )]
     pub(crate) fn elements(&self) -> impl Iterator<Item = Metadata<'_>> {
         let elements =
             unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::Elements as u32) };
@@ -273,8 +269,9 @@ impl DICompositeType<'_> {
             unsafe { LLVMGetNumOperands(elements) }
         };
 
-        (0..operands)
-            .map(move |i| unsafe { Metadata::from_value_ref(LLVMGetOperand(elements, i as u32)) })
+        (0..operands).map(move |i| unsafe {
+            Metadata::from_value_ref(LLVMGetOperand(elements, i.cast_unsigned()))
+        })
     }
 
     /// Returns the name of the composite type.
