@@ -93,19 +93,15 @@ jobs:
       - name: Install btfdump
         run: cargo install btfdump
 
-      - name: Install prerequisites
+      - name: Add clang to PATH
         # ubuntu-22.04 comes with clang 13-15[0]; support for signed and 64bit
         # enum values was added in clang 15[1] which isn't in `$PATH`.
-        #
-        # gcc-multilib provides at least <asm/types.h> which is referenced by libbpf.
         #
         # [0] https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md
         #
         # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
         run: |
           set -euxo pipefail
-          sudo apt update
-          sudo apt -y install gcc-multilib
           echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
       - name: Install LLVM
