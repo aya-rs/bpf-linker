@@ -85,10 +85,6 @@ impl Value<'_> {
         MetadataEntries::new(value)
     }
 
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "replace as u32 with cast_unsigned when we no longer support LLVM 19"
-    )]
     pub(crate) fn operands(&self) -> Option<impl Iterator<Item = LLVMValueRef>> {
         let value = match self {
             Value::MDNode(node) => Some(node.value_ref),
@@ -98,7 +94,7 @@ impl Value<'_> {
         };
 
         value.map(|value| unsafe {
-            (0..LLVMGetNumOperands(value)).map(move |i| LLVMGetOperand(value, i as u32))
+            (0..LLVMGetNumOperands(value)).map(move |i| LLVMGetOperand(value, i.cast_unsigned()))
         })
     }
 }
