@@ -52,26 +52,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - rust: 1.86.0
-            llvm-version: 19
-            llvm-from: apt
-            exclude-features: default,llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
           - rust: 1.89.0
             llvm-version: 20
             llvm-from: apt
-            exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+            exclude-features: default,llvm-21,rust-llvm-21
           - rust: beta
             llvm-version: 21
             llvm-from: apt
-            exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            exclude-features: default,llvm-20,rust-llvm-20
           - rust: nightly
             llvm-version: 21
             llvm-from: apt
-            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            exclude-features: llvm-20,rust-llvm-20
           - rust: nightly
             llvm-version: 21
             llvm-from: source
-            exclude-features: llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            exclude-features: llvm-20,rust-llvm-20
     name: rustc=${{ matrix.rust }} llvm-version=${{ matrix.llvm-version }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 

@@ -30,13 +30,10 @@ macro_rules! assert_unique_used_features {
 }
 
 assert_unique_used_features! {
-    "llvm-19",
     "llvm-20",
     "llvm-21"
 }
 
-#[cfg(feature = "llvm-19")]
-pub extern crate llvm_sys_19 as llvm_sys;
 #[cfg(feature = "llvm-20")]
 pub extern crate llvm_sys_20 as llvm_sys;
 #[cfg(feature = "llvm-21")]

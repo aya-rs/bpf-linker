@@ -8,11 +8,7 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(any(
-    feature = "rust-llvm-19",
-    feature = "rust-llvm-20",
-    feature = "rust-llvm-21"
-))]
+#[cfg(any(feature = "rust-llvm-20", feature = "rust-llvm-21"))]
 use aya_rustc_llvm_proxy as _;
 use bpf_linker::{Cpu, Linker, LinkerInput, LinkerOptions, OptLevel, OutputType};
 use clap::{
