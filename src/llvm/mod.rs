@@ -172,6 +172,7 @@ pub(crate) fn link_ir_buffer<'ctx>(
         let linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
         Ok(linked)
     } else {
+        unsafe { LLVMDisposeMemoryBuffer(mem_buffer) };
         Err(message.as_string_lossy().to_string())
     }
 }

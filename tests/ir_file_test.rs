@@ -75,10 +75,8 @@ fn test_invalid_ir_file() {
     let valid_content = fs::read_to_string(valid_ir_file).expect("Failed to read valid IR file");
 
     // Corrupting IR content
-    let invalid_content = valid_content
-        .replace("define", "defXne")
-        .replace("add i32", "adX i32")
-        .replace("; ModuleID = 'alessandro'", ": ModuleXX = 'corrupted'");
+    let invalid_content =
+        valid_content.replace("; ModuleID = 'alessandro'", ": ModuleXX = 'corrupted'");
 
     let invalid_ir_file = temp_dir.path().join("corrupted.ll");
 

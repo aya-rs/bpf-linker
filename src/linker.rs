@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, BufRead, BufReader, Read, Seek},
+    io::{self, Read, Seek},
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -510,24 +510,15 @@ where
         .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
-    for input in inputs {
-        let path = match input {
-            InputReader::File { path, .. } => path.into(),
+    for mut input in inputs {
+        let path = match &input {
+            InputReader::File { path, .. } => (*path).into(),
             InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
         };
 
-        let mut buf = BufReader::new(input);
-
-        // Peek at the buffer to determine file type
-        let preview = buf
-            .fill_buf()
-            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-
-        let in_type = detect_input_type(preview)
+        let in_type = detect_input_type(&mut input)
             .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
-        // Get back the inner reader to rewind it
-        let mut input = buf.into_inner();
         input
             .rewind()
             .map_err(|e| LinkerError::IoError(path.clone(), e))?;
@@ -590,7 +581,7 @@ fn link_reader<'ctx>(
         .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
     // in_type is unknown when we're linking an item from an archive file
     let in_type = in_type
-        .or_else(|| detect_input_type(&data))
+        .or_else(|| detect_input_type(reader.by_ref()))
         .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
     match in_type {
@@ -889,19 +880,22 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     }
 }
 
-fn detect_input_type(data: &[u8]) -> Option<InputType> {
-    if data.len() < 8 {
+fn detect_input_type(reader: &mut impl Read) -> Option<InputType> {
+    let mut header = [0u8; 16];
+    let bytes_read = reader.read(&mut header).ok()?;
+
+    if bytes_read < 4 {
         return None;
     }
 
-    match &data[..4] {
+    match &header[..4] {
         b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
         b"\x7FELF" => Some(InputType::Elf),
         b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
         _ => {
-            if &data[..8] == b"!<arch>\x0A" {
+            if bytes_read >= 8 && &header[..8] == b"!<arch>\x0A" {
                 Some(InputType::Archive)
-            } else if is_llvm_ir(data) {
+            } else if is_llvm_ir(&header[..bytes_read]) {
                 Some(InputType::Ir)
             } else {
                 None
