@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, Read, Seek},
+    io::{self, Cursor, Read, Seek, SeekFrom},
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -173,12 +173,12 @@ enum InputReader<'a> {
     },
     Buffer {
         name: &'a str,
-        cursor: io::Cursor<&'a [u8]>,
+        cursor: Cursor<&'a [u8]>,
     },
 }
 
 impl Seek for InputReader<'_> {
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         match self {
             InputReader::File { file, .. } => file.seek(pos),
             InputReader::Buffer { cursor, .. } => cursor.seek(pos),
@@ -453,7 +453,7 @@ impl Linker {
 
                     Ok(InputReader::Buffer {
                         name,
-                        cursor: io::Cursor::new(bytes),
+                        cursor: Cursor::new(bytes),
                     })
                 }
             })
@@ -572,16 +572,18 @@ fn link_reader<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    mut reader: impl Read,
+    mut reader: impl Read + Seek,
     in_type: Option<InputType>,
 ) -> Result<(), LinkerError> {
     let mut data = Vec::new();
+
     let _: usize = reader
         .read_to_end(&mut data)
         .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+
     // in_type is unknown when we're linking an item from an archive file
     let in_type = in_type
-        .or_else(|| detect_input_type(reader.by_ref()))
+        .or_else(|| detect_input_type(&mut Cursor::new(data.as_slice())))
         .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
 
     match in_type {
@@ -880,8 +882,8 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     }
 }
 
-fn detect_input_type(reader: &mut impl Read) -> Option<InputType> {
-    let mut header = [0u8; 16];
+fn detect_input_type(reader: &mut (impl Read + Seek)) -> Option<InputType> {
+    let mut header = [0u8; 8];
     let bytes_read = reader.read(&mut header).ok()?;
 
     if bytes_read < 4 {
@@ -893,9 +895,10 @@ fn detect_input_type(reader: &mut impl Read) -> Option<InputType> {
         b"\x7FELF" => Some(InputType::Elf),
         b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
         _ => {
+            reader.rewind().ok()?;
             if bytes_read >= 8 && &header[..8] == b"!<arch>\x0A" {
                 Some(InputType::Archive)
-            } else if is_llvm_ir(&header[..bytes_read]) {
+            } else if is_llvm_ir(reader)? {
                 Some(InputType::Ir)
             } else {
                 None
@@ -904,9 +907,7 @@ fn detect_input_type(reader: &mut impl Read) -> Option<InputType> {
     }
 }
 
-fn is_llvm_ir(data: &[u8]) -> bool {
-    let trimmed = data.trim_ascii_start();
-
+fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
     let prefixes: &[&[u8]] = &[
         b"; ModuleID",
         b"target triple",
@@ -917,7 +918,28 @@ fn is_llvm_ir(data: &[u8]) -> bool {
         b"!llvm",
     ];
 
-    prefixes.iter().any(|prefix| trimmed.starts_with(prefix))
+    let mut byte = [0u8; 1];
+
+    loop {
+        let bytes_read = reader.read(&mut byte).ok()?;
+        if bytes_read == 0 {
+            // EOF
+            reader.rewind().ok()?;
+            return Some(false);
+        }
+        if !byte[0].is_ascii_whitespace() {
+            break;
+        }
+    }
+
+    // consume the non-whitespace byte
+    let _ = reader.seek(SeekFrom::Current(-1)).ok()?;
+
+    let mut buf = vec![0u8; 17]; // enough for all prefixes 
+    let bytes_read = reader.read(&mut buf).ok()?;
+
+    reader.rewind().ok()?;
+    Some(prefixes.iter().any(|p| buf[..bytes_read].starts_with(p)))
 }
 
 pub struct LinkerOutput {
