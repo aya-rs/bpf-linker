@@ -1,2 +1,11 @@
 [alias]
 xtask = "run --package xtask --"
+
+# On Linux we let clang drive the link so it contributes the right system
+# search paths, then use `-fuse-ld` to force the actual linker (rust-lld).
+[target.'cfg(target_os = "linux")']
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=rust-lld"]
+
+[target.'cfg(target_os = "macos")']
+linker = "rust-lld"
