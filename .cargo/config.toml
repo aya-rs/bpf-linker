@@ -1,2 +1,6 @@
 [alias]
 xtask = "run --package xtask --"
+
+[target.'cfg(all())']
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
