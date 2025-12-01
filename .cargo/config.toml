@@ -1,2 +1,34 @@
 [alias]
 xtask = "run --package xtask --"
+
+# On Linux we let clang drive the link so it contributes the right system
+# search paths.
+#
+# `x86_64-unknown-linux-gnu` target uses rust-lld as a default linker[0][1] and
+# it does so by feeding rust-lld into a C compiler, that is still used as a
+# driver as a part of `gnu-lld-cc` linker flavor (formerly implemented as
+# `-Z gcc-ld=lld` option)[2][3][4].
+#
+# [0] https://blog.rust-lang.org/2025/09/01/rust-lld-on-1.90.0-stable/
+# [1] https://github.com/rust-lang/rust/pull/140525
+# [2] https://github.com/rust-lang/rust/issues/71519
+# [3] https://github.com/rust-lang/rust/pull/85961
+# [4] https://github.com/rust-lang/rust/pull/112910
+[target.'cfg(target_os = "linux")']
+linker = "clang"
+
+# On other Linux targets we use `-fuse-ld` to force the usage of lld, that has
+# to be available in the system. Unfortunately, enabling rust-lld with
+# `-C linker-features=+lld`, `-C linker-flavor=gnu-lld-cc` or
+# `-C link-self-contained=+linker` is not stabilized. Using
+# `-C link-self-contained` (currently stabilized only with all options enabled)
+# does not work, as rustup toolchains do not provide all necessary libraries
+# for Linux targets. Neither does using rust-lld directly due to lack of
+# awarness about system search paths.
+[target.'cfg(all(target_os = "linux", any(not(target_arch = "x86_64"), not(target_env = "gnu"))))']
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# On macOS we can use rust-lld directly without worrying about system search
+# paths.
+[target.'cfg(target_os = "macos")']
+linker = "rust-lld"
