@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+# On Linux we let clang drive the link so it contributes the right system
+# search paths.
+[target.'cfg(target_os = "linux")']
+linker = "clang"
