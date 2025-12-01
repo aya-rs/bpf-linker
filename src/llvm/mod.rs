@@ -154,12 +154,18 @@ pub(crate) fn link_ir_buffer<'ctx>(
             buffer.as_ptr().cast(),
             buffer.len(),
             buffer_name.as_ptr(),
-            1, // LLVM internally sets RequiresTerminator=true
+            // LLVM use the RequiresNullTerminator flag to indicate whether the buffer buffer it's created.
+            // https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/Support/MemoryBuffer.cpp#L48
+            // Then with we ommit the null terminator when creating the buffer, we hit this assertion leading into a bug on LLVM with debug mode.
+            // https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L138
+            1,
         )
     };
 
     let mut temp_module = ptr::null_mut();
     let (ret, message) = Message::with(|error_msg| unsafe {
+        // LLVMParseIRInContext takes ownership of mem_buffer, so we don't need to dispose of it ourselves.
+        // https://github.com/llvm/llvm-project/blob/00276b67d36a665119a6a7b39dbba69f45c44e58/llvm/lib/IRReader/IRReader.cpp#L122
         LLVMParseIRInContext(
             context.as_mut_ptr(),
             mem_buffer,
@@ -172,7 +178,6 @@ pub(crate) fn link_ir_buffer<'ctx>(
         let linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
         Ok(linked)
     } else {
-        unsafe { LLVMDisposeMemoryBuffer(mem_buffer) };
         Err(message.as_string_lossy().to_string())
     }
 }

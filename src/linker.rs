@@ -895,7 +895,6 @@ fn detect_input_type(reader: &mut (impl Read + Seek)) -> Option<InputType> {
         b"\x7FELF" => Some(InputType::Elf),
         b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
         _ => {
-            reader.rewind().ok()?;
             if bytes_read >= 8 && &header[..8] == b"!<arch>\x0A" {
                 Some(InputType::Archive)
             } else if is_llvm_ir(reader)? {
@@ -908,38 +907,74 @@ fn detect_input_type(reader: &mut (impl Read + Seek)) -> Option<InputType> {
 }
 
 fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
-    let prefixes: &[&[u8]] = &[
+    const PREFIXES: &[&[u8]] = &[
         b"; ModuleID",
-        b"target triple",
-        b"target datalayout",
         b"source_filename",
-        b"target ",
-        b"define",
+        b"target datalayout",
+        b"target triple",
+        b"define ",
+        b"declare ",
         b"!llvm",
     ];
 
-    let mut byte = [0u8; 1];
+    const MAX_PREFIX_LEN: usize = 17; // "target datalayout"
+    const BUF_SIZE: usize = 4096;
+
+    // Return to the start of the input since it's passed in a arbitrary position to this function
+    reader
+        .rewind()
+        .inspect_err(|e| error!("failed to rewind reader for LLVM IR detection: {}", e))
+        .ok()?;
+
+    let mut buf = [0u8; BUF_SIZE];
+    let mut prefix = [0u8; MAX_PREFIX_LEN];
+    let mut filled = 0;
+    let mut skipped_whitespace = false;
 
     loop {
-        let bytes_read = reader.read(&mut byte).ok()?;
+        let bytes_read = reader
+            .read(&mut buf)
+            .inspect_err(|e| error!("failed to read for LLVM IR detection: {}", e))
+            .ok()?;
+
         if bytes_read == 0 {
             // EOF
-            reader.rewind().ok()?;
-            return Some(false);
+            break;
         }
-        if !byte[0].is_ascii_whitespace() {
+
+        let chunk = &buf[..bytes_read];
+
+        // Find where content starts (skip leading whitespace)
+        let start = if skipped_whitespace {
+            0
+        } else {
+            match chunk.iter().position(|b| !b.is_ascii_whitespace()) {
+                Some(pos) => {
+                    skipped_whitespace = true;
+                    pos
+                }
+                None => continue, // entire chunk is whitespace
+            }
+        };
+
+        if filled < MAX_PREFIX_LEN {
+            let content = &chunk[start..];
+            let to_copy = content.len().min(MAX_PREFIX_LEN - filled);
+            prefix[filled..filled + to_copy].copy_from_slice(&content[..to_copy]);
+            filled += to_copy;
+        }
+
+        if filled >= MAX_PREFIX_LEN {
             break;
         }
     }
 
-    // consume the non-whitespace byte
-    let _ = reader.seek(SeekFrom::Current(-1)).ok()?;
+    if !skipped_whitespace {
+        return Some(false);
+    }
 
-    let mut buf = vec![0u8; 17]; // enough for all prefixes 
-    let bytes_read = reader.read(&mut buf).ok()?;
-
-    reader.rewind().ok()?;
-    Some(prefixes.iter().any(|p| buf[..bytes_read].starts_with(p)))
+    let slice = &prefix[..filled];
+    Some(PREFIXES.iter().any(|p| slice.starts_with(p)))
 }
 
 pub struct LinkerOutput {
