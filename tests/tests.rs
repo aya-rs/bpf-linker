@@ -84,6 +84,14 @@ where
         .arg("-o")
         .arg(dst.as_ref())
         .arg(src.as_ref())
+        // `LD_LIBRARY_PATH` set to a custom LLVM build might mess up with
+        // clang, if it's dynamically linked to libLLVM that was build with
+        // larger configuration than the custom one, causing errors like:
+        // ```
+        // /usr/bin/clang-21: symbol lookup error: /usr/lib/llvm-21/bin/../lib/libclang-cpp.so.21.1:
+        //   undefined symbol: _ZTIN4llvm5MachO13RecordVisitorE, version
+        // ```
+        .env_remove("LD_LIBRARY_PATH")
         .output()
         .expect("failed to execute clang");
 
