@@ -48,6 +48,21 @@ jobs:
   build:
     # We don't use ubuntu-latest because we care about the apt packages available.
     runs-on: ubuntu-22.04
+    # We work with two git repositories in this workflow:
+    #
+    # - bpf-linker
+    # - aya (for integration tests)
+    #
+    # Cargo searches for `.cargo` directories recursively in all parent
+    # directories. Therefore, nesting different Rust projects with their own
+    # `.cargo/config.toml` files in the same hierarchy (one nested in another)
+    # causes cargo to read and merge both configurations.
+    #
+    # To avoid that, we clone both repositories in separate directories inside
+    # the workspace.
+    defaults:
+      run:
+        working-directory: bpf-linker
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +93,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          path: bpf-linker
 
       - name: Install Rust ${{ matrix.toolchain.rust }}
         uses: dtolnay/rust-toolchain@master
