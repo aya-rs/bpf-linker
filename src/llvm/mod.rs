@@ -142,6 +142,14 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
     linked
 }
 
+/// Links an LLVM IR buffer into the given module.
+///
+/// The buffer must be null-terminated (hence `&CStr`), because LLVM's IR parser
+/// requires `RequiresNullTerminator=1` when creating the memory buffer.
+/// See: https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/Support/MemoryBuffer.cpp#L48
+///
+/// Without the null terminator, LLVM hits an assertion in debug builds:
+/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L138
 pub(crate) fn link_ir_buffer<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
@@ -154,11 +162,7 @@ pub(crate) fn link_ir_buffer<'ctx>(
             buffer.as_ptr().cast(),
             buffer.len(),
             buffer_name.as_ptr(),
-            // LLVM use the RequiresNullTerminator flag to indicate whether the buffer buffer it's created.
-            // https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/Support/MemoryBuffer.cpp#L48
-            // Then with we ommit the null terminator when creating the buffer, we hit this assertion leading into a bug on LLVM with debug mode.
-            // https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L138
-            1,
+            1, // RequiresNullTerminator - see doc comment above
         )
     };
 

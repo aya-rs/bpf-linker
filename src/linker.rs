@@ -43,6 +43,10 @@ pub enum LinkerError {
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
 
+    /// Linking an IR module failed.
+    #[error("failure linking IR module `{0}`: {1}")]
+    LinkIrModuleError(PathBuf, String),
+
     /// Linking a module included in an archive failed.
     #[error("failure linking module {1} from {0}")]
     LinkArchiveModuleError(PathBuf, PathBuf),
@@ -517,6 +521,7 @@ where
         };
 
         let in_type = detect_input_type(&mut input)
+            .map_err(|e| LinkerError::IoError(path.clone(), e))?
             .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         input
@@ -582,9 +587,12 @@ fn link_reader<'ctx>(
         .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
 
     // in_type is unknown when we're linking an item from an archive file
-    let in_type = in_type
-        .or_else(|| detect_input_type(&mut Cursor::new(data.as_slice())))
-        .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
+    let in_type = match in_type {
+        Some(ty) => ty,
+        None => detect_input_type(&mut reader)
+            .map_err(|e| LinkerError::IoError(path.to_owned(), e))?
+            .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?,
+    };
 
     match in_type {
         InputType::Bitcode => {
@@ -595,7 +603,7 @@ fn link_reader<'ctx>(
         InputType::Ir => {
             let data = CString::new(data).unwrap();
             if !llvm::link_ir_buffer(context, module, &data)
-                .map_err(|_| LinkerError::LinkModuleError(path.to_owned()))?
+                .map_err(|e| LinkerError::LinkIrModuleError(path.to_owned(), e))?
             {
                 return Err(LinkerError::LinkModuleError(path.to_owned()));
             }
@@ -882,31 +890,31 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     }
 }
 
-fn detect_input_type(reader: &mut (impl Read + Seek)) -> Option<InputType> {
+fn detect_input_type(reader: &mut (impl Read + Seek)) -> Result<Option<InputType>, io::Error> {
     let mut header = [0u8; 8];
-    let bytes_read = reader.read(&mut header).ok()?;
+    let bytes_read = reader.read(&mut header)?;
 
     if bytes_read < 4 {
-        return None;
+        return Ok(None);
     }
 
     match &header[..4] {
-        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
-        b"\x7FELF" => Some(InputType::Elf),
-        b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
+        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Ok(Some(InputType::Bitcode)),
+        b"\x7FELF" => Ok(Some(InputType::Elf)),
+        b"\xcf\xfa\xed\xfe" => Ok(Some(InputType::MachO)),
         _ => {
             if bytes_read >= 8 && &header[..8] == b"!<arch>\x0A" {
-                Some(InputType::Archive)
+                Ok(Some(InputType::Archive))
             } else if is_llvm_ir(reader)? {
-                Some(InputType::Ir)
+                Ok(Some(InputType::Ir))
             } else {
-                None
+                Ok(None)
             }
         }
     }
 }
 
-fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
+fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Result<bool, io::Error> {
     const PREFIXES: &[&[u8]] = &[
         b"; ModuleID",
         b"source_filename",
@@ -920,11 +928,8 @@ fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
     const MAX_PREFIX_LEN: usize = 17; // "target datalayout"
     const BUF_SIZE: usize = 4096;
 
-    // Return to the start of the input since it's passed in a arbitrary position to this function
-    reader
-        .rewind()
-        .inspect_err(|e| error!("failed to rewind reader for LLVM IR detection: {}", e))
-        .ok()?;
+    // Return to the start of the input since it's passed in an arbitrary position to this function
+    reader.rewind()?;
 
     let mut buf = [0u8; BUF_SIZE];
     let mut prefix = [0u8; MAX_PREFIX_LEN];
@@ -932,10 +937,7 @@ fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
     let mut skipped_whitespace = false;
 
     loop {
-        let bytes_read = reader
-            .read(&mut buf)
-            .inspect_err(|e| error!("failed to read for LLVM IR detection: {}", e))
-            .ok()?;
+        let bytes_read = reader.read(&mut buf)?;
 
         if bytes_read == 0 {
             // EOF
@@ -970,11 +972,11 @@ fn is_llvm_ir(reader: &mut (impl Read + Seek)) -> Option<bool> {
     }
 
     if !skipped_whitespace {
-        return Some(false);
+        return Ok(false);
     }
 
     let slice = &prefix[..filled];
-    Some(PREFIXES.iter().any(|p| slice.starts_with(p)))
+    Ok(PREFIXES.iter().any(|p| slice.starts_with(p)))
 }
 
 pub struct LinkerOutput {
