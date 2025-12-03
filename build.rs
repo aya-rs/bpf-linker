@@ -50,29 +50,31 @@ enum Cxxstdlibs<'a> {
 
 impl Cxxstdlibs<'_> {
     /// Detects which standard C++ library to link.
-    fn new() -> Self {
-        match env::var_os("CXXSTDLIB") {
-            Some(cxxstdlib) => Self::EnvVar(cxxstdlib),
+    fn new(stdout: &mut io::StdoutLock<'_>) -> anyhow::Result<Self> {
+        const CXXSTDLIB: &str = "CXXSTDLIB";
+        writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
+        match env::var_os(CXXSTDLIB) {
+            Some(cxxstdlib) => Ok(Self::EnvVar(cxxstdlib)),
             None => {
                 if cfg!(target_os = "linux") {
                     // Default to GNU libstdc++ on Linux. Can be overwritten through
                     // `CXXSTDLIB` variable on distributions using LLVM as default
                     // toolchain.
-                    Self::Single(b"stdc++")
+                    Ok(Self::Single(b"stdc++"))
                 } else if cfg!(target_os = "macos") {
                     // Default to LLVM libc++ on macOS, where LLVM is the default
                     // toolchain.
                     if cfg!(feature = "llvm-link-static") {
                         // Static LLVM libc++ has two files - libc++.a and libc++abi.a.
-                        Self::Multiple(&[b"c++", b"c++abi"])
+                        Ok(Self::Multiple(&[b"c++", b"c++abi"]))
                     } else {
                         // Shared LLVM libc++ has one file.
-                        Self::Single(b"c++")
+                        Ok(Self::Single(b"c++"))
                     }
                 } else {
                     // Fall back to GNU libstdc++ on all other platforms. Again,
                     // can be overwritten through `CXXSTDLIB`.
-                    Self::Single(b"stdc++")
+                    Ok(Self::Single(b"stdc++"))
                 }
             }
         }
@@ -158,6 +160,7 @@ fn emit_search_path_if_defined(
     stdout: &mut io::StdoutLock<'_>,
     env_var: &str,
 ) -> anyhow::Result<bool> {
+    writeln!(stdout, "cargo:rerun-if-env-changed={env_var}")?;
     match env::var_os(env_var) {
         Some(path) => {
             write_bytes!(
@@ -257,7 +260,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         }
     }
 
-    let cxxstdlibs = Cxxstdlibs::new();
+    let cxxstdlibs = Cxxstdlibs::new(stdout)?;
 
     // Find directories with static libraries we're interested in:
     // - C++ standard library
@@ -286,12 +289,15 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
             var: Option<&str>,
         ) -> anyhow::Result<Option<(Cow<'a, OsStr>, Vec<u8>)>> {
             let maybe_cc = match var {
-                Some(var) => match env::var_os(var).map(Cow::Owned) {
-                    Some(var) => var,
-                    // If the environment variable is not defined, proceed with
-                    // the next candidate.
-                    None => return Ok(None),
-                },
+                Some(var) => {
+                    writeln!(stdout, "cargo:rerun-if-env-changed={var}")?;
+                    match env::var_os(var).map(Cow::Owned) {
+                        Some(var) => var,
+                        // If the environment variable is not defined, proceed with
+                        // the next candidate.
+                        None => return Ok(None),
+                    }
+                }
                 // Use `cc` as the last option. Pretty much all UNIX-like operating
                 // systems provide `/usr/bin/cc` as a symlink to the default
                 // compiler (either clang or gcc).
@@ -584,6 +590,8 @@ fn main() -> anyhow::Result<()> {
     // lives.
     const LLVM_PREFIX: &str = "LLVM_PREFIX";
     const PATH: &str = "PATH";
+    writeln!(stdout, "cargo:rerun-if-env-changed={LLVM_PREFIX}")?;
+    writeln!(stdout, "cargo:rerun-if-env-changed={PATH}")?;
     let (var_name, paths_os) = env::var_os(LLVM_PREFIX)
         .map(|mut p| {
             p.push("/bin");
