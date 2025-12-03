@@ -68,3 +68,7 @@ jobs:
       - name: Report disk usage
         if: ${{ always() }}
         uses: ./.github/actions/report-disk-usage
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
