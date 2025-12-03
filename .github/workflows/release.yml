@@ -24,9 +24,19 @@ jobs:
             target: aarch64-unknown-linux-musl
     env:
       RUST_CI_LLVM_INSTALL_DIR: /tmp/rustc-llvm
+      SYSROOT_DIR: /tmp/sysroot
     steps:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
+
+      - name: Prepare sysroot
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          mkdir -p $SYSROOT_DIR
+          wget -q -O - $(cargo xtask musl-sysroot-url) | \
+            tar -xJ -C $SYSROOT_DIR --xattrs-include='*.*' --numeric-owner --wildcards './usr/lib/*'
+          echo "CXXSTDLIB_PATH=$(dirname $(find $SYSROOT_DIR -name libstdc++.a))" >> $GITHUB_ENV
 
       - name: Install prerequisites
         if: runner.os == 'macOS'
@@ -55,9 +65,15 @@ jobs:
           bin: bpf-linker
           features: llvm-21,llvm-link-static
           no-default-features: true
+          target: ${{ matrix.platform.target }}
+          # Use vanilla cargo instead of cross-rs, even though we specify
+          # targets explicitly.
+          build-tool: cargo
           dry-run: ${{ github.event_name != 'release' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Link libc and C runtime statically.
+          RUSTFLAGS: -C target-feature=+crt-static
 
       - name: Report disk usage
         if: ${{ always() }}
