@@ -37,6 +37,8 @@ macro_rules! write_bytes {
     };
 }
 
+const CXXSTDLIB: &str = "CXXSTDLIB";
+
 enum Cxxstdlibs<'a> {
     EnvVar(OsString),
     Single(&'static [u8]),
@@ -46,7 +48,7 @@ enum Cxxstdlibs<'a> {
 impl Cxxstdlibs<'_> {
     /// Detects which standard C++ library to link.
     fn new() -> Self {
-        match env::var_os("CXXSTDLIB") {
+        match env::var_os(CXXSTDLIB) {
             Some(cxxstdlib) => Self::EnvVar(cxxstdlib),
             None => {
                 if cfg!(target_os = "linux") {
@@ -144,6 +146,7 @@ fn emit_search_path_if_defined(
     stdout: &mut io::StdoutLock<'_>,
     env_var: &str,
 ) -> anyhow::Result<bool> {
+    writeln!(stdout, "cargo:rerun-if-env-changed={env_var}")?;
     match env::var_os(env_var) {
         Some(path) => {
             write_bytes!(
@@ -243,6 +246,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         }
     }
 
+    writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
     let cxxstdlibs = Cxxstdlibs::new();
 
     // Find directories with static libraries we're interested in:
@@ -265,6 +269,8 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         // `-print-search-dirs` option.
         const CC: &str = "CC";
         const RUSTC_LINKER: &str = "RUSTC_LINKER";
+        writeln!(stdout, "cargo:rerun-if-env-changed={CC}")?;
+        writeln!(stdout, "cargo:rerun-if-env-changed={RUSTC_LINKER}")?;
         /// Executes `maybe_cc` with `-print-search-dirs` argument. On success,
         /// returns the output.
         fn print_search_dirs<'a>(
@@ -532,6 +538,8 @@ fn main() -> anyhow::Result<()> {
     // lives.
     const LLVM_PREFIX: &str = "LLVM_PREFIX";
     const PATH: &str = "PATH";
+    writeln!(stdout, "cargo:rerun-if-env-changed={LLVM_PREFIX}")?;
+    writeln!(stdout, "cargo:rerun-if-env-changed={PATH}")?;
     let (var_name, paths_os) = env::var_os(LLVM_PREFIX)
         .map(|mut p| {
             p.push("/bin");
