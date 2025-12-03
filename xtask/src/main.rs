@@ -70,6 +70,9 @@ enum XtaskSubcommand {
     BuildStd(BuildStd),
     /// Manages and builds LLVM.
     BuildLlvm(BuildLlvm),
+    /// Finds the full URL of a musl-based sysroot that contains necessary
+    /// system libraries for static linking.
+    MuslSysrootUrl,
     /// Finds the commit in github.com/rust-lang/rust that can be used for
     /// downloading LLVM for the current Rust toolchain.
     RustcLlvmCommit(RustcLlvmCommitOptions),
@@ -202,6 +205,53 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
     Ok(())
 }
 
+fn musl_sysroot_url() -> Result<()> {
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else {
+        anyhow::bail!("unsupported architecture: {}", env::consts::ARCH);
+    };
+    let base_url = format!(
+        "https://distfiles.gentoo.org/releases/{arch}/autobuilds/current-stage3-{arch}-musl"
+    );
+    let latest_file = format!("latest-stage3-{arch}-musl.txt");
+
+    // Parse the the `latest-*.txt` file that contains the full tarball name.
+    let latest_url = format!("{base_url}/{latest_file}");
+    let content = reqwest::blocking::get(&latest_url)
+        .with_context(|| format!("failed to fetch latest version info from {latest_url}"))?
+        .text()
+        .with_context(|| format!("failed to read response text from {latest_url}"))?;
+    let re = regex::Regex::new(r"^(stage3-[a-z0-9]+-musl-[^.]+\.tar\.xz) +[0-9]+$")
+        .expect("could not compile the regular expression");
+    let tarballs: Vec<_> = content
+        .lines()
+        .filter_map(|line| {
+            re.captures(line).map(|cap| {
+                let (_, [tarball]): (&str, [&str; 1]) = cap.extract();
+                tarball
+            })
+        })
+        .collect();
+    let tarball = match tarballs.as_slice() {
+        [] => {
+            anyhow::bail!("could not find stage3 tarball filename in {latest_url}: {content}");
+        }
+        [tarball] => tarball,
+        tarballs => {
+            anyhow::bail!(
+                "found multiple stage3 tarball filenames in {latest_url}: {tarballs:?}: {content}"
+            );
+        }
+    };
+
+    println!("{base_url}/{tarball}");
+
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct SearchIssuesResponse {
     items: Vec<IssueItem>,
@@ -329,6 +379,7 @@ fn main() -> Result<()> {
     match subcommand {
         XtaskSubcommand::BuildStd(options) => build_std(options),
         XtaskSubcommand::BuildLlvm(options) => build_llvm(options),
+        XtaskSubcommand::MuslSysrootUrl => musl_sysroot_url(),
         XtaskSubcommand::RustcLlvmCommit(options) => rustc_llvm_commit(options),
     }
 }
