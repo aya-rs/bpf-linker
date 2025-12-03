@@ -36,6 +36,7 @@ jobs:
         #
         # We install llvm package only for libc++.
         run: |
+          set -euxo pipefail
           brew install llvm zlib
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
