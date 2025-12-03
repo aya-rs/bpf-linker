@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString, OsStr},
     fs::File,
-    io::{self, Read, Seek},
+    io::{self, Read as _},
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -15,6 +15,7 @@ use llvm_sys::{
     error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
     target_machine::LLVMCodeGenFileType,
 };
+use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -142,56 +143,18 @@ pub enum OptLevel {
     SizeMin,
 }
 
-pub struct FileInput<'a> {
-    path: &'a Path,
-}
-
-pub struct BufferInput<'a> {
-    name: &'a str,
-    bytes: &'a [u8],
-}
-
 pub enum LinkerInput<'a> {
-    File(FileInput<'a>),
-    Buffer(BufferInput<'a>),
+    File { path: &'a Path },
+    Buffer { name: &'a str, bytes: &'a [u8] },
 }
 
 impl<'a> LinkerInput<'a> {
     pub fn new_from_file(path: &'a Path) -> Self {
-        LinkerInput::File(FileInput { path })
+        LinkerInput::File { path }
     }
 
     pub fn new_from_buffer(name: &'a str, bytes: &'a [u8]) -> Self {
-        LinkerInput::Buffer(BufferInput { name, bytes })
-    }
-}
-
-enum InputReader<'a> {
-    File {
-        path: &'a Path,
-        file: File,
-    },
-    Buffer {
-        name: &'a str,
-        cursor: io::Cursor<&'a [u8]>,
-    },
-}
-
-impl Seek for InputReader<'_> {
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        match self {
-            InputReader::File { file, .. } => file.seek(pos),
-            InputReader::Buffer { cursor, .. } => cursor.seek(pos),
-        }
-    }
-}
-
-impl Read for InputReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            InputReader::File { file, .. } => file.read(buf),
-            InputReader::Buffer { cursor, .. } => cursor.read(buf),
-        }
+        LinkerInput::Buffer { name, bytes }
     }
 }
 
@@ -435,27 +398,6 @@ impl Linker {
             ..
         } = self;
 
-        let inputs = inputs
-            .into_iter()
-            .map(|value| match value {
-                LinkerInput::File(file_input) => {
-                    let FileInput { path } = file_input;
-
-                    let file = File::open(path)
-                        .map_err(|err| LinkerError::IoError(path.to_owned(), err))?;
-                    Ok(InputReader::File { path, file })
-                }
-                LinkerInput::Buffer(buffer_input) => {
-                    let BufferInput { name, bytes } = buffer_input;
-
-                    Ok(InputReader::Buffer {
-                        name,
-                        cursor: io::Cursor::new(bytes),
-                    })
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
         let mut module = link_modules(context, inputs)?;
 
         let target_machine = create_target_machine(options, &module)?;
@@ -501,67 +443,91 @@ fn link_modules<'ctx, 'i, I>(
     inputs: I,
 ) -> Result<LLVMModule<'ctx>, LinkerError>
 where
-    I: IntoIterator<Item = InputReader<'i>>,
+    I: IntoIterator<Item = LinkerInput<'i>>,
 {
     let mut module = context
         .create_module(c"linked_module")
         .ok_or(LinkerError::CreateModuleError)?;
 
-    // buffer used to perform file type detection
-    let mut buf = [0u8; 8];
-    for mut input in inputs {
-        let path = match input {
-            InputReader::File { path, .. } => path.into(),
-            InputReader::Buffer { name, .. } => PathBuf::from(format!("in_memory::{}", name)),
+    let mut buf = Vec::new();
+    for input in inputs {
+        let mmap: Mmap;
+        let (path, data) = match input {
+            LinkerInput::File { path } => {
+                let file =
+                    File::open(path).map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+                mmap = unsafe {
+                    MmapOptions::new()
+                        .map(&file)
+                        .map_err(|e| LinkerError::IoError(path.to_owned(), e))?
+                };
+                (path.to_owned(), mmap.as_ref())
+            }
+            LinkerInput::Buffer { name, bytes } => {
+                (PathBuf::from(format!("in_memory::{}", name)), bytes)
+            }
         };
 
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
         // or an invalid file
-        input
-            .read_exact(&mut buf)
-            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
-        input
-            .rewind()
-            .map_err(|e| LinkerError::IoError(path.clone(), e))?;
         let in_type =
-            detect_input_type(&buf).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+            detect_input_type(data).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
             InputType::Archive => {
                 info!("linking archive {}", path.display());
 
                 // Extract the archive and call link_reader() for each item.
-                let mut archive = Archive::new(input);
-                while let Some(Ok(item)) = archive.next_entry() {
+                let mut archive = Archive::new(data);
+                while let Some(item) = archive.next_entry() {
+                    let mut item = item.map_err(|e| LinkerError::IoError(path.clone(), e))?;
                     let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
                     info!("linking archive item {}", name.display());
 
-                    match link_reader(context, &mut module, &name, item, None) {
-                        Ok(_) => continue,
-                        Err(LinkerError::InvalidInputType(_)) => {
+                    buf.clear();
+                    let _: usize = item
+                        .read_to_end(&mut buf)
+                        .map_err(|e| LinkerError::IoError(name.to_owned(), e))?;
+                    let in_type = match detect_input_type(&buf) {
+                        Some(in_type) => in_type,
+                        None => {
                             info!("ignoring archive item {}: invalid type", name.display());
                             continue;
                         }
-                        Err(LinkerError::MissingBitcodeSection(_)) => {
+                    };
+
+                    match link_data(context, &mut module, &name, &buf, in_type) {
+                        Ok(()) => continue,
+                        Err(LinkerError::InvalidInputType(name)) => {
+                            info!("ignoring archive item {}: invalid type", name.display());
+                            continue;
+                        }
+                        Err(LinkerError::MissingBitcodeSection(name)) => {
                             warn!(
                                 "ignoring archive item {}: no embedded bitcode",
                                 name.display()
                             );
                             continue;
                         }
-                        Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
+                        // TODO: this discards the underlying error.
+                        Err(_) => {
+                            return Err(LinkerError::LinkArchiveModuleError(
+                                path.to_owned(),
+                                name.to_owned(),
+                            ));
+                        }
                     };
                 }
             }
             ty => {
                 info!("linking file {} type {}", path.display(), ty);
-                match link_reader(context, &mut module, &path, input, Some(ty)) {
-                    Ok(_) => {}
-                    Err(LinkerError::InvalidInputType(_)) => {
+                match link_data(context, &mut module, &path, data, ty) {
+                    Ok(()) => {}
+                    Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
                         continue;
                     }
-                    Err(LinkerError::MissingBitcodeSection(_)) => {
+                    Err(LinkerError::MissingBitcodeSection(path)) => {
                         warn!("ignoring file {}: no embedded bitcode", path.display());
                     }
                     Err(err) => return Err(err),
@@ -573,27 +539,17 @@ where
     Ok(module)
 }
 
-// link in a `Read`-er, which can be a file or an archive item
-fn link_reader<'ctx>(
+fn link_data<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    mut reader: impl Read,
-    in_type: Option<InputType>,
+    data: &[u8],
+    in_type: InputType,
 ) -> Result<(), LinkerError> {
-    let mut data = Vec::new();
-    let _: usize = reader
-        .read_to_end(&mut data)
-        .map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
-    // in_type is unknown when we're linking an item from an archive file
-    let in_type = in_type
-        .or_else(|| detect_input_type(&data))
-        .ok_or_else(|| LinkerError::InvalidInputType(path.to_owned()))?;
-
     let bitcode = match in_type {
-        InputType::Bitcode => data,
-        InputType::Elf => match llvm::find_embedded_bitcode(context, &data) {
-            Ok(Some(bitcode)) => bitcode,
+        InputType::Bitcode => Cow::Borrowed(data),
+        InputType::Elf => match llvm::find_embedded_bitcode(context, data) {
+            Ok(Some(bitcode)) => Cow::Owned(bitcode),
             Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
             Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
         },
