@@ -528,22 +528,25 @@ where
 
         match in_type {
             InputType::Archive => {
-                info!("linking archive {:?}", path);
+                info!("linking archive {}", path.display());
 
                 // Extract the archive and call link_reader() for each item.
                 let mut archive = Archive::new(input);
                 while let Some(Ok(item)) = archive.next_entry() {
                     let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
-                    info!("linking archive item {:?}", name);
+                    info!("linking archive item {}", name.display());
 
                     match link_reader(context, &mut module, &name, item, None) {
                         Ok(_) => continue,
                         Err(LinkerError::InvalidInputType(_)) => {
-                            info!("ignoring archive item {:?}: invalid type", name);
+                            info!("ignoring archive item {}: invalid type", name.display());
                             continue;
                         }
                         Err(LinkerError::MissingBitcodeSection(_)) => {
-                            warn!("ignoring archive item {:?}: no embedded bitcode", name);
+                            warn!(
+                                "ignoring archive item {}: no embedded bitcode",
+                                name.display()
+                            );
                             continue;
                         }
                         Err(_) => return Err(LinkerError::LinkArchiveModuleError(path, name)),
@@ -551,15 +554,15 @@ where
                 }
             }
             ty => {
-                info!("linking file {:?} type {}", path, ty);
+                info!("linking file {} type {}", path.display(), ty);
                 match link_reader(context, &mut module, &path, input, Some(ty)) {
                     Ok(_) => {}
                     Err(LinkerError::InvalidInputType(_)) => {
-                        info!("ignoring file {:?}: invalid type", path);
+                        info!("ignoring file {}: invalid type", path.display());
                         continue;
                     }
                     Err(LinkerError::MissingBitcodeSection(_)) => {
-                        warn!("ignoring file {:?}: no embedded bitcode", path);
+                        warn!("ignoring file {}: no embedded bitcode", path.display());
                     }
                     Err(err) => return Err(err),
                 }
@@ -644,8 +647,8 @@ fn create_target_machine(
             } else {
                 // case 3.
                 info!(
-                    "detected non-bpf input target {:?} and no explicit output --target specified, selecting `bpf'",
-                    c_triple
+                    "detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'",
+                    OsStr::from_bytes(c_triple.to_bytes()).display()
                 );
                 let c_triple = c"bpf";
                 (c_triple, llvm::target_from_triple(c_triple))
