@@ -55,9 +55,15 @@ jobs:
           bin: bpf-linker
           features: llvm-21,llvm-link-static
           no-default-features: true
+          target: ${{ matrix.platform.target }}
+          # Use vanilla cargo instead of cross-rs, even though we specify
+          # targets explicitly.
+          build-tool: cargo
           dry-run: ${{ github.event_name != 'release' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Link libc and C runtime statically.
+          RUSTFLAGS: -C target-feature=+crt-static
 
       - name: Report disk usage
         if: ${{ always() }}
