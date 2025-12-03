@@ -313,6 +313,15 @@ jobs:
         run: |
           echo "${RUSTC_LLVM_INSTALL_DIR_STATIC}/bin" >> $GITHUB_PATH
 
+      - name: Prepare sysroot
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          mkdir -p $SYSROOT_DIR
+          wget -q -O - $(cargo xtask musl-sysroot-url) | \
+            tar -xJ -C $SYSROOT_DIR --xattrs-include='*.*' --numeric-owner --wildcards './usr/lib/*'
+          echo "CXXSTDLIB_PATH=$(dirname $(find $SYSROOT_DIR -name libstdc++.a))" >> $GITHUB_ENV
+
       - name: Install static libraries (macOS)
         if: runner.os == 'macOS'
         # macOS does not provide any static libraries. Homebrew does provide
@@ -337,24 +346,31 @@ jobs:
         # (multiple builds) increases the disk usage massively. Therefore we
         # perform all static builds with only one fixed feature set.
         run: |
-          cargo check --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          set -euxo pipefail
+          # Link libc and C runtime statically.
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+          cargo check --no-default-features \
+           --features ${{ env.LLVM_FEATURES_STATIC }} \
+           --target ${{ matrix.platform.static-target }}
 
       - name: Build (static linking, single feature set)
         run: |
-          cargo build --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          cargo build --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
 
       - name: Test (sysroot built on demand, static linking)
         run: |
-          RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          RUSTC_BOOTSTRAP=1 cargo test --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
 
       - name: Test (prebuilt BPF standard library, static linking)
         run: |
           BPFEL_SYSROOT_DIR="${{ github.workspace }}/bpf-sysroot" \
-            cargo test --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+            cargo test --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
 
       - name: Report disk usage
         if: ${{ always() }}
