@@ -37,6 +37,7 @@ llvm-sys-21 = { package = "llvm-sys", features = [
     "no-llvm-linking",
 ], version = "211.0.0", optional = true }
 log = { version = "0.4.27" }
+memmap2 = { version = "0.9.5" }
 thiserror = { version = "2.0.12" }
 tracing = "0.1"
 
