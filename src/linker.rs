@@ -15,6 +15,7 @@ use llvm_sys::{
     error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
     target_machine::LLVMCodeGenFileType,
 };
+use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -449,10 +450,16 @@ where
 
     let mut buf = Vec::new();
     for input in inputs {
-        let data: Vec<u8>;
+        let data: Mmap;
         let (path, input) = match input {
             LinkerInput::File { path } => {
-                data = fs::read(path).map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+                let file =
+                    fs::File::open(path).map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+                data = unsafe {
+                    MmapOptions::new()
+                        .map(&file)
+                        .map_err(|e| LinkerError::IoError(path.to_owned(), e))?
+                };
                 (path.to_owned(), data.as_ref())
             }
             LinkerInput::Buffer { name, bytes } => {
