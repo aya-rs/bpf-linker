@@ -119,6 +119,7 @@ jobs:
       LLVM_EXCLUDE_FEATURES_DYNAMIC: llvm-link-static,no-llvm-linking
       RUSTC_LLVM_INSTALL_DIR_DYNAMIC: /tmp/rustc-llvm-dynamic
       RUSTC_LLVM_INSTALL_DIR_STATIC: /tmp/rustc-llvm-static
+      SYSROOT_DIR: /tmp/sysroot
 
     steps:
       - uses: actions/checkout@v6
@@ -130,6 +131,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain.rust }}
           components: rust-src
+          targets: ${{ matrix.platform.static-target }}
 
       - name: Check (default features, no system LLVM)
         run: cargo check
@@ -313,6 +315,15 @@ jobs:
         run: |
           echo "${RUSTC_LLVM_INSTALL_DIR_STATIC}/bin" >> $GITHUB_PATH
 
+      - name: Prepare sysroot
+        if: runner.os == 'Linux' && matrix.llvm-from == 'rust-ci'
+        run: |
+          set -euxo pipefail
+          mkdir -p $SYSROOT_DIR
+          wget -q -O - $(cargo xtask musl-sysroot-url) | \
+            tar -xJ -C $SYSROOT_DIR --xattrs-include='*.*' --numeric-owner --wildcards './usr/lib/*'
+          echo "CXXSTDLIB_PATH=$(dirname $(find $SYSROOT_DIR -name libstdc++.a))" >> $GITHUB_ENV
+
       - name: Install static libraries (macOS)
         if: runner.os == 'macOS'
         # macOS does not provide any static libraries. Homebrew does provide
@@ -333,28 +344,65 @@ jobs:
           fi
 
       - name: Check (static linking, single feature set)
+        # LLVM from APT is dynamically linked against glibc, so when used with
+        # musl it causes link errors (libLLVM contains undefined glibc symbols).
+        # To build fully static binaries, LLVM from the `*-musl` Rust CI
+        # tarballs must be used instead.
+        if: ${{ runner.os != 'Linux' || matrix.llvm-from == 'rust-ci' }}
         # Static linking in combination with `cargo hack --feature-powerset`
         # (multiple builds) increases the disk usage massively. Therefore we
         # perform all static builds with only one fixed feature set.
         run: |
-          cargo check --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          set -euxo pipefail
+          # Link libc and C runtime statically.
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+          cargo check --no-default-features \
+           --features ${{ env.LLVM_FEATURES_STATIC }} \
+           --target ${{ matrix.platform.static-target }}
 
       - name: Build (static linking, single feature set)
+        if: ${{ runner.os != 'Linux' || matrix.llvm-from == 'rust-ci' }}
         run: |
-          cargo build --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          cargo build --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
+
+      - name: Check whether the binary is fully static
+        if: ${{ runner.os == 'Linux' && matrix.llvm-from == 'rust-ci' }}
+        run: |
+          set -euxo pipefail
+          bin="target/${{ matrix.platform.static-target }}/debug/bpf-linker"
+          if readelf -l "$bin" | grep -q INTERP || \
+            readelf -d "$bin" | grep -q '(NEEDED)'; then
+            echo "ERROR: $bin is NOT fully static (has runtime dependencies)"
+            exit 1
+          fi
+
+      - name: Check whether the binary is fully static
+        if: runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          bin="target/${{ matrix.platform.static-target }}/debug/bpf-linker"
+          if objdump --macho --load-commands "$bin" \
+            | grep -E -q "LC_LOAD_DYLIB|LC_LOAD_DYLINKER"; then
+              echo "ERROR: $bin is NOT fully static (has runtime dependencies)"
+              exit 1
+          fi
 
       - name: Test (sysroot built on demand, static linking)
+        if: ${{ runner.os != 'Linux' || matrix.llvm-from == 'rust-ci' }}
         run: |
-          RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+          RUSTC_BOOTSTRAP=1 cargo test --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
 
       - name: Test (prebuilt BPF standard library, static linking)
+        if: ${{ runner.os != 'Linux' || matrix.llvm-from == 'rust-ci' }}
         run: |
           BPFEL_SYSROOT_DIR="${{ github.workspace }}/bpf-sysroot" \
-            cargo test --no-default-features --features \
-            ${{ env.LLVM_FEATURES_STATIC }}
+            cargo test --no-default-features \
+            --features ${{ env.LLVM_FEATURES_STATIC }} \
+            --target ${{ matrix.platform.static-target }}
 
       - name: Report disk usage
         if: ${{ always() }}

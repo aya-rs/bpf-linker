@@ -37,6 +37,8 @@ macro_rules! write_bytes {
     };
 }
 
+const CXXSTDLIB: &str = "CXXSTDLIB";
+
 enum Cxxstdlibs<'a> {
     EnvVar(OsString),
     Single(&'static [u8]),
@@ -46,7 +48,7 @@ enum Cxxstdlibs<'a> {
 impl Cxxstdlibs<'_> {
     /// Detects which standard C++ library to link.
     fn new() -> Self {
-        match env::var_os("CXXSTDLIB") {
+        match env::var_os(CXXSTDLIB) {
             Some(cxxstdlib) => Self::EnvVar(cxxstdlib),
             None => {
                 if cfg!(target_os = "linux") {
@@ -144,6 +146,7 @@ fn emit_search_path_if_defined(
     stdout: &mut io::StdoutLock<'_>,
     env_var: &str,
 ) -> anyhow::Result<bool> {
+    writeln!(stdout, "cargo:rerun-if-env-changed={env_var}")?;
     match env::var_os(env_var) {
         Some(path) => {
             write_bytes!(
@@ -243,6 +246,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         }
     }
 
+    writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
     let cxxstdlibs = Cxxstdlibs::new();
 
     // Find directories with static libraries we're interested in:
@@ -272,12 +276,15 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
             var: Option<&str>,
         ) -> anyhow::Result<Option<(Cow<'a, OsStr>, Vec<u8>)>> {
             let maybe_cc = match var {
-                Some(var) => match env::var_os(var).map(Cow::Owned) {
-                    Some(var) => var,
-                    // If the environment variable is not defined, proceed with
-                    // the next candidate.
-                    None => return Ok(None),
-                },
+                Some(var) => {
+                    writeln!(stdout, "cargo:rerun-if-env-changed={var}")?;
+                    match env::var_os(var).map(Cow::Owned) {
+                        Some(var) => var,
+                        // If the environment variable is not defined, proceed with
+                        // the next candidate.
+                        None => return Ok(None),
+                    }
+                }
                 // Use `cc` as the last option. Pretty much all UNIX-like operating
                 // systems provide `/usr/bin/cc` as a symlink to the default
                 // compiler (either clang or gcc).
@@ -532,6 +539,8 @@ fn main() -> anyhow::Result<()> {
     // lives.
     const LLVM_PREFIX: &str = "LLVM_PREFIX";
     const PATH: &str = "PATH";
+    writeln!(stdout, "cargo:rerun-if-env-changed={LLVM_PREFIX}")?;
+    writeln!(stdout, "cargo:rerun-if-env-changed={PATH}")?;
     let (var_name, paths_os) = env::var_os(LLVM_PREFIX)
         .map(|mut p| {
             p.push("/bin");
