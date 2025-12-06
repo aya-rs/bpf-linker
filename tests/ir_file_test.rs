@@ -1,18 +1,11 @@
 #![expect(unused_crate_dependencies, reason = "used in lib/bin")]
 
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::ffi::CString;
 
-fn linker_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bpf-linker"))
-}
+use bpf_linker::{Linker, LinkerInput, LinkerOptions, OutputType};
 
-fn create_test_ir_file(dir: &Path, name: &str) -> PathBuf {
-    let ir_path = dir.join(format!("{}.ll", name));
-    let ir_content = format!(
+fn create_test_ir_content(name: &str) -> String {
+    format!(
         r#"; ModuleID = '{name}'
 source_filename = "{name}"
 target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128"
@@ -29,72 +22,79 @@ attributes #0 = {{ noinline nounwind optnone }}
 !llvm.module.flags = !{{!0}}
 !0 = !{{i32 1, !"wchar_size", i32 4}}
 "#
-    );
-    fs::write(&ir_path, ir_content).expect("Failed to write test IR file");
-    ir_path
+    )
 }
 
 #[test]
 fn test_link_ir_file() {
-    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let ir_file = create_test_ir_file(temp_dir.path(), "alessandro");
-    let output_file = temp_dir.path().join("output.o");
+    let ir_content = create_test_ir_content("alessandro");
 
-    let output = Command::new(linker_path())
-        .arg("--export")
-        .arg(format!("test_{}", "alessandro"))
-        .arg(&ir_file)
-        .arg("-o")
-        .arg(&output_file)
-        .output()
-        .expect("Failed to execute bpf-linker");
+    let options = LinkerOptions {
+        target: None,
+        cpu: bpf_linker::Cpu::Generic,
+        cpu_features: CString::default(),
+        optimize: bpf_linker::OptLevel::No,
+        unroll_loops: false,
+        ignore_inline_never: false,
+        llvm_args: vec![],
+        disable_expand_memcpy_in_order: false,
+        disable_memory_builtins: false,
+        btf: false,
+        allow_bpf_trap: false,
+    };
 
-    if !output.status.success() {
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        panic!("bpf-linker failed with status: {}", output.status);
-    }
+    let linker = Linker::new(options);
+
+    let result = linker.link_to_buffer(
+        [LinkerInput::Buffer {
+            name: "alessandro.ll",
+            bytes: ir_content.as_bytes(),
+        }],
+        OutputType::Object,
+        ["test_alessandro"],
+    );
 
     assert!(
-        output_file.exists(),
-        "Output file should exist: {:?}",
-        output_file
+        result.is_ok(),
+        "Linking IR should succeed: {:?}",
+        result.err()
     );
-    assert!(
-        output_file.metadata().unwrap().len() > 0,
-        "Output file should not be empty"
-    );
+
+    let output = result.unwrap();
+    assert!(!output.as_slice().is_empty(), "Output should not be empty");
 }
 
 #[test]
 fn test_invalid_ir_file() {
-    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let valid_content = create_test_ir_content("alessandro");
 
-    let valid_ir_file = create_test_ir_file(temp_dir.path(), "alessandro");
-
-    let valid_content = fs::read_to_string(valid_ir_file).expect("Failed to read valid IR file");
-
-    // Corrupting IR content
     let invalid_content =
         valid_content.replace("; ModuleID = 'alessandro'", ": ModuleXX = 'corrupted'");
 
-    let invalid_ir_file = temp_dir.path().join("corrupted.ll");
+    let options = LinkerOptions {
+        target: None,
+        cpu: bpf_linker::Cpu::Generic,
+        cpu_features: CString::default(),
+        optimize: bpf_linker::OptLevel::No,
+        unroll_loops: false,
+        ignore_inline_never: false,
+        llvm_args: vec![],
+        disable_expand_memcpy_in_order: false,
+        disable_memory_builtins: false,
+        btf: false,
+        allow_bpf_trap: false,
+    };
 
-    fs::write(&invalid_ir_file, invalid_content).expect("Failed to write invalid IR file");
+    let linker = Linker::new(options);
 
-    let output_file = temp_dir.path().join("output.o");
-
-    let output = Command::new(linker_path())
-        .arg(&invalid_ir_file)
-        .arg("-o")
-        .arg(&output_file)
-        .output()
-        .expect("Failed to execute bpf-linker");
-
-    // Should fail with corrupted IR
-    assert!(
-        !output.status.success(),
-        "bpf-linker should fail with corrupted IR. stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    let result = linker.link_to_buffer(
+        [LinkerInput::Buffer {
+            name: "corrupted.ll",
+            bytes: invalid_content.as_bytes(),
+        }],
+        OutputType::Object,
+        Vec::<&str>::new(),
     );
+
+    assert!(result.is_err(), "Linking corrupted IR should fail");
 }

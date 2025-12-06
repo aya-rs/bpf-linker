@@ -144,15 +144,15 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
 
 /// Links an LLVM IR buffer into the given module.
 ///
-/// The buffer must be null-terminated (hence `&CStr`), because LLVM's IR parser
+/// The buffer must be null-terminated (hence `CStr`), because LLVM's IR parser
 /// requires `RequiresNullTerminator=true` when creating the memory buffer.
 /// See `getMemBuffer` with default `RequiresNullTerminator = true`:
 /// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L134
-/// Called by `LLVMParseIRInContext` via `parseIR`:
-/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/IRReader/IRReader.cpp#L122
+/// Called by `LLVMParseIRInContext` follows this path parseIR => parseAssembly => parseAssemblyInto
+/// Calling `getMemBuffer` without specifying `RequiresNullTerminator`, hence defaulting to true:
+/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/AsmParser/Parser.cpp#L30
 ///
-/// Without the null terminator, LLVM hits an assertion in debug builds:
-/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L138
+/// Without the null terminator, LLVM hits an assertion in debug builds.
 pub(crate) fn link_ir_buffer<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
