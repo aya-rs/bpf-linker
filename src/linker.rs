@@ -545,12 +545,11 @@ fn link_data<'ctx>(
     data: &[u8],
     in_type: InputType,
 ) -> Result<(), LinkerError> {
-   if in_type == InputType::Ir {
+    if in_type == InputType::Ir {
         let mut ir_data = data.to_vec();
         ir_data.push(0);
-        let c_str = CStr::from_bytes_with_nul(&ir_data)
-            .expect("we just added the null terminator");
-        
+        let c_str = CStr::from_bytes_with_nul(&ir_data).expect("we just added the null terminator");
+
         return llvm::link_ir_buffer(context, module, c_str)
             .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))
             .and_then(|linked| {
