@@ -4,7 +4,6 @@ use std::{
     ffi::{CStr, CString, OsStr},
     fs,
     io::{self, Read as _},
-    mem,
     ops::Deref,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
@@ -496,7 +495,7 @@ where
                         }
                     };
 
-                    match link_data(context, &mut module, &name, &mut buf, in_type) {
+                    match link_data(context, &mut module, &name, &buf, in_type) {
                         Ok(()) => continue,
                         Err(LinkerError::InvalidInputType(name)) => {
                             info!("ignoring archive item {}: invalid type", name.display());
@@ -521,7 +520,7 @@ where
             }
             ty => {
                 info!("linking file {} type {}", path.display(), ty);
-                match link_data(context, &mut module, &path, &mut input.to_vec(), ty) {
+                match link_data(context, &mut module, &path, input, ty) {
                     Ok(()) => {}
                     Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
@@ -543,9 +542,24 @@ fn link_data<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    data: &mut Vec<u8>,
+    data: &[u8],
     in_type: InputType,
 ) -> Result<(), LinkerError> {
+    if in_type == InputType::Ir {
+        let mut ir_data = data.to_vec();
+        ir_data.push(0);
+        let c_str = CStr::from_bytes_with_nul(&ir_data).expect("We just added the null terminator");
+
+        return llvm::link_ir_buffer(context, module, c_str)
+            .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))
+            .and_then(|linked| {
+                if linked {
+                    Ok(())
+                } else {
+                    Err(LinkerError::LinkModuleError(path.to_owned()))
+                }
+            });
+    }
     let bitcode = match in_type {
         InputType::Bitcode => Cow::Borrowed(data),
         InputType::Elf => match llvm::find_embedded_bitcode(context, data) {
@@ -559,20 +573,7 @@ fn link_data<'ctx>(
         InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
         // this can't really happen
         InputType::Archive => panic!("nested archives not supported duh"),
-        InputType::Ir => {
-            let data = CString::new(mem::take(data)).expect("null byte in IR data");
-            let c_str = data.as_c_str();
-
-            return llvm::link_ir_buffer(context, module, c_str)
-                .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))
-                .and_then(|linked| {
-                    if linked {
-                        Ok(())
-                    } else {
-                        Err(LinkerError::LinkModuleError(path.to_owned()))
-                    }
-                });
-        }
+        InputType::Ir => unreachable!(),
     };
 
     if !llvm::link_bitcode_buffer(context, module, &bitcode) {

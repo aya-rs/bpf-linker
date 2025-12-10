@@ -149,7 +149,9 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
 /// See `getMemBuffer` with default `RequiresNullTerminator = true`:
 /// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L134
 /// Called by `LLVMParseIRInContext` follows this path parseIR => parseAssembly => parseAssemblyInto
-/// Calling `getMemBuffer` without specifying `RequiresNullTerminator`, hence defaulting to true:
+/// Deeper inside LLVM parser's they rely on the null termination due performance optimization.
+/// LLVM's C API does not enforce this at the type level, so callers must guarantee the invariant themselves.
+/// See the relevant code inside LLVM's parser:
 /// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/AsmParser/Parser.cpp#L30
 ///
 /// Without the null terminator, LLVM hits an assertion in debug builds.
