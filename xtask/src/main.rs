@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
+    io::{self, Write as _},
     os::unix::ffi::OsStrExt as _,
     path::PathBuf,
     process::Command,
@@ -218,6 +219,26 @@ struct PullRequest {
     merge_commit_sha: Option<String>,
 }
 
+macro_rules! expect_single {
+    ($vec:expr, $what:literal, $cmd:expr, $stdout:expr) => {{
+        match ($vec).as_slice() {
+            [] => anyhow::bail!(
+                "failed to find `{}` line in {:?} output: {}",
+                $what,
+                $cmd,
+                std::ffi::OsStr::from_bytes($stdout).display(),
+            ),
+            [one] => one,
+            _ => anyhow::bail!(
+                "found multiple `{}` lines in {:?} output: {}",
+                $what,
+                $cmd,
+                std::ffi::OsStr::from_bytes($stdout).display(),
+            ),
+        }
+    }};
+}
+
 /// Finds a commit in the [Rust GitHub repository][rust-repo] that corresponds
 /// to an update of LLVM and can be used to download libLLVM from Rust CI.
 ///
@@ -243,83 +264,110 @@ fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
             output.status
         ));
     }
-    let llvm_version: Vec<_> = output
-        .stdout
-        .split(|&b| b == b'\n')
-        .filter_map(|line| line.strip_prefix(b"LLVM version: "))
-        .collect();
-    let llvm_version = match llvm_version.as_slice() {
-        [] => anyhow::bail!(
-            "failed to find `LLVM version:` line in {rustc_cmd:?} output: {}",
-            OsStr::from_bytes(&output.stdout).display()
-        ),
-        [llvm_version] => llvm_version,
-        _ => {
-            anyhow::bail!(
-                "found multiple `LLVM version:` lines in {rustc_cmd:?} output: {}",
-                OsStr::from_bytes(&output.stdout).display()
-            )
+
+    // `rustc --version --verbose` output should contain lines starting from:
+    //
+    // - `commit-hash:`
+    // - `release:`
+    // - `LLVM version:`
+    //
+    // Example:
+    //
+    // ```
+    // commit-hash: 31010ca61c3ff019e1480dda0a7ef16bd2bd51c0
+    // release: 1.94.0-nightly
+    // LLVM version: 21.1.8
+    // ```
+    let mut commit_hashes = Vec::new();
+    let mut rust_versions = Vec::new();
+    let mut llvm_versions = Vec::new();
+    for line in output.stdout.split(|&b| b == b'\n') {
+        if let Some(commit_hash) = line.strip_prefix(b"commit-hash: ") {
+            commit_hashes.push(commit_hash);
         }
-    };
+        if let Some(rust_version) = line.strip_prefix(b"release: ") {
+            rust_versions.push(rust_version);
+        }
+        if let Some(llvm_version) = line.strip_prefix(b"LLVM version: ") {
+            llvm_versions.push(llvm_version)
+        }
+    }
+    let rust_version = expect_single!(rust_versions, "release:", rustc_cmd, &output.stdout);
 
-    // reqwest does not accept raw bytes.
-    let llvm_version = str::from_utf8(llvm_version).with_context(|| {
-        format!(
-            "llvm version is not valid UTF-8: {}",
-            OsStr::from_bytes(llvm_version).display()
-        )
-    })?;
+    if rust_version.ends_with(b"nightly") {
+        // For nightly Rust, CI publishes LLVM tarballs for each recent commit.
+        // We can therefore use the Rust commit hash directly.
+        let commit_hash = expect_single!(commit_hashes, "commit-hash:", rustc_cmd, &output.stdout);
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(commit_hash)?;
+        stdout.write_all(b"\n")?;
+    } else {
+        // For stable Rust, CI does not publish LLVM tarballs per commit.
+        // Instead, we must locate the merge commit that introduced the
+        // corresponding LLVM version.
 
-    let pr_title = format!("Update LLVM to {llvm_version}");
-    let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
+        let llvm_version =
+            expect_single!(llvm_versions, "LLVM version:", rustc_cmd, &output.stdout);
 
-    let headers: HeaderMap = [
-        // GitHub requires a User-Agent header; requests without one get a 403.
-        // Any non-empty value works, but we provide an identifier for this tool.
-        (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
-        (ACCEPT, "application/vnd.github+json".parse().unwrap()),
-        (
-            AUTHORIZATION,
-            format!("Bearer {github_token}").parse().unwrap(),
-        ),
-    ]
-    .into_iter()
-    .collect();
-    let client = Client::builder()
-        .default_headers(headers)
-        .build()
-        .with_context(|| "failed to build an HTTP client")?;
+        // reqwest does not accept raw bytes.
+        let llvm_version = str::from_utf8(llvm_version).with_context(|| {
+            format!(
+                "llvm version is not valid UTF-8: {}",
+                OsStr::from_bytes(llvm_version).display()
+            )
+        })?;
 
-    const ISSUES_URL: &str = "https://api.github.com/search/issues";
-    let resp = client
-        .get(ISSUES_URL)
-        .query(&[("q", query)])
-        .send()
-        .with_context(|| format!("failed to send the request to {ISSUES_URL}"))?
-        .error_for_status()
-        .with_context(|| format!("HTTP request to {ISSUES_URL} returned an error status"))?;
+        let pr_title = format!("Update LLVM to {llvm_version}");
+        let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
 
-    let body: SearchIssuesResponse = resp.json()?;
-    let pr = body
-        .items
+        let headers: HeaderMap = [
+            // GitHub requires a User-Agent header; requests without one get a 403.
+            // Any non-empty value works, but we provide an identifier for this tool.
+            (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
+            (ACCEPT, "application/vnd.github+json".parse().unwrap()),
+            (
+                AUTHORIZATION,
+                format!("Bearer {github_token}").parse().unwrap(),
+            ),
+        ]
         .into_iter()
-        .find(|item| item.title == pr_title)
-        .ok_or_else(|| anyhow!("failed to find an LLVM bump PR titled \"{pr_title}\""))?;
-    let pr_number = pr.number;
+        .collect();
+        let client = Client::builder()
+            .default_headers(headers)
+            .build()
+            .with_context(|| "failed to build an HTTP client")?;
 
-    let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
-    let resp = client
-        .get(&url)
-        .send()
-        .with_context(|| format!("failed to send the request to {url}"))?
-        .error_for_status()
-        .with_context(|| format!("HTTP request to {url} returned an error status"))?;
-    let pr: PullRequest = resp.json()?;
+        const ISSUES_URL: &str = "https://api.github.com/search/issues";
+        let resp = client
+            .get(ISSUES_URL)
+            .query(&[("q", query)])
+            .send()
+            .with_context(|| format!("failed to send the request to {ISSUES_URL}"))?
+            .error_for_status()
+            .with_context(|| format!("HTTP request to {ISSUES_URL} returned an error status"))?;
 
-    let bors_sha = pr
-        .merge_commit_sha
-        .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
-    println!("{bors_sha}");
+        let body: SearchIssuesResponse = resp.json()?;
+        let pr = body
+            .items
+            .into_iter()
+            .find(|item| item.title == pr_title)
+            .ok_or_else(|| anyhow!("failed to find an LLVM bump PR titled \"{pr_title}\""))?;
+        let pr_number = pr.number;
+
+        let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
+        let resp = client
+            .get(&url)
+            .send()
+            .with_context(|| format!("failed to send the request to {url}"))?
+            .error_for_status()
+            .with_context(|| format!("HTTP request to {url} returned an error status"))?;
+        let pr: PullRequest = resp.json()?;
+
+        let bors_sha = pr
+            .merge_commit_sha
+            .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
+        println!("{bors_sha}");
+    }
 
     Ok(())
 }
