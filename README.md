@@ -17,13 +17,34 @@ files with embedded bitcode (.o), optionally stored inside ar archives (.a).
 
 ## Installation
 
+### Binary
+
+The easiest way to install the linker is by using [cargo-binstall][cargo-binstall]:
+
+```sh
+cargo binstall bpf-linker
+```
+
+You can also download prebuilt binaries directly from the [release pages][release].
+
+We currently provide binaries for the following platforms:
+
+- Linux aarch64
+- Linux x86_64
+- macOS aarch64
+- macOS x86_64
+
+For other platforms, install the linker using the *From source* method.
+
+[cargo-binstall]: https://crates.io/crates/cargo-binstall
+[release]: https://github.com/aya-rs/bpf-linker/releases
+
+### From source
+
 The linker requires LLVM 21. It can use the same LLVM used by the rust compiler,
 or it can use an external LLVM installation.
 
-If your target is `aarch64-unknown-linux-gnu` (i.e. Linux on Apple Silicon) you 
-will have to use the *external LLVM* method.
-
-### Using LLVM provided by rustc
+#### Using LLVM provided by rustc
 
 All you need to do is run:
 
@@ -31,9 +52,13 @@ All you need to do is run:
 cargo install bpf-linker
 ```
 
-### Using external LLVM
+However, this method works only for Linux x86_64 (`x86_64-unknown-linux-gnu`),
+which is the only target that rustup provides a shared libLLVM library for.
+For any other platform, use the *external LLVM* method.
 
-#### System packages
+#### Using external LLVM
+
+##### System packages
 
 On Debian based distributions you need to install the `llvm-21-dev` and `libclang-21-dev`
 packages, from the official LLVM repo at https://apt.llvm.org.
@@ -47,7 +72,7 @@ Once you have installed LLVM 21 you can install the linker running:
 cargo install bpf-linker --no-default-features --features llvm-21
 ```
 
-#### Building LLVM from source
+##### Building LLVM from source
 
 LLVM can be built from source using the `xtask build-llvm` subcommand, included
 in bpf-linker sources.
@@ -78,11 +103,11 @@ cargo xtask llvm build \
     --install-prefix ./llvm-install
 ```
 
-After that, bpf-linker can be built with the `LLVM_SYS_211_PREFIX` environment
-variable pointing to that directory:
+After that, bpf-linker can be built with the `LLVM_PREFIX` environment variable
+pointing to that directory:
 
 ```sh
-LLVM_SYS_211_PREFIX=./llvm-install cargo install --path .
+LLVM_PREFIX=./llvm-install cargo install --path .
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
