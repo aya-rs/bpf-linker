@@ -1,20 +1,7 @@
-use std::{
-    env,
-    ffi::{OsStr, OsString},
-    fs,
-    io::{self, Write as _},
-    os::unix::ffi::OsStrExt as _,
-    path::PathBuf,
-    process::Command,
-};
+use std::{ffi::OsString, fs, path::PathBuf, process::Command};
 
-use anyhow::{Context as _, Result, anyhow};
-use reqwest::{
-    blocking::Client,
-    header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT},
-};
+use anyhow::{Context as _, Result};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};
-use serde::Deserialize;
 use walkdir::WalkDir;
 
 #[derive(Clone, clap::ValueEnum)]
@@ -57,13 +44,6 @@ struct BuildLlvm {
     install_prefix: PathBuf,
 }
 
-#[derive(clap::Args)]
-struct RustcLlvmCommitOptions {
-    /// GitHub token used for API requests. Reads from `GITHUB_TOKEN` when unset.
-    #[arg(long = "github-token", env = "GITHUB_TOKEN")]
-    github_token: Option<String>,
-}
-
 #[derive(clap::Subcommand)]
 enum XtaskSubcommand {
     /// Builds the Rust standard library for the given target in the current
@@ -71,9 +51,6 @@ enum XtaskSubcommand {
     BuildStd(BuildStd),
     /// Manages and builds LLVM.
     BuildLlvm(BuildLlvm),
-    /// Finds the commit in github.com/rust-lang/rust that can be used for
-    /// downloading LLVM for the current Rust toolchain.
-    RustcLlvmCommit(RustcLlvmCommitOptions),
 }
 
 /// Additional build commands for bpf-linker.
@@ -203,189 +180,10 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct SearchIssuesResponse {
-    items: Vec<IssueItem>,
-}
-
-#[derive(Deserialize)]
-struct IssueItem {
-    number: u64,
-    title: String,
-}
-
-#[derive(Deserialize)]
-struct PullRequest {
-    merge_commit_sha: Option<String>,
-}
-
-fn expect_single<'a>(
-    slice: &'a [&'a [u8]],
-    what: &'a str,
-    cmd: &'a Command,
-    cmd_output: &'a [u8],
-) -> Result<&'a [u8]> {
-    match slice {
-        [] => anyhow::bail!(
-            "failed to find `{}` line in {:?} output: {}",
-            what,
-            cmd,
-            OsStr::from_bytes(cmd_output).display(),
-        ),
-        [one] => Ok(one),
-        _ => anyhow::bail!(
-            "found multiple `{}` lines in {:?} output: {}",
-            what,
-            cmd,
-            OsStr::from_bytes(cmd_output).display(),
-        ),
-    }
-}
-
-/// Finds a commit in the [Rust GitHub repository][rust-repo] that corresponds
-/// to an update of LLVM and can be used to download libLLVM from Rust CI.
-///
-/// [rust-repo]: https://github.com/rust-lang/rust
-fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
-    let RustcLlvmCommitOptions { github_token } = options;
-    let toolchain = env::var_os("RUSTUP_TOOLCHAIN");
-
-    let mut rustc_cmd = Command::new("rustc");
-    if let Some(toolchain) = toolchain {
-        let mut toolchain_arg = OsString::new();
-        toolchain_arg.push(toolchain);
-        let _: &mut Command = rustc_cmd.arg(toolchain_arg);
-    }
-    let output = rustc_cmd
-        .args(["--version", "--verbose"])
-        .output()
-        .with_context(|| format!("failed to run {rustc_cmd:?}"))?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "{rustc_cmd:?} failed with status {}",
-            output.status
-        ));
-    }
-
-    // `rustc --version --verbose` output should contain lines starting from:
-    //
-    // - `commit-hash:`
-    // - `release:`
-    // - `LLVM version:`
-    //
-    // Example:
-    //
-    // ```
-    // commit-hash: 31010ca61c3ff019e1480dda0a7ef16bd2bd51c0
-    // release: 1.94.0-nightly
-    // LLVM version: 21.1.8
-    // ```
-    let mut commit_hashes = Vec::new();
-    let mut rust_versions = Vec::new();
-    let mut llvm_versions = Vec::new();
-    for line in output.stdout.split(|&b| b == b'\n') {
-        if let Some(commit_hash) = line.strip_prefix(b"commit-hash: ") {
-            commit_hashes.push(commit_hash);
-        }
-        if let Some(rust_version) = line.strip_prefix(b"release: ") {
-            rust_versions.push(rust_version);
-        }
-        if let Some(llvm_version) = line.strip_prefix(b"LLVM version: ") {
-            llvm_versions.push(llvm_version)
-        }
-    }
-    let rust_version = expect_single(&rust_versions, "release:", &rustc_cmd, &output.stdout)?;
-
-    if rust_version.ends_with(b"nightly") {
-        // For nightly Rust, CI publishes LLVM tarballs for each recent commit.
-        // We can therefore use the Rust commit hash directly.
-        let commit_hash =
-            expect_single(&commit_hashes, "commit-hash:", &rustc_cmd, &output.stdout)?;
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(commit_hash)?;
-        stdout.write_all(b"\n")?;
-    } else {
-        // For stable Rust, CI does not publish LLVM tarballs per commit.
-        // Instead, we must locate the merge commit that introduced the
-        // corresponding LLVM version.
-
-        let llvm_version =
-            expect_single(&llvm_versions, "LLVM version:", &rustc_cmd, &output.stdout)?;
-
-        // reqwest does not accept raw bytes.
-        let llvm_version = str::from_utf8(llvm_version).with_context(|| {
-            format!(
-                "llvm version is not valid UTF-8: {}",
-                OsStr::from_bytes(llvm_version).display()
-            )
-        })?;
-
-        let pr_title = format!("Update LLVM to {llvm_version}");
-        let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
-
-        let mut headers: HeaderMap = [
-            // GitHub requires a User-Agent header; requests without one get a 403.
-            // Any non-empty value works, but we provide an identifier for this tool.
-            (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
-            (ACCEPT, "application/vnd.github+json".parse().unwrap()),
-        ]
-        .into_iter()
-        .collect();
-        if let Some(github_token) = github_token {
-            assert_eq!(
-                headers.insert(
-                    AUTHORIZATION,
-                    format!("Bearer {github_token}").parse().unwrap(),
-                ),
-                None
-            );
-        }
-        let client = Client::builder()
-            .default_headers(headers)
-            .build()
-            .with_context(|| "failed to build an HTTP client")?;
-
-        const ISSUES_URL: &str = "https://api.github.com/search/issues";
-        let resp = client
-            .get(ISSUES_URL)
-            .query(&[("q", query)])
-            .send()
-            .with_context(|| format!("failed to send the request to {ISSUES_URL}"))?
-            .error_for_status()
-            .with_context(|| format!("HTTP request to {ISSUES_URL} returned an error status"))?;
-
-        let body: SearchIssuesResponse = resp.json()?;
-        let pr = body
-            .items
-            .into_iter()
-            .find(|item| item.title == pr_title)
-            .ok_or_else(|| anyhow!("failed to find an LLVM bump PR titled \"{pr_title}\""))?;
-        let pr_number = pr.number;
-
-        let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
-        let resp = client
-            .get(&url)
-            .send()
-            .with_context(|| format!("failed to send the request to {url}"))?
-            .error_for_status()
-            .with_context(|| format!("HTTP request to {url} returned an error status"))?;
-        let pr: PullRequest = resp.json()?;
-
-        let bors_sha = pr
-            .merge_commit_sha
-            .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
-        println!("{bors_sha}");
-    }
-
-    Ok(())
-}
-
 fn main() -> Result<()> {
     let CommandLine { subcommand } = clap::Parser::parse();
     match subcommand {
         XtaskSubcommand::BuildStd(options) => build_std(options),
         XtaskSubcommand::BuildLlvm(options) => build_llvm(options),
-        XtaskSubcommand::RustcLlvmCommit(options) => rustc_llvm_commit(options),
     }
 }
