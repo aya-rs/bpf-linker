@@ -42,7 +42,7 @@ tracing = "0.1"
 
 [build-dependencies]
 anyhow = { workspace = true }
-object = { version = "0.37", default-features = false, features = [
+object = { version = "0.38.0", default-features = false, features = [
     "archive",
     "elf",
     "macho",
