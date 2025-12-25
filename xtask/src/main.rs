@@ -61,7 +61,7 @@ struct BuildLlvm {
 struct RustcLlvmCommitOptions {
     /// GitHub token used for API requests. Reads from `GITHUB_TOKEN` when unset.
     #[arg(long = "github-token", env = "GITHUB_TOKEN")]
-    github_token: String,
+    github_token: Option<String>,
 }
 
 #[derive(clap::Subcommand)]
@@ -324,18 +324,23 @@ fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
         let pr_title = format!("Update LLVM to {llvm_version}");
         let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
 
-        let headers: HeaderMap = [
+        let mut headers: HeaderMap = [
             // GitHub requires a User-Agent header; requests without one get a 403.
             // Any non-empty value works, but we provide an identifier for this tool.
             (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
             (ACCEPT, "application/vnd.github+json".parse().unwrap()),
-            (
-                AUTHORIZATION,
-                format!("Bearer {github_token}").parse().unwrap(),
-            ),
         ]
         .into_iter()
         .collect();
+        if let Some(github_token) = github_token {
+            assert_eq!(
+                headers.insert(
+                    AUTHORIZATION,
+                    format!("Bearer {github_token}").parse().unwrap(),
+                ),
+                None
+            );
+        }
         let client = Client::builder()
             .default_headers(headers)
             .build()
