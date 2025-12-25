@@ -2,7 +2,6 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
-    io::{self, Write as _},
     os::unix::ffi::OsStrExt as _,
     path::PathBuf,
     process::Command,
@@ -204,41 +203,20 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
 }
 
 #[derive(Deserialize)]
-struct SearchIssuesResponse {
-    items: Vec<IssueItem>,
-}
-
-#[derive(Deserialize)]
-struct IssueItem {
-    number: u64,
-    title: String,
+struct Commit {
+    sha: String,
 }
 
 #[derive(Deserialize)]
 struct PullRequest {
-    merge_commit_sha: Option<String>,
+    merge_commit_sha: String,
 }
 
-fn expect_single<'a>(
-    slice: &'a [&'a [u8]],
-    what: &'a str,
-    cmd: &'a Command,
-    cmd_output: &'a [u8],
-) -> Result<&'a [u8]> {
+fn expect_single<'a, T: std::fmt::Debug>(slice: &'a [T], what: &'a str) -> Result<&'a T> {
     match slice {
-        [] => anyhow::bail!(
-            "failed to find `{}` line in {:?} output: {}",
-            what,
-            cmd,
-            OsStr::from_bytes(cmd_output).display(),
-        ),
+        [] => anyhow::bail!("found no instances of `{what}`"),
         [one] => Ok(one),
-        _ => anyhow::bail!(
-            "found multiple `{}` lines in {:?} output: {}",
-            what,
-            cmd,
-            OsStr::from_bytes(cmd_output).display(),
-        ),
+        slice => anyhow::bail!("found multiple instances of `{what}`: {slice:?}"),
     }
 }
 
@@ -282,101 +260,79 @@ fn rustc_llvm_commit(options: RustcLlvmCommitOptions) -> Result<()> {
     // LLVM version: 21.1.8
     // ```
     let mut commit_hashes = Vec::new();
-    let mut rust_versions = Vec::new();
-    let mut llvm_versions = Vec::new();
     for line in output.stdout.split(|&b| b == b'\n') {
         if let Some(commit_hash) = line.strip_prefix(b"commit-hash: ") {
             commit_hashes.push(commit_hash);
         }
-        if let Some(rust_version) = line.strip_prefix(b"release: ") {
-            rust_versions.push(rust_version);
-        }
-        if let Some(llvm_version) = line.strip_prefix(b"LLVM version: ") {
-            llvm_versions.push(llvm_version)
-        }
     }
-    let rust_version = expect_single(&rust_versions, "release:", &rustc_cmd, &output.stdout)?;
 
-    if rust_version.ends_with(b"nightly") {
-        // For nightly Rust, CI publishes LLVM tarballs for each recent commit.
-        // We can therefore use the Rust commit hash directly.
-        let commit_hash =
-            expect_single(&commit_hashes, "commit-hash:", &rustc_cmd, &output.stdout)?;
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(commit_hash)?;
-        stdout.write_all(b"\n")?;
-    } else {
-        // For stable Rust, CI does not publish LLVM tarballs per commit.
-        // Instead, we must locate the merge commit that introduced the
-        // corresponding LLVM version.
+    // For stable Rust, CI does not publish LLVM tarballs per commit. Instead,
+    // we locate the most recent ancestor of the current commit that touched
+    // `src/llvm-project` then resolve it back to its PR merge commit.
 
-        let llvm_version =
-            expect_single(&llvm_versions, "LLVM version:", &rustc_cmd, &output.stdout)?;
+    let commit_hash = expect_single(&commit_hashes, "commit-hash:").with_context(|| {
+        format!(
+            "{rustc_cmd:?}: {}",
+            OsStr::from_bytes(&output.stdout).display()
+        )
+    })?;
 
-        // reqwest does not accept raw bytes.
-        let llvm_version = str::from_utf8(llvm_version).with_context(|| {
-            format!(
-                "llvm version is not valid UTF-8: {}",
-                OsStr::from_bytes(llvm_version).display()
-            )
-        })?;
+    // reqwest does not accept raw bytes.
+    let commit_hash = str::from_utf8(commit_hash).with_context(|| {
+        format!(
+            "rust commit hash is not valid UTF-8: {}",
+            OsStr::from_bytes(commit_hash).display()
+        )
+    })?;
 
-        let pr_title = format!("Update LLVM to {llvm_version}");
-        let query = format!(r#"repo:rust-lang/rust is:pr is:closed in:title "{pr_title}""#);
-
-        let mut headers: HeaderMap = [
-            // GitHub requires a User-Agent header; requests without one get a 403.
-            // Any non-empty value works, but we provide an identifier for this tool.
-            (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
-            (ACCEPT, "application/vnd.github+json".parse().unwrap()),
-        ]
-        .into_iter()
-        .collect();
-        if let Some(github_token) = github_token {
-            assert_eq!(
-                headers.insert(
-                    AUTHORIZATION,
-                    format!("Bearer {github_token}").parse().unwrap(),
-                ),
-                None
-            );
-        }
-        let client = Client::builder()
-            .default_headers(headers)
-            .build()
-            .with_context(|| "failed to build an HTTP client")?;
-
-        const ISSUES_URL: &str = "https://api.github.com/search/issues";
-        let resp = client
-            .get(ISSUES_URL)
-            .query(&[("q", query)])
-            .send()
-            .with_context(|| format!("failed to send the request to {ISSUES_URL}"))?
-            .error_for_status()
-            .with_context(|| format!("HTTP request to {ISSUES_URL} returned an error status"))?;
-
-        let body: SearchIssuesResponse = resp.json()?;
-        let pr = body
-            .items
-            .into_iter()
-            .find(|item| item.title == pr_title)
-            .ok_or_else(|| anyhow!("failed to find an LLVM bump PR titled \"{pr_title}\""))?;
-        let pr_number = pr.number;
-
-        let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr_number}");
-        let resp = client
-            .get(&url)
-            .send()
-            .with_context(|| format!("failed to send the request to {url}"))?
-            .error_for_status()
-            .with_context(|| format!("HTTP request to {url} returned an error status"))?;
-        let pr: PullRequest = resp.json()?;
-
-        let bors_sha = pr
-            .merge_commit_sha
-            .ok_or_else(|| anyhow!("PR #{pr_number} has no merge_commit_sha"))?;
-        println!("{bors_sha}");
+    let mut headers: HeaderMap = [
+        // GitHub requires a User-Agent header; requests without one get a 403.
+        // Any non-empty value works, but we provide an identifier for this tool.
+        (USER_AGENT, "bpf-linker-xtask/0.1".parse().unwrap()),
+        (ACCEPT, "application/vnd.github+json".parse().unwrap()),
+    ]
+    .into_iter()
+    .collect();
+    if let Some(github_token) = github_token {
+        assert_eq!(
+            headers.insert(
+                AUTHORIZATION,
+                format!("Bearer {github_token}").parse().unwrap(),
+            ),
+            None
+        );
     }
+    let client = Client::builder()
+        .default_headers(headers)
+        .build()
+        .with_context(|| "failed to build an HTTP client")?;
+
+    const COMMITS_URL: &str = "https://api.github.com/repos/rust-lang/rust/commits";
+    let resp = client
+        .get(COMMITS_URL)
+        .query(&[
+            ("path", "src/llvm-project"),
+            ("sha", commit_hash),
+            // We only need the most recent match.
+            ("per_page", "1"),
+        ])
+        .send()
+        .with_context(|| format!("failed to send the request to {COMMITS_URL}"))?
+        .error_for_status()
+        .with_context(|| format!("HTTP request to {COMMITS_URL} returned an error status"))?;
+    let [Commit { sha }] = resp.json()?;
+
+    let pulls_url = format!("https://api.github.com/repos/rust-lang/rust/commits/{sha}/pulls");
+    let resp = client
+        .get(&pulls_url)
+        .query(&[("per_page", "1")])
+        .send()
+        .with_context(|| format!("failed to send the request to {pulls_url}"))?
+        .error_for_status()
+        .with_context(|| format!("HTTP request to {pulls_url} returned an error status"))?;
+    let [PullRequest { merge_commit_sha }] = resp.json()?;
+
+    println!("{merge_commit_sha}");
 
     Ok(())
 }
