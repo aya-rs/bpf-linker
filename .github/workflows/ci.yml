@@ -176,17 +176,21 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p $RUSTC_LLVM_INSTALL_DIR_DYNAMIC $RUSTC_LLVM_INSTALL_DIR_STATIC
-          rustc_sha=$(cargo xtask rustc-llvm-commit --github-token "${{ secrets.GITHUB_TOKEN }}")
+
           download_llvm() {
-            local target=$1
+            local target_triple=$1
             local install_dir=$2
-            wget -q -O - "https://ci-artifacts.rust-lang.org/rustc-builds/$rustc_sha/rust-dev-nightly-$target.tar.xz" | \
-              tar -xJ --strip-components 2 -C $install_dir
+
+            local url
+            url="$(bash ./scripts/rust-ci-rust-dev-url.sh "$target_triple")"
+            echo "Downloading $url"
+            wget -q -O - "$url" | tar -xJ --strip-components 2 -C "$install_dir"
           }
+
           if [[ -n "${{ matrix.platform['dynamic-target'] }}" ]]; then
             download_llvm \
               "${{ matrix.platform['dynamic-target'] }}" \
-              ${RUSTC_LLVM_INSTALL_DIR_DYNAMIC}
+              "${RUSTC_LLVM_INSTALL_DIR_DYNAMIC}"
             # LD_LIBRARY_PATH is needed because we're going to link everything dynamically below. This
             # doesn't affect behavior, but greatly reduces disk usage.
             echo "LD_LIBRARY_PATH=${RUSTC_LLVM_INSTALL_DIR_DYNAMIC}/lib" >> $GITHUB_ENV
@@ -197,7 +201,7 @@ jobs:
           if [[ -n "${{ matrix.platform['static-target'] }}" ]]; then
             download_llvm \
               "${{ matrix.platform['static-target'] }}" \
-              ${RUSTC_LLVM_INSTALL_DIR_STATIC}
+              "${RUSTC_LLVM_INSTALL_DIR_STATIC}"
             if [[ "${{ runner.os }}" == "Linux" ]]; then
               # `FileCheck` binary shipped in musl tarballs is linked dynamically
               # to musl, we can't execute it on Ubuntu.
