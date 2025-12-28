@@ -157,20 +157,13 @@ impl<'a> LinkerInput<'a> {
     }
 }
 
-/// Linker input type
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum InputType {
-    /// LLVM bitcode.
+enum LinkerInputKind {
     Bitcode,
-    /// ELF object file.
     Elf,
-    /// Mach-O object file.
     MachO,
-    /// Archive file. (.a)
-    Archive,
 }
 
-impl std::fmt::Display for InputType {
+impl std::fmt::Display for LinkerInputKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -179,9 +172,22 @@ impl std::fmt::Display for InputType {
                 Self::Bitcode => "bitcode",
                 Self::Elf => "elf",
                 Self::MachO => "Mach-O",
-                Self::Archive => "archive",
             }
         )
+    }
+}
+
+enum InputKind {
+    Archive,
+    Linker(LinkerInputKind),
+}
+
+impl std::fmt::Display for InputKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Archive => write!(f, "archive"),
+            Self::Linker(kind) => write!(f, "{}", kind),
+        }
     }
 }
 
@@ -463,10 +469,10 @@ where
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
         // or an invalid file
         let in_type =
-            detect_input_type(input).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+            InputKind::detect(input).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
-            InputType::Archive => {
+            InputKind::Archive => {
                 info!("linking archive {}", path.display());
 
                 // Extract the archive and call link_reader() for each item.
@@ -480,7 +486,7 @@ where
                     let _: usize = item
                         .read_to_end(&mut buf)
                         .map_err(|e| LinkerError::IoError(name.to_owned(), e))?;
-                    let in_type = match detect_input_type(&buf) {
+                    let in_type = match LinkerInputKind::detect(&buf) {
                         Some(in_type) => in_type,
                         None => {
                             info!("ignoring archive item {}: invalid type", name.display());
@@ -511,9 +517,9 @@ where
                     };
                 }
             }
-            ty => {
-                info!("linking file {} type {}", path.display(), ty);
-                match link_data(context, &mut module, &path, input, ty) {
+            InputKind::Linker(kind) => {
+                info!("linking file {} type {kind}", path.display());
+                match link_data(context, &mut module, &path, input, kind) {
                     Ok(()) => {}
                     Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
@@ -536,11 +542,11 @@ fn link_data<'ctx>(
     module: &mut LLVMModule<'ctx>,
     path: &Path,
     data: &[u8],
-    in_type: InputType,
+    in_type: LinkerInputKind,
 ) -> Result<(), LinkerError> {
     let bitcode = match in_type {
-        InputType::Bitcode => Cow::Borrowed(data),
-        InputType::Elf => match llvm::find_embedded_bitcode(context, data) {
+        LinkerInputKind::Bitcode => Cow::Borrowed(data),
+        LinkerInputKind::Elf => match llvm::find_embedded_bitcode(context, data) {
             Ok(Some(bitcode)) => Cow::Owned(bitcode),
             Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
             Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
@@ -548,9 +554,7 @@ fn link_data<'ctx>(
         // we need to handle this here since archive files could contain
         // mach-o files, eg somecrate.rlib containing lib.rmeta which is
         // mach-o on macos
-        InputType::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
-        // this can't really happen
-        InputType::Archive => panic!("nested archives not supported duh"),
+        LinkerInputKind::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
     };
 
     if !llvm::link_bitcode_buffer(context, module, &bitcode) {
@@ -821,21 +825,22 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
     }
 }
 
-fn detect_input_type(data: &[u8]) -> Option<InputType> {
-    if data.len() < 8 {
-        return None;
+impl LinkerInputKind {
+    fn detect(data: &[u8]) -> Option<Self> {
+        match data.get(..4) {
+            Some(b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b") => Some(Self::Bitcode),
+            Some(b"\x7FELF") => Some(Self::Elf),
+            Some(b"\xcf\xfa\xed\xfe") => Some(Self::MachO),
+            _ => None,
+        }
     }
+}
 
-    match &data[..4] {
-        b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b" => Some(InputType::Bitcode),
-        b"\x7FELF" => Some(InputType::Elf),
-        b"\xcf\xfa\xed\xfe" => Some(InputType::MachO),
-        _ => {
-            if &data[..8] == b"!<arch>\x0A" {
-                Some(InputType::Archive)
-            } else {
-                None
-            }
+impl InputKind {
+    fn detect(data: &[u8]) -> Option<Self> {
+        match data.get(..8) {
+            Some(b"!<arch>\x0A") => Some(Self::Archive),
+            _ => LinkerInputKind::detect(data).map(Self::Linker),
         }
     }
 }
