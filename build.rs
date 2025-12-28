@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     env,
     ffi::{OsStr, OsString},
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Display, Formatter},
     fs,
     io::{self, Write as _},
     iter,
@@ -100,14 +100,23 @@ impl Cxxstdlibs<'_> {
     }
 }
 
-impl Debug for Cxxstdlibs<'_> {
+impl Display for Cxxstdlibs<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnvVar(p) => {
                 Display::fmt(&p.display(), f)?;
             }
             Self::Single(s) => Display::fmt(&OsStr::from_bytes(s).display(), f)?,
-            Self::Multiple(m) => Debug::fmt(&m, f)?,
+            Self::Multiple(m) => {
+                f.write_str("[")?;
+                for (i, lib) in m.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    Display::fmt(&OsStr::from_bytes(lib).display(), f)?;
+                }
+                f.write_str("]")?;
+            }
         }
         Ok(())
     }
@@ -397,7 +406,7 @@ to an appropriate compiler"
             }
         }
 
-        fn check_library<S: Debug>(
+        fn check_library<S: Display>(
             stdout: &mut io::StdoutLock<'_>,
             ld_paths: &OsStr,
             library: S,
@@ -407,16 +416,54 @@ to an appropriate compiler"
                 match paths.as_slice() {
                     [] => {
                         anyhow::bail!(
-                            "could not find {library:?} in any of the following directories: {}",
+                            "could not find {library} in any of the following directories: {}",
                             ld_paths.display()
                         );
                     }
                     [_] => {}
                     paths => {
-                        writeln!(
-                            stdout,
-                            "cargo:warning={library:?} was found in multiple locations: {paths:?}"
-                        )?;
+                        let mut hashes = std::collections::HashMap::new();
+                        let mut buffer = [0; 8 * 1024];
+                        for path in paths {
+                            use std::{hash::Hasher as _, io::Read as _};
+                            let mut hasher = std::hash::DefaultHasher::new();
+                            let mut file = fs::File::open(path).with_context(|| {
+                                format!("failed to open file {}", path.display())
+                            })?;
+                            loop {
+                                let n = file.read(&mut buffer).with_context(|| {
+                                    format!("failed to read file {}", path.display())
+                                })?;
+                                if n == 0 {
+                                    break;
+                                }
+                                hasher.write(&buffer[..n]);
+                            }
+                            hashes
+                                .entry(hasher.finish())
+                                .or_insert_with(Vec::new)
+                                .push(path);
+                        }
+                        if hashes.len() > 1 {
+                            write!(
+                                stdout,
+                                "cargo:warning={library} was found in multiple locations: "
+                            )?;
+                            for (i, (hash, paths)) in hashes.iter().enumerate() {
+                                if i != 0 {
+                                    write!(stdout, ", ")?;
+                                }
+                                write!(stdout, "[")?;
+                                for (i, path) in paths.iter().enumerate() {
+                                    if i != 0 {
+                                        write!(stdout, ", ")?;
+                                    }
+                                    write!(stdout, "{}", path.display())?;
+                                }
+                                write!(stdout, "]=0x{hash:x}")?;
+                            }
+                            writeln!(stdout)?;
+                        }
                     }
                 }
             }
