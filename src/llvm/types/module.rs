@@ -62,6 +62,7 @@ impl LLVMModule<'_> {
         // internal API simpler, as all the other codegen methods output a MemoryBuffer.
         unsafe {
             let ptr = LLVMPrintModuleToString(self.module);
+            scopeguard::defer!(LLVMDisposeMessage(ptr));
             let cstr = CStr::from_ptr(ptr);
             let bytes = cstr.to_bytes();
 
@@ -73,7 +74,6 @@ impl LLVMModule<'_> {
                 bytes.len(),
                 buffer_name.as_ptr(),
             );
-            LLVMDisposeMessage(ptr);
 
             MemoryBuffer { memory_buffer }
         }

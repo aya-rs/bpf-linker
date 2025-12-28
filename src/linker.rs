@@ -544,24 +544,27 @@ fn link_data<'ctx>(
     data: &[u8],
     in_type: LinkerInputKind,
 ) -> Result<(), LinkerError> {
-    let bitcode = match in_type {
-        LinkerInputKind::Bitcode => Cow::Borrowed(data),
-        LinkerInputKind::Elf => match llvm::find_embedded_bitcode(context, data) {
-            Ok(Some(bitcode)) => Cow::Owned(bitcode),
-            Ok(None) => return Err(LinkerError::MissingBitcodeSection(path.to_owned())),
-            Err(e) => return Err(LinkerError::EmbeddedBitcodeError(e)),
+    let mut link_data = |data: &[u8]| {
+        if !llvm::link_bitcode_buffer(context, module, data) {
+            Err(LinkerError::LinkModuleError(path.to_owned()))
+        } else {
+            Ok(())
+        }
+    };
+    match in_type {
+        LinkerInputKind::Bitcode => link_data(data),
+        LinkerInputKind::Elf => match llvm::with_embedded_bitcode(context, data, link_data) {
+            Ok(result) => match result {
+                Some(result) => result,
+                None => Err(LinkerError::MissingBitcodeSection(path.to_owned())),
+            },
+            Err(e) => Err(LinkerError::EmbeddedBitcodeError(e)),
         },
         // we need to handle this here since archive files could contain
         // mach-o files, eg somecrate.rlib containing lib.rmeta which is
         // mach-o on macos
-        LinkerInputKind::MachO => return Err(LinkerError::InvalidInputType(path.to_owned())),
-    };
-
-    if !llvm::link_bitcode_buffer(context, module, &bitcode) {
-        return Err(LinkerError::LinkModuleError(path.to_owned()));
+        LinkerInputKind::MachO => Err(LinkerError::InvalidInputType(path.to_owned())),
     }
-
-    Ok(())
 }
 
 fn create_target_machine(

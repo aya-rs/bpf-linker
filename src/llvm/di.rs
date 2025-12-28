@@ -287,8 +287,6 @@ impl<'ctx> DISanitizer<'ctx> {
                 self.skipped_types_lossy.join(", ")
             );
         }
-
-        unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
 
     // Make it so that only exported symbols (programs marked as #[no_mangle]) get BTF
@@ -388,6 +386,12 @@ impl<'ctx> DISanitizer<'ctx> {
         }
 
         replace
+    }
+}
+
+impl Drop for DISanitizer<'_> {
+    fn drop(&mut self) {
+        unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
 }
 
