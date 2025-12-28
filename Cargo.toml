@@ -59,9 +59,6 @@ which = { version = "8.0.0", default-features = false, features = ["real-sys", "
 [lints]
 workspace = true
 
-[[bin]]
-name = "bpf-linker"
-
 [features]
 llvm-20 = ["dep:llvm-sys-20"]
 llvm-21 = ["dep:llvm-sys-21"]
