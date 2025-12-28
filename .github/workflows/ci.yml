@@ -182,7 +182,7 @@ jobs:
             local install_dir=$2
 
             local url
-            url="$(bash ./scripts/rust-ci-rust-dev-url.sh "$target_triple")"
+            url="$(./scripts/rust-ci-rust-dev-url.sh "$target_triple")"
             echo "Downloading $url"
             wget -q -O - "$url" | tar -xJ --strip-components 2 -C "$install_dir"
           }
