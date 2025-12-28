@@ -6,10 +6,19 @@ use llvm_sys::{
 };
 
 pub(crate) struct MemoryBuffer {
-    pub(super) memory_buffer: LLVMMemoryBufferRef,
+    memory_buffer: LLVMMemoryBufferRef,
 }
 
 impl MemoryBuffer {
+    pub(crate) const fn new(memory_buffer: LLVMMemoryBufferRef) -> Self {
+        Self { memory_buffer }
+    }
+
+    pub(crate) const fn as_mut_ptr(&self) -> LLVMMemoryBufferRef {
+        let Self { memory_buffer } = self;
+        *memory_buffer
+    }
+
     /// Gets a byte slice of this `MemoryBuffer`.
     pub(crate) fn as_slice(&self) -> &[u8] {
         unsafe {

@@ -42,7 +42,7 @@ impl LLVMModule<'_> {
     pub(crate) fn write_bitcode_to_memory(&self) -> MemoryBuffer {
         let buf = unsafe { llvm_sys::bit_writer::LLVMWriteBitcodeToMemoryBuffer(self.module) };
 
-        MemoryBuffer { memory_buffer: buf }
+        MemoryBuffer::new(buf)
     }
 
     pub(crate) fn write_ir_to_path(&self, path: &CStr) -> Result<(), String> {
@@ -62,6 +62,7 @@ impl LLVMModule<'_> {
         // internal API simpler, as all the other codegen methods output a MemoryBuffer.
         unsafe {
             let ptr = LLVMPrintModuleToString(self.module);
+            scopeguard::defer!(LLVMDisposeMessage(ptr));
             let cstr = CStr::from_ptr(ptr);
             let bytes = cstr.to_bytes();
 
@@ -73,9 +74,8 @@ impl LLVMModule<'_> {
                 bytes.len(),
                 buffer_name.as_ptr(),
             );
-            LLVMDisposeMessage(ptr);
 
-            MemoryBuffer { memory_buffer }
+            MemoryBuffer::new(memory_buffer)
         }
     }
 

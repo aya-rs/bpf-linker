@@ -71,10 +71,11 @@ pub(crate) fn init(args: &[Cow<'_, CStr>], overview: &CStr) {
     };
 }
 
-pub(crate) fn find_embedded_bitcode(
+pub(crate) fn with_embedded_bitcode<T>(
     context: &LLVMContext,
     data: &[u8],
-) -> Result<Option<Vec<u8>>, String> {
+    f: impl FnOnce(&[u8]) -> T,
+) -> Result<Option<T>, String> {
     let buffer_name = c"mem_buffer";
     let buffer = unsafe {
         LLVMCreateMemoryBufferWithMemoryRange(
@@ -84,15 +85,19 @@ pub(crate) fn find_embedded_bitcode(
             0,
         )
     };
+    let buffer = MemoryBuffer::new(buffer);
 
-    let (bin, message) =
-        Message::with(|message| unsafe { LLVMCreateBinary(buffer, context.as_mut_ptr(), message) });
+    let (bin, message) = Message::with(|message| unsafe {
+        LLVMCreateBinary(buffer.as_mut_ptr(), context.as_mut_ptr(), message)
+    });
     if bin.is_null() {
         return Err(message.as_string_lossy().to_string());
     }
+    scopeguard::defer!(unsafe { LLVMDisposeBinary(bin) });
 
-    let mut ret = None;
     let iter = unsafe { LLVMObjectFileCopySectionIterator(bin) };
+    scopeguard::defer!(unsafe { LLVMDisposeSectionIterator(iter) });
+
     while unsafe { LLVMObjectFileIsSectionIteratorAtEnd(bin, iter) } == 0 {
         let name = unsafe { LLVMGetSectionName(iter) };
         if !name.is_null() {
@@ -100,17 +105,14 @@ pub(crate) fn find_embedded_bitcode(
             if name == c".llvmbc" {
                 let buf = unsafe { LLVMGetSectionContents(iter) };
                 let size = unsafe { LLVMGetSectionSize(iter) }.try_into().unwrap();
-                ret = Some(unsafe { slice::from_raw_parts(buf.cast(), size).to_vec() });
-                break;
+                let data = unsafe { slice::from_raw_parts(buf.cast(), size) };
+                return Ok(Some(f(data)));
             }
         }
         unsafe { LLVMMoveToNextSection(iter) };
     }
-    unsafe { LLVMDisposeSectionIterator(iter) };
-    unsafe { LLVMDisposeBinary(bin) };
-    unsafe { LLVMDisposeMemoryBuffer(buffer) };
 
-    Ok(ret)
+    Ok(None)
 }
 
 #[must_use]
@@ -129,14 +131,13 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
             0,
         )
     };
+    scopeguard::defer!(unsafe { LLVMDisposeMemoryBuffer(buffer) });
 
     let mut temp_module = ptr::null_mut();
 
     if unsafe { LLVMParseBitcodeInContext2(context.as_mut_ptr(), buffer, &mut temp_module) } == 0 {
         linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
     }
-
-    unsafe { LLVMDisposeMemoryBuffer(buffer) };
 
     linked
 }
@@ -207,6 +208,8 @@ pub(crate) fn optimize(
     debug!("running passes: {passes}");
     let passes = CString::new(passes).unwrap();
     let options = unsafe { LLVMCreatePassBuilderOptions() };
+    scopeguard::defer!(unsafe { LLVMDisposePassBuilderOptions(options) });
+
     let error = unsafe {
         LLVMRunPasses(
             module.as_mut_ptr(),
@@ -215,17 +218,16 @@ pub(crate) fn optimize(
             options,
         )
     };
-    unsafe { LLVMDisposePassBuilderOptions(options) };
     // Handle the error and print it to stderr.
     if !error.is_null() {
         let error_type_id = unsafe { LLVMGetErrorTypeId(error) };
         // This is the only error type that exists currently, but there might be more in the future.
         assert_eq!(error_type_id, unsafe { LLVMGetStringErrorTypeId() });
         let error_message = unsafe { LLVMGetErrorMessage(error) };
+        scopeguard::defer!(unsafe { LLVMDisposeErrorMessage(error_message) });
         let error_string = unsafe { CStr::from_ptr(error_message) }
             .to_string_lossy()
             .to_string();
-        unsafe { LLVMDisposeErrorMessage(error_message) };
         return Err(error_string);
     }
 

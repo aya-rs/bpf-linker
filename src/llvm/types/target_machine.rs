@@ -88,9 +88,7 @@ impl LLVMTargetMachine {
             return Err(message.as_string_lossy().to_string());
         }
 
-        Ok(MemoryBuffer {
-            memory_buffer: out_buf,
-        })
+        Ok(MemoryBuffer::new(out_buf))
     }
 }
 
