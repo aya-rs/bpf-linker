@@ -381,10 +381,12 @@ impl<'ctx> DISanitizer<'ctx> {
             let empty_node = unsafe { LLVMMDNodeInContext2(self.context, ptr::null_mut(), 0) };
             subprogram.set_retained_nodes(empty_node);
 
-            let ret = replace.insert(subprogram.value_ref as u64, unsafe {
-                LLVMValueAsMetadata(new_program.value_ref)
-            });
-            assert!(ret.is_none());
+            assert_eq!(
+                replace.insert(subprogram.value_ref as u64, unsafe {
+                    LLVMValueAsMetadata(new_program.value_ref)
+                }),
+                None
+            );
         }
 
         replace
