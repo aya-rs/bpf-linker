@@ -455,28 +455,28 @@ where
 
     let mut buf = Vec::new();
     for input in inputs {
-        let data: Vec<u8>;
         let (path, input) = match input {
             LinkerInput::File { path } => {
-                data = fs::read(path).map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
-                (path.to_owned(), data.as_ref())
+                let data = fs::read(path).map_err(|e| LinkerError::IoError(path.to_owned(), e))?;
+                (path.to_owned(), Cow::Owned(data))
             }
-            LinkerInput::Buffer { name, bytes } => {
-                (PathBuf::from(format!("in_memory::{}", name)), bytes)
-            }
+            LinkerInput::Buffer { name, bytes } => (
+                PathBuf::from(format!("in_memory::{}", name)),
+                Cow::Borrowed(bytes),
+            ),
         };
 
         // determine whether the input is bitcode, ELF with embedded bitcode, an archive file
         // or an invalid file
-        let in_type =
-            InputKind::detect(input).ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
+        let in_type = InputKind::detect(input.as_ref())
+            .ok_or_else(|| LinkerError::InvalidInputType(path.clone()))?;
 
         match in_type {
             InputKind::Archive => {
                 info!("linking archive {}", path.display());
 
                 // Extract the archive and call link_reader() for each item.
-                let mut archive = Archive::new(input);
+                let mut archive = Archive::new(input.as_ref());
                 while let Some(item) = archive.next_entry() {
                     let mut item = item.map_err(|e| LinkerError::IoError(path.clone(), e))?;
                     let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
@@ -519,7 +519,7 @@ where
             }
             InputKind::Linker(kind) => {
                 info!("linking file {} type {kind}", path.display());
-                match link_data(context, &mut module, &path, input, kind) {
+                match link_data(context, &mut module, &path, input.as_ref(), kind) {
                     Ok(()) => {}
                     Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
