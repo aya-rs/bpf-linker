@@ -16,24 +16,29 @@ use object::{Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
 
 macro_rules! write_bytes {
     ($dst:expr, $($bytes:expr),* $(,)?) => {
-        {
-            let result = (|| -> anyhow::Result<()> {
+        (|| {
+            use std::io::{IoSlice, Error, ErrorKind};
+            let mut bufs = [
                 $(
-                    $dst.write_all($bytes.as_ref()).with_context(|| {
-                        format!(
-                            "failed to write bytes to stdout: {}",
-                            OsStr::from_bytes($bytes.as_ref()).display()
-                        )
-                    })?;
+                    IoSlice::new($bytes.as_ref()),
                 )*
-                $dst.write_all(b"\n").with_context(|| {
-                    "failed to write newline to stdout"
-                })?;
-                Ok(())
-            })();
-
-            result
-        }
+                IoSlice::new(b"\n"),
+            ];
+            // TODO(https://github.com/rust-lang/rust/issues/70436): use `write_all_vectored` when stable.
+            let mut bufs = &mut bufs[..];
+            IoSlice::advance_slices(&mut bufs, 0);
+            while !bufs.is_empty() {
+                match $dst.write_vectored(bufs) {
+                    Ok(0) => {
+                        return Err(Error::new(ErrorKind::WriteZero, "failed to write whole buffer"));
+                    }
+                    Ok(n) => IoSlice::advance_slices(&mut bufs, n),
+                    Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
+        })().map_err(Into::<anyhow::Error>::into)
     };
 }
 
