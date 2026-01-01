@@ -24,6 +24,7 @@ use llvm_sys::{
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
     },
+    ir_reader::LLVMParseIRInContext,
     linker::LLVMLinkModules2,
     object::{
         LLVMCreateBinary, LLVMDisposeBinary, LLVMDisposeSectionIterator, LLVMGetSectionContents,
@@ -140,6 +141,55 @@ pub(crate) fn link_bitcode_buffer<'ctx>(
     }
 
     linked
+}
+
+/// Links an LLVM IR buffer into the given module.
+///
+/// The buffer must be null-terminated (hence `CStr`), because LLVM's IR parser
+/// requires `RequiresNullTerminator=true` when creating the memory buffer.
+/// See `getMemBuffer` with default `RequiresNullTerminator = true`:
+/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/include/llvm/Support/MemoryBuffer.h#L134
+/// Called by `LLVMParseIRInContext` follows this path parseIR => parseAssembly => parseAssemblyInto
+/// Deep inside LLVM parser's they rely on the null termination for performance optimization.
+/// LLVM's C API does not enforce this at the type level, so callers must guarantee the invariant themselves.
+/// See the relevant code inside LLVM's parser:
+/// https://github.com/llvm/llvm-project/blob/bde90624185ea2cead0a8d7231536e2625d78798/llvm/lib/AsmParser/Parser.cpp#L30
+///
+/// Without the null terminator, LLVM hits an assertion in debug builds.
+pub(crate) fn link_ir_buffer<'ctx>(
+    context: &'ctx LLVMContext,
+    module: &mut LLVMModule<'ctx>,
+    buffer: &CStr,
+) -> Result<bool, String> {
+    let buffer_name = c"ir_buffer";
+    let buffer = buffer.to_bytes();
+    let mem_buffer = unsafe {
+        LLVMCreateMemoryBufferWithMemoryRange(
+            buffer.as_ptr().cast(),
+            buffer.len(),
+            buffer_name.as_ptr(),
+            0,
+        )
+    };
+
+    let mut temp_module = ptr::null_mut();
+    let (ret, message) = Message::with(|error_msg| unsafe {
+        // LLVMParseIRInContext takes ownership of mem_buffer, so we don't need to dispose of it ourselves.
+        // https://github.com/llvm/llvm-project/blob/00276b67d36a665119a6a7b39dbba69f45c44e58/llvm/lib/IRReader/IRReader.cpp#L122
+        LLVMParseIRInContext(
+            context.as_mut_ptr(),
+            mem_buffer,
+            &mut temp_module,
+            error_msg,
+        )
+    });
+
+    if ret == 0 {
+        let linked = unsafe { LLVMLinkModules2(module.as_mut_ptr(), temp_module) } == 0;
+        Ok(linked)
+    } else {
+        Err(message.as_string_lossy().to_string())
+    }
 }
 
 pub(crate) fn target_from_triple(triple: &CStr) -> Result<LLVMTargetRef, String> {

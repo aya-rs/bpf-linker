@@ -43,6 +43,10 @@ pub enum LinkerError {
     #[error("failure linking module {0}")]
     LinkModuleError(PathBuf),
 
+    /// Parsing an IR module failed.
+    #[error("failure parsing IR module `{0}`: {1}")]
+    IRParseError(PathBuf, String),
+
     /// Linking a module included in an archive failed.
     #[error("failure linking module {1} from {0}")]
     LinkArchiveModuleError(PathBuf, PathBuf),
@@ -161,6 +165,7 @@ enum LinkerInputKind {
     Bitcode,
     Elf,
     MachO,
+    Ir,
 }
 
 impl std::fmt::Display for LinkerInputKind {
@@ -169,12 +174,20 @@ impl std::fmt::Display for LinkerInputKind {
             f,
             "{}",
             match self {
-                Self::Bitcode => "bitcode",
-                Self::Elf => "elf",
+                Self::Bitcode => "Bitcode",
+                Self::Elf => "ELF",
                 Self::MachO => "Mach-O",
+                Self::Ir => "IR",
             }
         )
     }
+}
+
+enum PreparedLinkerInput<'a> {
+    Bitcode(&'a [u8]),
+    Elf(&'a [u8]),
+    MachO(&'a [u8]),
+    Ir(&'a CStr),
 }
 
 enum InputKind {
@@ -494,7 +507,19 @@ where
                         }
                     };
 
-                    match link_data(context, &mut module, &name, &buf, in_type) {
+                    let prepared_input = match in_type {
+                        LinkerInputKind::Bitcode => PreparedLinkerInput::Bitcode(&buf),
+                        LinkerInputKind::Elf => PreparedLinkerInput::Elf(&buf),
+                        LinkerInputKind::MachO => PreparedLinkerInput::MachO(&buf),
+                        LinkerInputKind::Ir => {
+                            buf.push(b'\0');
+                            PreparedLinkerInput::Ir(CStr::from_bytes_with_nul(&buf).map_err(
+                                |err| LinkerError::IRParseError(name.to_owned(), err.to_string()),
+                            )?)
+                        }
+                    };
+
+                    match link_data(context, &mut module, &name, prepared_input) {
                         Ok(()) => continue,
                         Err(LinkerError::InvalidInputType(name)) => {
                             info!("ignoring archive item {}: invalid type", name.display());
@@ -518,8 +543,21 @@ where
                 }
             }
             InputKind::Linker(kind) => {
+                let terminated_input: CString;
+                let prepared_input = match kind {
+                    LinkerInputKind::Bitcode => PreparedLinkerInput::Bitcode(input.as_ref()),
+                    LinkerInputKind::Elf => PreparedLinkerInput::Elf(input.as_ref()),
+                    LinkerInputKind::MachO => PreparedLinkerInput::MachO(input.as_ref()),
+                    LinkerInputKind::Ir => {
+                        let input: Vec<_> = input.into_owned();
+                        terminated_input = CString::new(input).map_err(|err| {
+                            LinkerError::IRParseError(path.to_owned(), err.to_string())
+                        })?;
+                        PreparedLinkerInput::Ir(&terminated_input)
+                    }
+                };
                 info!("linking file {} type {kind}", path.display());
-                match link_data(context, &mut module, &path, input.as_ref(), kind) {
+                match link_data(context, &mut module, &path, prepared_input) {
                     Ok(()) => {}
                     Err(LinkerError::InvalidInputType(path)) => {
                         info!("ignoring file {}: invalid type", path.display());
@@ -541,8 +579,7 @@ fn link_data<'ctx>(
     context: &'ctx LLVMContext,
     module: &mut LLVMModule<'ctx>,
     path: &Path,
-    data: &[u8],
-    in_type: LinkerInputKind,
+    data: PreparedLinkerInput<'_>,
 ) -> Result<(), LinkerError> {
     let mut link_data = |data: &[u8]| {
         if !llvm::link_bitcode_buffer(context, module, data) {
@@ -551,19 +588,27 @@ fn link_data<'ctx>(
             Ok(())
         }
     };
-    match in_type {
-        LinkerInputKind::Bitcode => link_data(data),
-        LinkerInputKind::Elf => match llvm::with_embedded_bitcode(context, data, link_data) {
-            Ok(result) => match result {
-                Some(result) => result,
-                None => Err(LinkerError::MissingBitcodeSection(path.to_owned())),
-            },
-            Err(e) => Err(LinkerError::EmbeddedBitcodeError(e)),
-        },
+    match data {
+        PreparedLinkerInput::Bitcode(data) => link_data(data),
+        PreparedLinkerInput::Elf(data) => llvm::with_embedded_bitcode(context, data, link_data)
+            .map_err(LinkerError::EmbeddedBitcodeError)
+            .and_then(|opt| {
+                opt.unwrap_or_else(|| Err(LinkerError::MissingBitcodeSection(path.to_owned())))
+            }),
         // we need to handle this here since archive files could contain
         // mach-o files, eg somecrate.rlib containing lib.rmeta which is
         // mach-o on macos
-        LinkerInputKind::MachO => Err(LinkerError::InvalidInputType(path.to_owned())),
+        PreparedLinkerInput::MachO(_data) => Err(LinkerError::InvalidInputType(path.to_owned())),
+        PreparedLinkerInput::Ir(data) => {
+            let linked = llvm::link_ir_buffer(context, module, data)
+                .map_err(|e| LinkerError::IRParseError(path.to_owned(), e))?;
+
+            if linked {
+                Ok(())
+            } else {
+                Err(LinkerError::LinkModuleError(path.to_owned()))
+            }
+        }
     }
 }
 
@@ -834,7 +879,24 @@ impl LinkerInputKind {
             Some(b"\x42\x43\xC0\xDE" | b"\xDE\xC0\x17\x0b") => Some(Self::Bitcode),
             Some(b"\x7FELF") => Some(Self::Elf),
             Some(b"\xcf\xfa\xed\xfe") => Some(Self::MachO),
-            _ => None,
+            _ => {
+                const PREFIXES: &[&[u8]] = &[
+                    b"; ModuleID",
+                    b"source_filename",
+                    b"target datalayout",
+                    b"target triple",
+                    b"define ",
+                    b"declare ",
+                    b"!llvm",
+                ];
+
+                let trimmed = data.trim_ascii_start();
+
+                PREFIXES
+                    .iter()
+                    .any(|p| trimmed.starts_with(p))
+                    .then_some(Self::Ir)
+            }
         }
     }
 }
@@ -848,6 +910,7 @@ impl InputKind {
     }
 }
 
+#[derive(Debug)]
 pub struct LinkerOutput {
     inner: MemoryBuffer,
 }
