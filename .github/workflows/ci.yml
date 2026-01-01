@@ -211,7 +211,7 @@ jobs:
 
       - name: Restore LLVM from GitHub Actions
         if: matrix.llvm-from == 'source'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: llvm-install
           key: ${{ needs.llvm.outputs.cache-key }}
