@@ -3,17 +3,19 @@ name: LLVM
 on:
   workflow_call:
     outputs:
-      cache-key:
-        value: ${{ jobs.llvm.outputs.cache-key }}
+      artifact-ref:
+        value: ${{ jobs.llvm.outputs.artifact-ref }}
 
-permissions: {}
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   llvm:
     runs-on: ubuntu-22.04
     name: llvm
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.cache-key }}
+      artifact-ref: ${{ steps.artifact.outputs.ref }}
     steps:
       - id: ls-remote
         run: |
@@ -21,25 +23,38 @@ jobs:
           value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/21.1-2025-08-01 | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
-      - id: cache-key
-        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+      - id: artifact
+        run: |
+          set -euxo pipefail
+          echo "ref=ghcr.io/${{ github.repository }}-llvm:llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
 
-      - name: Cache
-        id: cache-llvm
-        uses: actions/cache@v5
-        with:
-          path: llvm-install
-          key: ${{ steps.cache-key.outputs.cache-key }}
-          lookup-only: true
+      - uses: oras-project/setup-oras@v1
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - name: Download LLVM artifact
+        id: artifact-restore
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          oras pull "${{ steps.artifact.outputs.ref }}"
+          mkdir -p llvm-install
+          tar --zstd -xf llvm-install.tar.zst -C llvm-install
+          rm -f llvm-install.tar.zst
 
       - uses: actions/checkout@v6
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
 
       - name: Install Tools
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
         run: |
           set -euxo pipefail
           wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
@@ -52,7 +67,7 @@ jobs:
           sudo apt -y install cmake ninja-build clang lld
 
       - name: Checkout LLVM Source
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
         uses: actions/checkout@v6
         with:
           repository: aya-rs/llvm-project
@@ -60,10 +75,24 @@ jobs:
           path: llvm-project
 
       - name: Build LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
         run: |
           set -euxo pipefail
           cargo xtask build-llvm \
             --src-dir llvm-project \
             --build-dir llvm-build \
             --install-prefix "${{ github.workspace }}/llvm-install"
+
+      - name: Package LLVM artifact
+        if: steps.artifact-restore.outcome != 'success'
+        run: |
+          set -euxo pipefail
+          tar --zstd -C llvm-install -cf llvm-install.tar.zst .
+
+      - name: Publish LLVM OCI artifact
+        if: steps.artifact-restore.outcome != 'success'
+        run: |
+          set -euxo pipefail
+          oras push "${{ steps.artifact.outputs.ref }}" \
+            --artifact-type application/vnd.aya.llvm.install \
+            llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd

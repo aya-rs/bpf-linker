@@ -46,6 +46,9 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
+    permissions:
+      contents: read
+      packages: read
     runs-on: ${{ matrix.platform.os }}
     # We work with two git repositories in this workflow:
     #
@@ -209,13 +212,25 @@ jobs:
             fi
           fi
 
-      - name: Restore LLVM from GitHub Actions
+      - uses: oras-project/setup-oras@v1
         if: matrix.llvm-from == 'source'
-        uses: actions/cache/restore@v5
-        with:
-          path: llvm-install
-          key: ${{ needs.llvm.outputs.cache-key }}
-          fail-on-cache-miss: true
+
+      - name: Login to ghcr.io
+        if: matrix.llvm-from == 'source'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - name: Restore LLVM from ghcr.io
+        if: matrix.llvm-from == 'source'
+        run: |
+          set -euxo pipefail
+          oras pull "${{ needs.llvm.outputs.artifact-ref }}"
+          mkdir -p llvm-install
+          tar --zstd -xf llvm-install.tar.zst -C llvm-install
+          rm -f llvm-install.tar.zst
 
       - name: Add LLVM to PATH && LD_LIBRARY_PATH
         if: matrix.llvm-from == 'source'
