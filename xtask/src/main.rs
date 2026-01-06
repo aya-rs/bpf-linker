@@ -42,6 +42,24 @@ struct BuildLlvm {
     /// Directory in which the built LLVM artifacts are installed.
     #[arg(long)]
     install_prefix: PathBuf,
+    /// C compiler.
+    #[arg(long, default_value = "clang")]
+    c_compiler: String,
+    /// C++ compiler.
+    #[arg(long, default_value = "clang++")]
+    cxx_compiler: String,
+    /// Target architecture to build LLVM for, must match the syntax of
+    /// `CMAKE_SYSTEM_PROCESSOR` option, e.g. `aarch64`, `riscv64`.
+    #[arg(long, requires = "system")]
+    processor: Option<String>,
+    /// Target system to build LLVM for, must match the syntax of
+    /// `CMAKE_SYSTEM_NAME` option, e.g. `Linux`.
+    #[arg(long)]
+    system_name: Option<String>,
+    /// Sysroot that contains necessary libraries for the given target, e.g.
+    /// `/usr/aarch64-unknown-linux-musl`.
+    #[arg(long)]
+    sysroot: Option<PathBuf>,
 }
 
 #[derive(clap::Subcommand)]
@@ -94,12 +112,17 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
         src_dir,
         build_dir,
         install_prefix,
+        c_compiler,
+        cxx_compiler,
+        processor,
+        system_name: system,
+        sysroot,
     } = options;
 
     let mut install_arg = OsString::from("-DCMAKE_INSTALL_PREFIX=");
     install_arg.push(install_prefix.as_os_str());
     let mut cmake_configure = Command::new("cmake");
-    let cmake_configure = cmake_configure
+    let _: &mut Command = cmake_configure
         .arg("-S")
         .arg(src_dir.join("llvm"))
         .arg("-B")
@@ -108,8 +131,6 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             "-G",
             "Ninja",
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
-            "-DCMAKE_C_COMPILER=clang",
-            "-DCMAKE_CXX_COMPILER=clang++",
             "-DLLVM_BUILD_LLVM_DYLIB=ON",
             "-DLLVM_ENABLE_ASSERTIONS=ON",
             "-DLLVM_ENABLE_PROJECTS=",
@@ -119,7 +140,27 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             "-DLLVM_TARGETS_TO_BUILD=BPF",
             "-DLLVM_USE_LINKER=lld",
         ])
+        .args([
+            format!("-DCMAKE_C_COMPILER={c_compiler}"),
+            format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"),
+        ])
         .arg(install_arg);
+    if let Some(processor) = processor {
+        let _: &mut Command = cmake_configure.arg(format!("-DCMAKE_SYSTEM_PROCESSOR={processor}"));
+    }
+    if let Some(system) = system {
+        let _: &mut Command = cmake_configure.arg(format!("-DCMAKE_SYSTEM_NAME={system}"));
+    }
+    if let Some(sysroot) = sysroot {
+        let mut sysroot_arg = OsString::from("-DCMAKE_SYSROOT=");
+        sysroot_arg.push(sysroot.as_os_str());
+        let _: &mut Command = cmake_configure.arg(sysroot_arg);
+        let _: &mut Command = cmake_configure.args([
+            "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER",
+            "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY",
+            "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY",
+        ]);
+    }
     println!("Configuring LLVM with command {cmake_configure:?}");
     let status = cmake_configure.status().with_context(|| {
         format!("failed to configure LLVM build with command {cmake_configure:?}")
