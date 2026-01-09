@@ -78,11 +78,11 @@ cargo xtask llvm build \
     --install-prefix ./llvm-install
 ```
 
-After that, bpf-linker can be built with the `LLVM_SYS_211_PREFIX` environment
+After that, bpf-linker can be built with the `LLVM_PREFIX` environment
 variable pointing to that directory:
 
 ```sh
-LLVM_SYS_211_PREFIX=./llvm-install cargo install --path .
+LLVM_PREFIX=./llvm-install cargo install --path .
 ```
 
 If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
