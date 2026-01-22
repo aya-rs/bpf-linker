@@ -12,8 +12,9 @@ older, more restrictive kernels.
 
 bpf-linker can be used to statically link multiple BPF object files together
 and optionally perform optimizations needed to target older kernels. It
-operates on LLVM bitcode, so the inputs must be bitcode files (.bc) or object
-files with embedded bitcode (.o), optionally stored inside ar archives (.a).
+operates on LLVM bitcode, so the inputs can be bitcode files (.bc), LLVM IR
+files (.ll), or object files with embedded bitcode (.o), optionally stored
+inside ar archives (.a).
 
 ## Installation
 
