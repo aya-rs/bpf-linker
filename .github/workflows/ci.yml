@@ -75,9 +75,10 @@ jobs:
           - rust: beta
             llvm: 21
             exclude-features: default,llvm-20,rust-llvm-20
-          - rust: nightly
-            llvm: 21
-            exclude-features: llvm-20,rust-llvm-20
+          # TODO: enable when llvm-sys 221.x is released
+          # - rust: nightly
+          #   llvm: 22
+          #   exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
         platform:
           # Rust CI ships only one flavor of libLLVM, dynamic or static, per
           # target. Linux GNU targets come with dynamic ones. Apple and Linux
@@ -98,8 +99,10 @@ jobs:
           - rust-ci
         include:
           # Currently we build LLVM from source only for Linux x86_64.
+          # Keep LLVM 21 here until aya-rs/llvm-project has a 22.x branch.
+          # Using nightly before https://github.com/rust-lang/rust/pull/150722
           - toolchain:
-              rust: nightly
+              rust: nightly-2026-01-28
               llvm: 21
               exclude-features: llvm-20,rust-llvm-20
             platform:
