@@ -307,6 +307,10 @@ jobs:
           cargo install --path . --no-default-features --features \
             ${{ env.LLVM_FEATURES_DYNAMIC }}
 
+      - name: Install autopoint for aya integration tests
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
+        run: sudo apt -y install autopoint
+
       - name: Run aya integration tests
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         working-directory: aya
