@@ -12,6 +12,10 @@ use std::{
 
 pub(crate) use di::DISanitizer;
 use iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _};
+#[cfg(not(feature = "llvm-22"))]
+use llvm_sys::ir_reader::LLVMParseIRInContext;
+#[cfg(feature = "llvm-22")]
+use llvm_sys::ir_reader::LLVMParseIRInContext2 as LLVMParseIRInContext;
 use llvm_sys::{
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
     bit_reader::LLVMParseBitcodeInContext2,
@@ -24,7 +28,6 @@ use llvm_sys::{
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
     },
-    ir_reader::LLVMParseIRInContext,
     linker::LLVMLinkModules2,
     object::{
         LLVMCreateBinary, LLVMDisposeBinary, LLVMDisposeSectionIterator, LLVMGetSectionContents,
