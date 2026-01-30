@@ -4,7 +4,11 @@
 
 #![expect(unused_crate_dependencies, reason = "used in bin")]
 
-#[cfg(any(feature = "rust-llvm-20", feature = "rust-llvm-21"))]
+#[cfg(any(
+    feature = "rust-llvm-20",
+    feature = "rust-llvm-21",
+    feature = "rust-llvm-22"
+))]
 use aya_rustc_llvm_proxy as _;
 
 macro_rules! assert_unique_features {
@@ -34,13 +38,16 @@ macro_rules! assert_unique_used_features {
 
 assert_unique_used_features! {
     "llvm-20",
-    "llvm-21"
+    "llvm-21",
+    "llvm-22"
 }
 
 #[cfg(feature = "llvm-20")]
 pub extern crate llvm_sys_20 as llvm_sys;
 #[cfg(feature = "llvm-21")]
 pub extern crate llvm_sys_21 as llvm_sys;
+#[cfg(feature = "llvm-22")]
+pub extern crate llvm_sys_22 as llvm_sys;
 
 mod linker;
 mod llvm;
