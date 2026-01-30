@@ -158,7 +158,7 @@ enum DIDerivedTypeOperand {
     ///
     #[cfg(feature = "llvm-20")]
     BaseType = 3,
-    #[cfg(feature = "llvm-21")]
+    #[cfg(not(feature = "llvm-20"))]
     BaseType = 5,
 }
 
@@ -226,7 +226,7 @@ enum DICompositeTypeOperand {
     /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813
     #[cfg(feature = "llvm-20")]
     Elements = 4,
-    #[cfg(feature = "llvm-21")]
+    #[cfg(not(feature = "llvm-20"))]
     Elements = 6,
 }
 
