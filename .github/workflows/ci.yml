@@ -29,7 +29,7 @@ jobs:
           components: clippy, rust-src
 
       - name: Run clippy
-        run: cargo clippy --features llvm-21,no-llvm-linking --all-targets --workspace -- --deny warnings
+        run: cargo clippy --features llvm-22,no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
     runs-on: ubuntu-latest
@@ -68,16 +68,16 @@ jobs:
         toolchain:
           - rust: 1.90.0
             llvm: 20
-            exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
+            exclude-features: default,llvm-19,llvm-21,llvm-22,rust-llvm-19,rust-llvm-21,rust-llvm-22
           - rust: stable
             llvm: 21
-            exclude-features: default,llvm-19,llvm-20,rust-llvm-19,rust-llvm-20
+            exclude-features: default,llvm-19,llvm-20,llvm-22,rust-llvm-19,rust-llvm-20,rust-llvm-22
           - rust: beta
             llvm: 21
-            exclude-features: default,llvm-20,rust-llvm-20
+            exclude-features: default,llvm-20,llvm-22,rust-llvm-20,rust-llvm-22
           - rust: nightly
-            llvm: 21
-            exclude-features: llvm-20,rust-llvm-20
+            llvm: 22
+            exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
         platform:
           # Rust CI ships only one flavor of libLLVM, dynamic or static, per
           # target. Linux GNU targets come with dynamic ones. Apple and Linux
@@ -100,11 +100,16 @@ jobs:
           # Currently we build LLVM from source only for Linux x86_64.
           - toolchain:
               rust: nightly
-              llvm: 21
-              exclude-features: llvm-20,rust-llvm-20
+              llvm: 22
+              exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
             platform:
               os: ubuntu-22.04
             llvm-from: source
+        exclude:
+          # Neither apt.llvm.org nor Homebrew has packaged LLVM 22 yet.
+          - toolchain:
+              llvm: 22
+            llvm-from: packages
     name: os=${{ matrix.platform.os }} rustc=${{ matrix.toolchain.rust }} llvm-version=${{ matrix.toolchain.llvm }} llvm-from=${{ matrix.llvm-from }}
     needs: llvm
 
