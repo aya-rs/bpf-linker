@@ -12,6 +12,10 @@ use std::{
 
 pub(crate) use di::DISanitizer;
 use iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _};
+// #[cfg(not(feature = "llvm-22"))]
+// use llvm_sys::ir_reader::LLVMParseIRInContext;
+// #[cfg(feature = "llvm-22")]
+// use llvm_sys::ir_reader::LLVMParseIRInContext2 as LLVMParseIRInContext;
 use llvm_sys::{
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
     bit_reader::LLVMParseBitcodeInContext2,
@@ -24,7 +28,7 @@ use llvm_sys::{
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
     },
-    ir_reader::LLVMParseIRInContext,
+    ir_reader,
     linker::LLVMLinkModules2,
     object::{
         LLVMCreateBinary, LLVMDisposeBinary, LLVMDisposeSectionIterator, LLVMGetSectionContents,
@@ -176,12 +180,22 @@ pub(crate) fn link_ir_buffer<'ctx>(
     let (ret, message) = Message::with(|error_msg| unsafe {
         // LLVMParseIRInContext takes ownership of mem_buffer, so we don't need to dispose of it ourselves.
         // https://github.com/llvm/llvm-project/blob/00276b67d36a665119a6a7b39dbba69f45c44e58/llvm/lib/IRReader/IRReader.cpp#L122
-        LLVMParseIRInContext(
-            context.as_mut_ptr(),
-            mem_buffer,
-            &mut temp_module,
-            error_msg,
-        )
+        #[expect(deprecated, reason = "not deprecated in LLVM < 22")]
+        if cfg!(feature = "llvm-22") {
+            ir_reader::LLVMParseIRInContext2(
+                context.as_mut_ptr(),
+                mem_buffer,
+                &mut temp_module,
+                error_msg,
+            )
+        } else {
+            ir_reader::LLVMParseIRInContext(
+                context.as_mut_ptr(),
+                mem_buffer,
+                &mut temp_module,
+                error_msg,
+            )
+        }
     });
 
     if ret == 0 {
