@@ -53,7 +53,7 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bpf-linker
-          features: llvm-21,llvm-link-static
+          features: llvm-22,llvm-link-static
           no-default-features: true
           dry-run: ${{ github.event_name != 'release' }}
         env:
