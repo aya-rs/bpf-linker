@@ -68,6 +68,7 @@ jobs:
         toolchain:
           - rust: 1.90.0
             llvm: 20
+            features: di-sanitizer
             exclude-features: default,llvm-19,llvm-21,rust-llvm-19,rust-llvm-21
           - rust: stable
             llvm: 21
@@ -244,14 +245,14 @@ jobs:
         run: |
           cargo hack check --feature-powerset --exclude-features \
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }},${{ matrix.toolchain.features }}
 
       - name: Build (dynamic linking, feature powerset)
         if: matrix.platform.dynamic-target || matrix.llvm-from != 'rust-ci'
         run: |
           cargo hack build --feature-powerset --exclude-features \
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }},${{ matrix.toolchain.features }}
 
       # Toolchains provided by rustup include standard library artifacts
       # only for Tier 1 targets, which do not include BPF targets.
@@ -267,7 +268,7 @@ jobs:
           RUSTC_BOOTSTRAP=1 cargo hack test --feature-powerset \
             --exclude-features \
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }},${{ matrix.toolchain.features }}
 
       # To make things easier for package maintainers, the step of building a
       # custom sysroot can be skipped by setting the `BPFEL_SYSROOT_DIR`
@@ -295,12 +296,15 @@ jobs:
           BPFEL_SYSROOT_DIR="${{ github.workspace }}/bpf-sysroot" \
             cargo hack test --feature-powerset --exclude-features \
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
+            --features ${{ env.LLVM_FEATURES_DYNAMIC }},${{ matrix.toolchain.features }}
 
       - uses: actions/checkout@v6
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         with:
-          repository: aya-rs/aya
+          # FIXME: Switch to upstream after https://github.com/aya-rs/aya/pull/1382
+          # is merged.
+          repository: vadorovsky/aya
+          ref: btf-sanitize-name
           path: aya
           submodules: recursive
 
@@ -308,7 +312,7 @@ jobs:
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         run: |
           cargo install --path . --no-default-features --features \
-            ${{ env.LLVM_FEATURES_DYNAMIC }}
+            ${{ env.LLVM_FEATURES_DYNAMIC }},${{ matrix.toolchain.features }}
 
       - name: Install autopoint for aya integration tests
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'

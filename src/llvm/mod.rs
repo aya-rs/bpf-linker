@@ -1,3 +1,4 @@
+#[cfg(feature = "di-sanitizer")]
 mod di;
 mod iter;
 mod types;
@@ -10,16 +11,18 @@ use std::{
     ptr, slice, str,
 };
 
+#[cfg(feature = "di-sanitizer")]
 pub(crate) use di::DISanitizer;
 use iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _};
+#[cfg(feature = "di-sanitizer")]
+use llvm_sys::core::LLVMGetMDString;
 use llvm_sys::{
     LLVMAttributeFunctionIndex, LLVMLinkage, LLVMVisibility,
     bit_reader::LLVMParseBitcodeInContext2,
     core::{
         LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
-        LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
-        LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2,
-        LLVMSetVisibility,
+        LLVMGetEnumAttributeKindForName, LLVMGetModuleInlineAsm, LLVMGetTarget, LLVMGetValueName2,
+        LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2, LLVMSetVisibility,
     },
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,

@@ -11,10 +11,7 @@ use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{Level, span, trace, warn};
 
-use super::types::{
-    di::DIType,
-    ir::{Function, MDNode, Metadata, Value},
-};
+use super::types::ir::{Function, MDNode, Metadata, Value};
 use crate::llvm::{LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
@@ -89,84 +86,46 @@ impl<'ctx> DISanitizer<'ctx> {
                             return;
                         }
 
-                        let mut is_data_carrying_enum = false;
-                        let mut remove_name = false;
-                        let mut members: Vec<DIType<'_>> = Vec::new();
-                        for element in di_composite_type.elements() {
-                            match element {
-                                Metadata::DICompositeType(di_composite_type_inner) => {
+                        // BPF backend in LLVM <21.1.5 does not support Rust enums.
+                        #[cfg(feature = "llvm-20")]
+                        {
+                            let mut is_data_carrying_enum = false;
+                            for element in di_composite_type.elements() {
+                                if let Metadata::DICompositeType(di_composite_type_inner) = element
+                                {
                                     // The presence of a composite type with `DW_TAG_variant_part`
                                     // as a member of another composite type means that we are
                                     // processing a data-carrying enum. Such types are not supported
                                     // by the Linux kernel. We need to remove the children, so BTF
                                     // doesn't contain data carried by the enum variant.
-                                    match di_composite_type_inner.tag() {
-                                        DW_TAG_variant_part => {
-                                            if let Some((ref name, _)) = names {
-                                                let file = di_composite_type.file();
-                                                let name = String::from_utf8_lossy(name.as_slice())
-                                                    .to_string();
-                                                trace!(
-                                                    "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it",
-                                                    filename = file.filename().map_or(
-                                                        "<unknown>".into(),
-                                                        String::from_utf8_lossy
-                                                    ),
-                                                    line = di_composite_type.line(),
-                                                );
-                                                self.skipped_types_lossy.push(name);
-                                            }
-
-                                            is_data_carrying_enum = true;
-                                            break;
+                                    if matches!(di_composite_type_inner.tag(), DW_TAG_variant_part)
+                                    {
+                                        if let Some((ref name, _)) = names {
+                                            let file = di_composite_type.file();
+                                            let name = String::from_utf8_lossy(name.as_slice())
+                                                .to_string();
+                                            trace!(
+                                                "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it",
+                                                filename = file.filename().map_or(
+                                                    "<unknown>".into(),
+                                                    String::from_utf8_lossy
+                                                ),
+                                                line = di_composite_type.line(),
+                                            );
+                                            self.skipped_types_lossy.push(name);
                                         }
-                                        _ => {}
+
+                                        is_data_carrying_enum = true;
+                                        break;
                                     }
                                 }
-                                Metadata::DIDerivedType(di_derived_type) => {
-                                    let base_type = di_derived_type.base_type();
-
-                                    match base_type {
-                                        Metadata::DICompositeType(base_type_di_composite_type) => {
-                                            if let Some(base_type_name) =
-                                                base_type_di_composite_type.name()
-                                            {
-                                                // `AyaBtfMapMarker` is a type which is used in fields of BTF map
-                                                // structs. We need to make such structs anonymous in order to get
-                                                // BTF maps accepted by the Linux kernel.
-                                                if base_type_name == b"AyaBtfMapMarker" {
-                                                    // Remove the name from the struct.
-                                                    remove_name = true;
-                                                    // And don't include the field in the sanitized DI.
-                                                } else {
-                                                    members.push(di_derived_type.into());
-                                                }
-                                            } else {
-                                                members.push(di_derived_type.into());
-                                            }
-                                        }
-                                        _ => {
-                                            members.push(di_derived_type.into());
-                                        }
-                                    }
-                                }
-                                _ => {}
+                            }
+                            if is_data_carrying_enum {
+                                di_composite_type.replace_elements(MDNode::empty(self.context));
                             }
                         }
-                        if is_data_carrying_enum {
-                            di_composite_type.replace_elements(MDNode::empty(self.context));
-                        } else if !members.is_empty() {
-                            members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
-                            let sorted_elements =
-                                MDNode::with_elements(self.context, members.as_mut_slice());
-                            di_composite_type.replace_elements(sorted_elements);
-                        }
-                        if remove_name {
-                            // `AyaBtfMapMarker` is a type which is used in fields of BTF map
-                            // structs. We need to make such structs anonymous in order to get
-                            // BTF maps accepted by the Linux kernel.
-                            di_composite_type.replace_name(self.context, &[])
-                        } else if let Some((_, sanitized_name)) = names {
+
+                        if let Some((_, sanitized_name)) = names {
                             // Clear the name from characters incompatible with C.
                             di_composite_type.replace_name(self.context, sanitized_name.as_slice())
                         }

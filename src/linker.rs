@@ -673,6 +673,10 @@ fn create_target_machine(
 
 fn optimize<'ctx, 'a, E>(
     options: &LinkerOptions,
+    #[cfg_attr(
+        not(feature = "di-sanitizer"),
+        expect(unused, reason = "used when `di-sanitizer` feature is enabled")
+    )]
     context: &'ctx LLVMContext,
     target_machine: &LLVMTargetMachine,
     module: &mut LLVMModule<'ctx>,
@@ -710,6 +714,7 @@ where
 
     if *btf {
         // if we want to emit BTF, we need to sanitize the debug information
+        #[cfg(feature = "di-sanitizer")]
         llvm::DISanitizer::new(context, module).run(&export_symbols);
     } else {
         // if we don't need BTF emission, we can strip DI
