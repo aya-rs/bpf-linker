@@ -6,7 +6,9 @@ on:
   release:
     types: [published]
 
-permissions: {}
+permissions:
+  # This is used by the upload-rust-binary-action to upload the binary to the release.
+  contents: write
 
 jobs:
   upload-bins:
