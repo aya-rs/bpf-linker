@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{Context as _, anyhow};
-use object::{Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
+use object::{Architecture, Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
 
 macro_rules! write_bytes {
     ($dst:expr, $($bytes:expr),* $(,)?) => {
@@ -174,6 +174,109 @@ fn emit_search_path_if_defined(
     }
 }
 
+fn target_architecture_from_env() -> anyhow::Result<Architecture> {
+    const CARGO_CFG_TARGET_ARCH: &str = "CARGO_CFG_TARGET_ARCH";
+    let arch = env::var_os(CARGO_CFG_TARGET_ARCH).ok_or_else(|| {
+        anyhow::anyhow!(
+            "`{CARGO_CFG_TARGET_ARCH}` is not set, cannot determine the target architecture"
+        )
+    })?;
+    match arch.as_bytes() {
+        b"aarch64" => Ok(Architecture::Aarch64),
+        b"aarch64_ilp32" => Ok(Architecture::Aarch64_Ilp32),
+        b"alpha" => Ok(Architecture::Alpha),
+        b"arm" => Ok(Architecture::Arm),
+        b"avr" => Ok(Architecture::Avr),
+        b"bpf" => Ok(Architecture::Bpf),
+        b"csky" => Ok(Architecture::Csky),
+        b"loongarch32" => Ok(Architecture::LoongArch32),
+        b"loongarch64" => Ok(Architecture::LoongArch64),
+        b"m68k" => Ok(Architecture::M68k),
+        b"mips" => Ok(Architecture::Mips),
+        b"mips64" => Ok(Architecture::Mips64),
+        b"msp430" => Ok(Architecture::Msp430),
+        b"powerpc" => Ok(Architecture::PowerPc),
+        b"powerpc64" => Ok(Architecture::PowerPc64),
+        b"riscv32" => Ok(Architecture::Riscv32),
+        b"riscv64" => Ok(Architecture::Riscv64),
+        b"s390x" => Ok(Architecture::S390x),
+        b"sbf" => Ok(Architecture::Sbf),
+        b"sparc" => Ok(Architecture::Sparc),
+        b"sparc64" => Ok(Architecture::Sparc64),
+        b"wasm32" => Ok(Architecture::Wasm32),
+        b"wasm64" => Ok(Architecture::Wasm64),
+        b"xtensa" => Ok(Architecture::Xtensa),
+        b"x86" => Ok(Architecture::I386),
+        b"x86_64" => Ok(Architecture::X86_64),
+        _ => Err(anyhow::anyhow!(
+            "`{CARGO_CFG_TARGET_ARCH}` references unknown architecture `{}`",
+            arch.display()
+        )),
+    }
+}
+
+fn archive_member_object<'a>(
+    member: object::read::Result<object::read::archive::ArchiveMember<'a>>,
+    archive_path: &Path,
+    archive_data: &'a [u8],
+) -> anyhow::Result<(&'a [u8], object::File<'a>)> {
+    let member = member.with_context(|| {
+        format!(
+            "failed to process the member of library archive {}",
+            archive_path.display()
+        )
+    })?;
+    let member_name = member.name();
+    let member_data = member.data(archive_data).with_context(|| {
+        format!(
+            "failed to read data of static library archive member {} in {}",
+            OsStr::from_bytes(member_name).display(),
+            archive_path.display()
+        )
+    })?;
+    let obj = object::File::parse(member_data).with_context(|| {
+        format!(
+            "failed to parse data of static library archive member {} as object file",
+            OsStr::from_bytes(member_name).display(),
+        )
+    })?;
+    Ok((member_name, obj))
+}
+
+fn library_matches_architecture(path: &Path, target_arch: &Architecture) -> anyhow::Result<bool> {
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read library {}", path.display()));
+        }
+    };
+    let archive = ArchiveFile::parse(data.as_slice())
+        .with_context(|| format!("failed to parse library archive {}", path.display()))?;
+    let mut saw_member = false;
+    for member in archive.members() {
+        let (_member_name, obj) = archive_member_object(member, path, data.as_slice())?;
+        saw_member = true;
+        if obj.architecture() != *target_arch {
+            return Ok(false);
+        }
+    }
+    Ok(saw_member)
+}
+
+fn binary_matches_architecture(path: &Path, target_arch: &Architecture) -> anyhow::Result<bool> {
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read binary {}", path.display()));
+        }
+    };
+    let obj = object::File::parse(data.as_slice())
+        .with_context(|| format!("failed to parse binary {} as object file", path.display()))?;
+    Ok(obj.architecture() == *target_arch)
+}
+
 /// Points cargo to static library names of LLVM and dependencies needed by
 /// LLVM.
 ///
@@ -188,7 +291,11 @@ fn emit_search_path_if_defined(
 /// libraries at link time. Since static archives do not explicitly express
 /// which additional libraries are required, we have to determine that set
 /// ourselves using the undefined symbols, and instruct Cargo to link them.
-fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+fn link_llvm_static(
+    stdout: &mut io::StdoutLock<'_>,
+    target_architecture: &Architecture,
+    llvm_lib_dir: &Path,
+) -> anyhow::Result<()> {
     // Link the library files found inside the directory.
     let dir_entries = fs::read_dir(llvm_lib_dir)
         .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
@@ -222,30 +329,13 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
     let archive = ArchiveFile::parse(data.as_slice())
         .with_context(|| format!("failed to parse library archive {}", llvm_support.display()))?;
     'outer: for member in archive.members() {
-        let member = member.with_context(|| {
-            format!(
-                "failed to process the member of library archive {}",
-                llvm_support.display()
-            )
-        })?;
-        let member_data = member.data(data.as_slice()).with_context(|| {
-            format!(
-                "failed to read data of static library archive member {}",
-                OsStr::from_bytes(member.name()).display()
-            )
-        })?;
-        let obj = object::File::parse(member_data).with_context(|| {
-            format!(
-                "failed to parse data of static library archive member {} as object file",
-                OsStr::from_bytes(member.name()).display()
-            )
-        })?;
+        let (member_name, obj) = archive_member_object(member, &llvm_support, data.as_slice())?;
         for symbol in obj.symbols() {
             if symbol.is_undefined() {
                 let sym_name = symbol.name().with_context(|| {
                     format!(
                         "failed to retrieve the symbol name in static library archive member {}",
-                        OsStr::from_bytes(member.name()).display()
+                        OsStr::from_bytes(member_name).display()
                     )
                 })?;
                 if sym_name.contains("crc32") {
@@ -382,9 +472,7 @@ to an appropriate compiler"
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
                 for cxxstdlib in cxxstdlibs.iter_static_filenames() {
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
-                    if cxxstdlib_path.try_exists().with_context(|| {
-                        format!("failed to inspect the file {}", cxxstdlib_path.display(),)
-                    })? {
+                    if library_matches_architecture(&cxxstdlib_path, target_architecture)? {
                         cxxstdlib_paths.push(cxxstdlib_path);
                         found_any = true;
                     }
@@ -392,18 +480,14 @@ to an appropriate compiler"
             }
             if let Some(ref mut zlib_paths) = zlib_paths {
                 let zlib_path = ld_path.join(ZLIB);
-                if zlib_path.try_exists().with_context(|| {
-                    format!("failed to inspect the file {}", zlib_path.display())
-                })? {
+                if library_matches_architecture(&zlib_path, target_architecture)? {
                     zlib_paths.push(zlib_path);
                     found_any = true;
                 }
             }
             if let Some(ref mut zstd_paths) = zstd_paths {
-                let zstd_path = ld_path.join("libzstd.a");
-                if zstd_path.try_exists().with_context(|| {
-                    format!("failed to inspect the file {}", zstd_path.display())
-                })? {
+                let zstd_path = ld_path.join(ZSTD);
+                if library_matches_architecture(&zstd_path, target_architecture)? {
                     zstd_paths.push(zstd_path);
                     found_any = true;
                 }
@@ -571,16 +655,12 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
 /// Points cargo to the path containing LLVM libraries and to the LLVM library
 /// files.
 fn main() -> anyhow::Result<()> {
-    let link_fn = if cfg!(feature = "no-llvm-linking") {
+    if cfg!(feature = "no-llvm-linking") {
         if cfg!(feature = "llvm-link-static") {
             anyhow::bail!("`no-llvm-linking` and `llvm-link-static` are mutually exclusive");
         }
         return Ok(());
-    } else if cfg!(feature = "llvm-link-static") {
-        link_llvm_static
-    } else {
-        link_llvm_dynamic
-    };
+    }
 
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -599,21 +679,23 @@ fn main() -> anyhow::Result<()> {
         })
         .or_else(|| env::var_os(PATH).map(|p| (PATH, p)))
         .ok_or_else(|| anyhow!("neither {LLVM_PREFIX} nor {PATH} is set"))?;
+    let target_architecture = target_architecture_from_env()?;
     let llvm_config = env::split_paths(&paths_os)
         .find_map(|dir| {
             let candidate = Path::new(&dir).join("llvm-config");
-            candidate
-                .try_exists()
-                .with_context(|| format!("failed to inspect the file {}", candidate.display()))
-                .map(|exists| exists.then_some(candidate))
-                .transpose()
+            match binary_matches_architecture(&candidate, &target_architecture) {
+                Ok(true) => Some(Ok(candidate)),
+                Ok(false) => None,
+                Err(err) => Some(Err(err)),
+            }
         })
         .transpose()?
         .ok_or_else(|| {
             anyhow!(
-                "could not find llvm-config in directories specified by environment
+                "could not find llvm-config targeting architecture {:?} in directories specified by environment
 variable `{var_name}` {}",
-                paths_os.display()
+                target_architecture,
+                paths_os.display(),
             )
         })?;
     let llvm_lib_dir = llvm_config
@@ -638,5 +720,9 @@ variable `{var_name}` {}",
         llvm_lib_dir.as_os_str().as_bytes(),
     )?;
 
-    link_fn(&mut stdout, &llvm_lib_dir)
+    if cfg!(feature = "llvm-link-static") {
+        link_llvm_static(&mut stdout, &target_architecture, &llvm_lib_dir)
+    } else {
+        link_llvm_dynamic(&mut stdout, &llvm_lib_dir)
+    }
 }
