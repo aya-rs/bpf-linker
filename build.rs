@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{Context as _, anyhow};
-use object::{Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
+use object::{Architecture, Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
 
 macro_rules! write_bytes {
     ($dst:expr, $($bytes:expr),* $(,)?) => {
@@ -172,6 +172,79 @@ fn emit_search_path_if_defined(
         }
         None => Ok(false),
     }
+}
+
+fn target_architecture_from_env() -> anyhow::Result<Architecture> {
+    const CARGO_CFG_TARGET_ARCH: &str = "CARGO_CFG_TARGET_ARCH";
+    let arch = env::var_os(CARGO_CFG_TARGET_ARCH).ok_or_else(|| {
+        anyhow::anyhow!(
+            "`{CARGO_CFG_TARGET_ARCH} is not set, cannot determine the target architecture"
+        )
+    })?;
+    match arch.as_bytes() {
+        b"aarch64" => Ok(Architecture::Aarch64),
+        b"aarch64_ilp32" => Ok(Architecture::Aarch64_Ilp32),
+        b"alpha" => Ok(Architecture::Alpha),
+        b"arm" => Ok(Architecture::Arm),
+        b"avr" => Ok(Architecture::Avr),
+        b"bpf" => Ok(Architecture::Bpf),
+        b"csky" => Ok(Architecture::Csky),
+        b"loongarch32" => Ok(Architecture::LoongArch32),
+        b"loongarch64" => Ok(Architecture::LoongArch64),
+        b"m68k" => Ok(Architecture::M68k),
+        b"mips" => Ok(Architecture::Mips),
+        b"mips64" => Ok(Architecture::Mips64),
+        b"msp430" => Ok(Architecture::Msp430),
+        b"powerpc" => Ok(Architecture::PowerPc),
+        b"powerpc64" => Ok(Architecture::PowerPc64),
+        b"riscv32" => Ok(Architecture::Riscv32),
+        b"riscv64" => Ok(Architecture::Riscv64),
+        b"s390x" => Ok(Architecture::S390x),
+        b"sbf" => Ok(Architecture::Sbf),
+        b"sparc" => Ok(Architecture::Sparc),
+        b"sparc64" => Ok(Architecture::Sparc64),
+        b"wasm32" => Ok(Architecture::Wasm32),
+        b"wasm64" => Ok(Architecture::Wasm64),
+        b"xtensa" => Ok(Architecture::Xtensa),
+        b"x86" => Ok(Architecture::I386),
+        b"x86_64" => Ok(Architecture::X86_64),
+        _ => Err(anyhow::anyhow!(
+            "`{CARGO_CFG_TARGET_ARCH}` references unknown architecture `{}`",
+            arch.display()
+        )),
+    }
+}
+
+fn library_matches_architecture(path: &Path, target_arch: &Architecture) -> anyhow::Result<bool> {
+    let data =
+        fs::read(path).with_context(|| format!("failed to read library {}", path.display()))?;
+    let archive = ArchiveFile::parse(data.as_slice())
+        .with_context(|| format!("failed to parse library archive {}", path.display()))?;
+    for member in archive.members() {
+        let member = member.with_context(|| {
+            format!(
+                "failed to process the member of library archive {}",
+                path.display()
+            )
+        })?;
+        let member_data = member.data(data.as_slice()).with_context(|| {
+            format!(
+                "failed to read data of static library archive member {} in {}",
+                OsStr::from_bytes(member.name()).display(),
+                path.display()
+            )
+        })?;
+        let obj = object::File::parse(member_data).with_context(|| {
+            format!(
+                "failed to parse data of a library archive member {} as object file",
+                OsStr::from_bytes(member.name()).display()
+            )
+        })?;
+        if obj.architecture() != *target_arch {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Points cargo to static library names of LLVM and dependencies needed by
@@ -377,6 +450,7 @@ to an appropriate compiler"
         let mut cxxstdlib_paths = (!cxxstdlib_found).then(Vec::new);
         let mut zlib_paths = (needs_zlib && !zlib_found).then(Vec::new);
         let mut zstd_paths = (needs_zstd && !zstd_found).then(Vec::new);
+        let target_architecture = target_architecture_from_env()?;
         for ld_path in env::split_paths(ld_paths) {
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
@@ -384,7 +458,8 @@ to an appropriate compiler"
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
                     if cxxstdlib_path.try_exists().with_context(|| {
                         format!("failed to inspect the file {}", cxxstdlib_path.display(),)
-                    })? {
+                    })? && library_matches_architecture(&cxxstdlib_path, &target_architecture)?
+                    {
                         cxxstdlib_paths.push(cxxstdlib_path);
                         found_any = true;
                     }
@@ -394,16 +469,18 @@ to an appropriate compiler"
                 let zlib_path = ld_path.join(ZLIB);
                 if zlib_path.try_exists().with_context(|| {
                     format!("failed to inspect the file {}", zlib_path.display())
-                })? {
+                })? && library_matches_architecture(&zlib_path, &target_architecture)?
+                {
                     zlib_paths.push(zlib_path);
                     found_any = true;
                 }
             }
             if let Some(ref mut zstd_paths) = zstd_paths {
-                let zstd_path = ld_path.join("libzstd.a");
+                let zstd_path = ld_path.join(ZSTD);
                 if zstd_path.try_exists().with_context(|| {
                     format!("failed to inspect the file {}", zstd_path.display())
-                })? {
+                })? && library_matches_architecture(&zstd_path, &target_architecture)?
+                {
                     zstd_paths.push(zstd_path);
                     found_any = true;
                 }
