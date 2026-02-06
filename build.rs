@@ -42,15 +42,21 @@ macro_rules! write_bytes {
     };
 }
 
-enum Cxxstdlibs<'a> {
+/// Representation of a library that needs to be linked.
+enum Library<'a> {
+    /// Library (or multiple libraries separated by commas) that were provided
+    /// through an environment variable.
     EnvVar(OsString),
+    /// A single library, with name as bytes.
     Single(&'static [u8]),
+    /// Multiple libraries, with names as bytes.
     Multiple(&'a [&'static [u8]]),
 }
 
-impl Cxxstdlibs<'_> {
-    /// Detects which standard C++ library to link.
-    fn new(stdout: &mut io::StdoutLock<'_>) -> anyhow::Result<Self> {
+impl Library<'_> {
+    /// Detects which standard C++ library to link and creates an appropriate
+    /// [`Self`] representation.
+    fn cxxstdlib(stdout: &mut io::StdoutLock<'_>) -> anyhow::Result<Self> {
         const CXXSTDLIB: &str = "CXXSTDLIB";
         writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
         Ok(match env::var_os(CXXSTDLIB) {
@@ -82,14 +88,14 @@ impl Cxxstdlibs<'_> {
 
     fn iter(&self) -> impl Iterator<Item = &[u8]> {
         match self {
-            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.as_bytes().split(|b| *b == b',')),
+            Self::EnvVar(p) => LibraryIter::Parsed(p.as_bytes().split(|b| *b == b',')),
             Self::Single(s) => {
-                CxxstdlibsIter::Single(iter::once(
+                LibraryIter::Single(iter::once(
                     // Coerce `&&[u8]` to `&[u8]`.
                     *s,
                 ))
             }
-            Self::Multiple(m) => CxxstdlibsIter::Multiple(
+            Self::Multiple(m) => LibraryIter::Multiple(
                 m.iter()
                     // Coerce `&&[u8]` to `&[u8]`.
                     .copied(),
@@ -107,7 +113,7 @@ impl Cxxstdlibs<'_> {
     }
 }
 
-impl Display for Cxxstdlibs<'_> {
+impl Display for Library<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnvVar(p) => {
@@ -129,13 +135,13 @@ impl Display for Cxxstdlibs<'_> {
     }
 }
 
-enum CxxstdlibsIter<P, S, M> {
+enum LibraryIter<P, S, M> {
     Parsed(P),
     Single(S),
     Multiple(M),
 }
 
-impl<'a, P, S, M> Iterator for CxxstdlibsIter<P, S, M>
+impl<'a, P, S, M> Iterator for LibraryIter<P, S, M>
 where
     P: Iterator<Item = &'a [u8]>,
     S: Iterator<Item = &'a [u8]>,
@@ -260,7 +266,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> a
         }
     }
 
-    let cxxstdlibs = Cxxstdlibs::new(stdout)?;
+    let cxxstdlibs = Library::cxxstdlib(stdout)?;
 
     // Find directories with static libraries we're interested in:
     // - C++ standard library
