@@ -266,7 +266,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> a
         }
     }
 
-    let cxxstdlibs = Library::cxxstdlib(stdout)?;
+    let cxxstdlib = Library::cxxstdlib(stdout)?;
 
     // Find directories with static libraries we're interested in:
     // - C++ standard library
@@ -386,7 +386,7 @@ to an appropriate compiler"
         for ld_path in env::split_paths(ld_paths) {
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
-                for cxxstdlib in cxxstdlibs.iter_static_filenames() {
+                for cxxstdlib in cxxstdlib.iter_static_filenames() {
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
                     if cxxstdlib_path.try_exists().with_context(|| {
                         format!("failed to inspect the file {}", cxxstdlib_path.display(),)
@@ -486,12 +486,12 @@ to an appropriate compiler"
             }
             Ok(())
         }
-        check_library(stdout, ld_paths, &cxxstdlibs, cxxstdlib_paths)?;
+        check_library(stdout, ld_paths, &cxxstdlib, cxxstdlib_paths)?;
         check_library(stdout, ld_paths, ZLIB, zlib_paths)?;
         check_library(stdout, ld_paths, ZSTD, zstd_paths)?;
     }
 
-    for cxxstdlib in cxxstdlibs.iter() {
+    for cxxstdlib in cxxstdlib.iter() {
         write_bytes!(stdout, "cargo:rustc-link-lib=static=", cxxstdlib)?;
     }
     if needs_zlib {
