@@ -103,12 +103,12 @@ impl Library<'_> {
         }
     }
 
-    fn iter_static_filenames(&self) -> impl Iterator<Item = OsString> {
+    fn iter_static_filenames(&self) -> impl Iterator<Item = (&[u8], OsString)> {
         self.iter().map(|lib| {
             let mut filename = OsString::from("lib");
             filename.push(OsStr::from_bytes(lib));
             filename.push(".a");
-            filename
+            (lib, filename)
         })
     }
 }
@@ -386,7 +386,7 @@ to an appropriate compiler"
         for ld_path in env::split_paths(ld_paths) {
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
-                for cxxstdlib in cxxstdlib.iter_static_filenames() {
+                for (_, cxxstdlib) in cxxstdlib.iter_static_filenames() {
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
                     if cxxstdlib_path.try_exists().with_context(|| {
                         format!("failed to inspect the file {}", cxxstdlib_path.display(),)
