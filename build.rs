@@ -188,9 +188,9 @@ fn emit_search_path_if_defined(
 /// libraries at link time. Since static archives do not explicitly express
 /// which additional libraries are required, we have to determine that set
 /// ourselves using the undefined symbols, and instruct Cargo to link them.
-fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> anyhow::Result<()> {
     // Link the library files found inside the directory.
-    let dir_entries = fs::read_dir(llvm_lib_dir)
+    let dir_entries = fs::read_dir(&llvm_lib_dir)
         .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
     for entry in dir_entries {
         let entry = entry.with_context(|| {
@@ -504,14 +504,14 @@ to an appropriate compiler"
 /// dependencies, since shared libraries contain `DT_NEEDED` entries that
 /// specify the names of libaries that the dynamic linker should link
 /// beforehand.
-fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> anyhow::Result<()> {
     const LIB_LLVM: &[u8] = b"libLLVM";
     #[cfg(target_os = "macos")]
     const DYLIB_EXT: &[u8] = b".dylib";
     #[cfg(not(target_os = "macos"))]
     const DYLIB_EXT: &[u8] = b".so";
 
-    let dir_entries = fs::read_dir(llvm_lib_dir).with_context(|| {
+    let dir_entries = fs::read_dir(&llvm_lib_dir).with_context(|| {
         format!(
             "failed to read entry of the directory {}",
             llvm_lib_dir.display()
@@ -638,5 +638,5 @@ variable `{var_name}` {}",
         llvm_lib_dir.as_os_str().as_bytes(),
     )?;
 
-    link_fn(&mut stdout, &llvm_lib_dir)
+    link_fn(&mut stdout, llvm_lib_dir)
 }
