@@ -3,13 +3,13 @@ use std::{
     borrow::Cow,
     collections::{HashMap, VecDeque},
     env,
-    ffi::{OsStr, OsString},
+    ffi::{OsStr, OsString, os_str},
     fmt::{self, Display, Formatter},
     fs,
     io::{self, Write as _},
     iter,
     os::unix::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
     process::Command,
 };
 
@@ -160,6 +160,72 @@ where
     }
 }
 
+/// Representation of the paths that we search for libraries in.
+enum Paths<'a> {
+    /// Colon-separated paths parsed from the C compiler.
+    LdPaths(&'a OsStr),
+    /// A single path.
+    Single(PathBuf),
+}
+
+impl Paths<'_> {
+    fn display(&self) -> PathsDisplay<'_> {
+        match self {
+            Self::LdPaths(ld_paths) => PathsDisplay::LdPaths(ld_paths.display()),
+            Self::Single(path) => PathsDisplay::Single(path.display()),
+        }
+    }
+
+    fn iter(&self) -> PathsIter<'_> {
+        match self {
+            Self::LdPaths(ld_paths) => PathsIter::LdPaths(env::split_paths(ld_paths)),
+            Self::Single(single) => PathsIter::Single(iter::once(single)),
+        }
+    }
+}
+
+enum PathsDisplay<'a> {
+    LdPaths(os_str::Display<'a>),
+    Single(path::Display<'a>),
+}
+
+impl Display for PathsDisplay<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LdPaths(display) => display.fmt(f),
+            Self::Single(display) => display.fmt(f),
+        }
+    }
+}
+
+enum PathsIter<'a> {
+    LdPaths(env::SplitPaths<'a>),
+    Single(iter::Once<&'a PathBuf>),
+}
+
+impl<'a> Iterator for PathsIter<'a> {
+    type Item = Cow<'a, PathBuf>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            PathsIter::LdPaths(iter) => iter.next().map(Cow::Owned),
+            PathsIter::Single(iter) => iter.next().map(Cow::Borrowed),
+        }
+    }
+}
+
+/// Represents a located library with its corresponding path.
+struct LocatedLibrary {
+    library_name: OsString,
+    library_path: PathBuf,
+}
+
+impl AsRef<Path> for LocatedLibrary {
+    fn as_ref(&self) -> &Path {
+        &self.library_path
+    }
+}
+
 /// Validates the set of candidate `paths` for `library`.
 ///
 /// Does nothing if exactly one path is provided.
@@ -167,12 +233,12 @@ where
 /// Emits a warning (including content hashes) if multiple paths are present.
 ///
 /// Returns an error if `paths` is empty.
-fn check_library<S: Display>(
+fn check_library<S: Display, P: AsRef<Path>>(
     stdout: &mut io::StdoutLock<'_>,
-    ld_paths: &OsStr,
+    ld_paths: &Paths<'_>,
     library: S,
-    mut paths: VecDeque<PathBuf>,
-) -> anyhow::Result<PathBuf> {
+    mut paths: VecDeque<P>,
+) -> anyhow::Result<P> {
     let path = paths.pop_front().ok_or_else(|| {
         anyhow::anyhow!(
             "could not find {library} in any of the following directories: {}",
@@ -204,9 +270,9 @@ fn check_library<S: Display>(
             hashes.entry(hasher.finish()).or_default().push(path);
             Ok(())
         }
-        add_path_hash(&mut hashes, &mut buffer, &path)?;
+        add_path_hash(&mut hashes, &mut buffer, path.as_ref())?;
         for path in paths.iter() {
-            add_path_hash(&mut hashes, &mut buffer, path)?;
+            add_path_hash(&mut hashes, &mut buffer, path.as_ref())?;
         }
         if hashes.len() > 1 {
             write!(
@@ -234,13 +300,13 @@ fn check_library<S: Display>(
 
 fn find_and_link_libraries<const N: usize>(
     stdout: &mut io::StdoutLock<'_>,
-    ld_paths: &OsStr,
+    ld_paths: Paths<'_>,
     libraries: &[Library<'_>; N],
 ) -> anyhow::Result<()> {
     // Collecions of all library candidate paths. Might contain duplicates if
     // a library is present in different directories from `ld_paths`.
     let mut library_candidates: [_; N] = array::from_fn(|_| VecDeque::new());
-    for ld_path in env::split_paths(ld_paths) {
+    for ld_path in ld_paths.iter() {
         for (i, library) in libraries.iter().enumerate() {
             for (_, filename) in library.iter_static_filenames() {
                 let library_path = ld_path.join(filename);
@@ -258,7 +324,7 @@ fn find_and_link_libraries<const N: usize>(
     // Emit the appropriate Cargo instructions to link the found liraries.
     for (i, library) in libraries.iter().enumerate() {
         let library_candidates = std::mem::take(&mut library_candidates[i]);
-        let library_path = check_library(stdout, ld_paths, library, library_candidates)?;
+        let library_path = check_library(stdout, &ld_paths, library, library_candidates)?;
         let library_dir = library_path
             .parent()
             .expect("`library_path` should have a parent");
@@ -514,7 +580,7 @@ to an appropriate compiler"
         const ZSTD: &[u8] = b"zstd";
         find_and_link_libraries(
             stdout,
-            ld_paths,
+            Paths::LdPaths(ld_paths),
             &[cxxstdlib, Library::Single(ZLIB), Library::Single(ZSTD)],
         )?;
     }
@@ -541,54 +607,43 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> 
             llvm_lib_dir.display()
         )
     })?;
-    let libraries = dir_entries
-        .filter_map(|entry| {
-            entry
-                .with_context(|| {
-                    format!(
-                        "failed to read entry of the directory {}",
-                        llvm_lib_dir.display()
-                    )
-                })
-                .map(|entry| {
-                    let mut file_name = entry.file_name().into_encoded_bytes();
-                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(DYLIB_EXT) {
-                        drop(file_name.drain((file_name.len() - DYLIB_EXT.len())..));
-                        drop(file_name.drain(..LIB_LLVM.len()));
-                        // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
-                        // Since then, it was only trimmed.
-                        Some(unsafe { OsString::from_encoded_bytes_unchecked(file_name) })
-                    } else {
-                        None
-                    }
-                })
-                .transpose()
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let library = match libraries.as_slice() {
-        [] => {
-            anyhow::bail!(
-                "could not find dynamic libLLVM in the directory {}",
+    let mut libraries = VecDeque::new();
+    for entry in dir_entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read entry of the directory {}",
                 llvm_lib_dir.display()
-            );
+            )
+        })?;
+
+        let mut file_name = entry.file_name().into_encoded_bytes();
+        if file_name.starts_with(LIB_LLVM) && file_name.ends_with(DYLIB_EXT) {
+            drop(file_name.drain((file_name.len() - DYLIB_EXT.len())..));
+            drop(file_name.drain(..LIB_LLVM.len()));
+            libraries.push_back(LocatedLibrary {
+                // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
+                // Since then, it was only trimmed.
+                library_name: unsafe { OsString::from_encoded_bytes_unchecked(file_name) },
+                library_path: entry.path(),
+            });
         }
-        [library] => library,
-        libraries @ [library, ..] => {
-            writeln!(
-                stdout,
-                "cargo:warning=found multiple libLLVM files in directory {}:
-{libraries:?}",
-                llvm_lib_dir.display()
-            )?;
-            library
-        }
-    };
+    }
     write_bytes!(
         stdout,
-        "cargo:rustc-link-lib=dylib=LLVM",
-        library.as_bytes(),
+        "cargo:rustc-link-search=",
+        llvm_lib_dir.as_os_str().as_bytes()
     )?;
-
+    let library = check_library(
+        stdout,
+        &Paths::Single(llvm_lib_dir),
+        Library::Single(b"LLVM"),
+        libraries,
+    )?;
+    write_bytes!(
+        stdout,
+        "cargo:rustc-link-lib=dylib=",
+        library.library_name.as_bytes(),
+    )?;
     Ok(())
 }
 
