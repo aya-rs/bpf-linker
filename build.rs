@@ -3,13 +3,13 @@ use std::{
     borrow::Cow,
     collections::{HashMap, VecDeque},
     env,
-    ffi::{OsStr, OsString},
+    ffi::{OsStr, OsString, os_str},
     fmt::{self, Display, Formatter},
     fs,
     io::{self, Write as _},
     iter,
     os::unix::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
     process::Command,
 };
 
@@ -105,11 +105,20 @@ impl Library<'_> {
         }
     }
 
-    fn iter_static_filenames(&self) -> impl Iterator<Item = (&[u8], OsString)> {
-        self.iter().map(|lib| {
+    fn iter_filenames(&self, linkage: &Linkage) -> impl Iterator<Item = (&[u8], OsString)> {
+        #[cfg(target_os = "macos")]
+        const DYLIB_EXT: &str = ".dylib";
+        #[cfg(not(target_os = "macos"))]
+        const DYLIB_EXT: &str = ".so";
+        const STATICLIB_EXT: &str = ".a";
+        let suffix = match linkage {
+            Linkage::Dynamic => DYLIB_EXT,
+            Linkage::Static => STATICLIB_EXT,
+        };
+        self.iter().map(move |lib| {
             let mut filename = OsString::from("lib");
             filename.push(OsStr::from_bytes(lib));
-            filename.push(".a");
+            filename.push(suffix);
             (lib, filename)
         })
     }
@@ -160,6 +169,75 @@ where
     }
 }
 
+/// Representation of the paths that we search for libraries in.
+enum Paths<'a> {
+    /// Colon-separated paths parsed from the C compiler.
+    LdPaths(&'a OsStr),
+    /// A single path.
+    Single(PathBuf),
+}
+
+impl Paths<'_> {
+    fn display(&self) -> PathsDisplay<'_> {
+        match self {
+            Self::LdPaths(ld_paths) => PathsDisplay::LdPaths(ld_paths.display()),
+            Self::Single(path) => PathsDisplay::Single(path.display()),
+        }
+    }
+
+    fn iter(&self) -> PathsIter<'_> {
+        match self {
+            Self::LdPaths(ld_paths) => PathsIter::LdPaths(env::split_paths(ld_paths)),
+            Self::Single(single) => PathsIter::Single(iter::once(single)),
+        }
+    }
+}
+
+enum PathsDisplay<'a> {
+    LdPaths(os_str::Display<'a>),
+    Single(path::Display<'a>),
+}
+
+impl Display for PathsDisplay<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LdPaths(display) => display.fmt(f),
+            Self::Single(display) => display.fmt(f),
+        }
+    }
+}
+
+enum PathsIter<'a> {
+    LdPaths(env::SplitPaths<'a>),
+    Single(iter::Once<&'a PathBuf>),
+}
+
+impl<'a> Iterator for PathsIter<'a> {
+    type Item = Cow<'a, PathBuf>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            PathsIter::LdPaths(iter) => iter.next().map(Cow::Owned),
+            PathsIter::Single(iter) => iter.next().map(Cow::Borrowed),
+        }
+    }
+}
+
+/// Represents the type of library linkage.
+enum Linkage {
+    Dynamic,
+    Static,
+}
+
+impl Linkage {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Dynamic => "dylib",
+            Self::Static => "static",
+        }
+    }
+}
+
 /// Validates the set of candidate `paths` for `library`.
 ///
 /// Does nothing if exactly one path is provided.
@@ -169,7 +247,7 @@ where
 /// Returns an error if `paths` is empty.
 fn check_library<S: Display>(
     stdout: &mut io::StdoutLock<'_>,
-    ld_paths: &OsStr,
+    ld_paths: &Paths<'_>,
     library: S,
     mut paths: VecDeque<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
@@ -234,15 +312,16 @@ fn check_library<S: Display>(
 
 fn find_and_link_libraries<const N: usize>(
     stdout: &mut io::StdoutLock<'_>,
-    ld_paths: &OsStr,
+    ld_paths: Paths<'_>,
     libraries: &[Library<'_>; N],
+    linkage: Linkage,
 ) -> anyhow::Result<()> {
     // Collecions of all library candidate paths. Might contain duplicates if
     // a library is present in different directories from `ld_paths`.
     let mut library_candidates: [_; N] = array::from_fn(|_| VecDeque::new());
-    for ld_path in env::split_paths(ld_paths) {
+    for ld_path in ld_paths.iter() {
         for (i, library) in libraries.iter().enumerate() {
-            for (_, filename) in library.iter_static_filenames() {
+            for (_, filename) in library.iter_filenames(&linkage) {
                 let library_path = ld_path.join(filename);
                 if library_path.try_exists().with_context(|| {
                     format!("failed to inspect the file {}", library_path.display())
@@ -258,7 +337,7 @@ fn find_and_link_libraries<const N: usize>(
     // Emit the appropriate Cargo instructions to link the found liraries.
     for (i, library) in libraries.iter().enumerate() {
         let library_candidates = std::mem::take(&mut library_candidates[i]);
-        let library_path = check_library(stdout, ld_paths, library, library_candidates)?;
+        let library_path = check_library(stdout, &ld_paths, library, library_candidates)?;
         let library_dir = library_path
             .parent()
             .expect("`library_path` should have a parent");
@@ -268,7 +347,13 @@ fn find_and_link_libraries<const N: usize>(
             library_dir.as_os_str().as_bytes()
         )?;
         for library in library.iter() {
-            write_bytes!(stdout, "cargo:rustc-link-lib=static=", library)?;
+            write_bytes!(
+                stdout,
+                "cargo:rustc-link-lib=",
+                linkage.as_str(),
+                "=",
+                library
+            )?;
         }
     }
     Ok(())
@@ -291,7 +376,7 @@ fn find_and_link_libary_in_defined_path(
                 "cargo:rustc-link-search=",
                 path.as_os_str().as_bytes(),
             )?;
-            for (library, filename) in library.iter_static_filenames() {
+            for (library, filename) in library.iter_filenames(&Linkage::Static) {
                 let library_path = Path::new(&path).join(filename);
                 if library_path.try_exists().with_context(|| {
                     format!("failed to inspect the file {}", library_path.display())
@@ -514,8 +599,9 @@ to an appropriate compiler"
         const ZSTD: &[u8] = b"zstd";
         find_and_link_libraries(
             stdout,
-            ld_paths,
+            Paths::LdPaths(ld_paths),
             &[cxxstdlib, Library::Single(ZLIB), Library::Single(ZSTD)],
+            Linkage::Static,
         )?;
     }
 
@@ -529,67 +615,13 @@ to an appropriate compiler"
 /// specify the names of libaries that the dynamic linker should link
 /// beforehand.
 fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> anyhow::Result<()> {
-    const LIB_LLVM: &[u8] = b"libLLVM";
-    #[cfg(target_os = "macos")]
-    const DYLIB_EXT: &[u8] = b".dylib";
-    #[cfg(not(target_os = "macos"))]
-    const DYLIB_EXT: &[u8] = b".so";
-
-    let dir_entries = fs::read_dir(&llvm_lib_dir).with_context(|| {
-        format!(
-            "failed to read entry of the directory {}",
-            llvm_lib_dir.display()
-        )
-    })?;
-    let libraries = dir_entries
-        .filter_map(|entry| {
-            entry
-                .with_context(|| {
-                    format!(
-                        "failed to read entry of the directory {}",
-                        llvm_lib_dir.display()
-                    )
-                })
-                .map(|entry| {
-                    let mut file_name = entry.file_name().into_encoded_bytes();
-                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(DYLIB_EXT) {
-                        drop(file_name.drain((file_name.len() - DYLIB_EXT.len())..));
-                        drop(file_name.drain(..LIB_LLVM.len()));
-                        // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
-                        // Since then, it was only trimmed.
-                        Some(unsafe { OsString::from_encoded_bytes_unchecked(file_name) })
-                    } else {
-                        None
-                    }
-                })
-                .transpose()
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let library = match libraries.as_slice() {
-        [] => {
-            anyhow::bail!(
-                "could not find dynamic libLLVM in the directory {}",
-                llvm_lib_dir.display()
-            );
-        }
-        [library] => library,
-        libraries @ [library, ..] => {
-            writeln!(
-                stdout,
-                "cargo:warning=found multiple libLLVM files in directory {}:
-{libraries:?}",
-                llvm_lib_dir.display()
-            )?;
-            library
-        }
-    };
-    write_bytes!(
+    const LIB_LLVM: &[u8] = b"LLVM";
+    find_and_link_libraries(
         stdout,
-        "cargo:rustc-link-lib=dylib=LLVM",
-        library.as_bytes(),
-    )?;
-
-    Ok(())
+        Paths::Single(llvm_lib_dir),
+        &[Library::Single(LIB_LLVM)],
+        Linkage::Dynamic,
+    )
 }
 
 /// Points cargo to the path containing LLVM libraries and to the LLVM library
