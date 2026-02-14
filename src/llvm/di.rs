@@ -7,7 +7,7 @@ use std::{
     ptr,
 };
 
-use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_variant_part};
+use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type, DW_TAG_variant_part};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{Level, span, trace, warn};
 
@@ -77,7 +77,7 @@ impl<'ctx> DISanitizer<'ctx> {
                 #[expect(clippy::single_match)]
                 #[expect(non_upper_case_globals)]
                 match di_composite_type.tag() {
-                    DW_TAG_structure_type => {
+                    DW_TAG_structure_type | DW_TAG_union_type => {
                         let names = di_composite_type
                             .name()
                             .map(|name| (name.to_owned(), sanitize_type_name(name)));
@@ -496,6 +496,12 @@ mod test {
             san,
             b"my_function_3C_aya_bpf_3A__3A_this_3A__3A_is_3A__3A_a_3A__3A_very_3A__3A_long_3A__3A_namespace_3A__3A_BpfContex_94e4085604b3142f"
                 .as_slice()
+        );
+
+        let name = "MaybeUninit<u8>";
+        assert_eq!(
+            sanitize_type_name(name.as_bytes()),
+            b"MaybeUninit_3C_u8_3E_".as_slice()
         );
     }
 }
