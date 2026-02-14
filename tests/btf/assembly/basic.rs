@@ -5,14 +5,12 @@
 #![no_std]
 #![no_main]
 
+// aux-build: loop-panic-handler.rs
+extern crate loop_panic_handler;
+
 #[no_mangle]
 #[link_section = "uprobe/connect"]
 pub fn connect() {}
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
 
 // We check the BTF dump out of btfdump
 // CHECK: <FUNC> 'connect' --> global

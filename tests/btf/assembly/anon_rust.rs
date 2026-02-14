@@ -3,6 +3,9 @@
 
 #![no_std]
 
+// aux-build: loop-panic-handler.rs
+extern crate loop_panic_handler;
+
 use core::marker::PhantomData;
 
 #[repr(transparent)]
@@ -23,11 +26,6 @@ static FOO: Foo = Foo {
     ayy: 0,
     lmao: 0,
 };
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
 
 // CHECK: <STRUCT> '<anon>' sz:8 n:2
 // CHECK-NEXT: 'ayy' off:0 --> [{{[0-9]+}}]

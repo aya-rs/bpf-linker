@@ -3,6 +3,9 @@
 
 #![no_std]
 
+// aux-build: loop-panic-handler.rs
+extern crate loop_panic_handler;
+
 pub enum SimpleEnum {
     First,
     Second,
@@ -28,11 +31,6 @@ pub static X: DataCarryingEnum = DataCarryingEnum::First { a: 54, b: -23 };
 pub static Y: DataCarryingEnum = DataCarryingEnum::Second(54, -23);
 #[no_mangle]
 pub static Z: DataCarryingEnum = DataCarryingEnum::Third(36);
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
 
 // The data-carrying enum should be not included in BTF.
 
