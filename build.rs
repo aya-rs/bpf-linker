@@ -386,34 +386,13 @@ fn find_and_link_libary_in_defined_path(
 /// which additional libraries are required, we have to determine that set
 /// ourselves using the undefined symbols, and instruct Cargo to link them.
 fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> anyhow::Result<()> {
-    // Link the library files found inside the directory.
-    let dir_entries = fs::read_dir(&llvm_lib_dir)
-        .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
-    for entry in dir_entries {
-        let entry = entry.with_context(|| {
-            format!(
-                "failed to read entry of the directory {}",
-                llvm_lib_dir.display()
-            )
-        })?;
-        let file_name = entry.file_name();
-        let file_name = file_name.as_bytes();
-        let Some(trimmed) = file_name
-            .strip_prefix(b"libLLVM")
-            .and_then(|name| name.strip_suffix(b".a"))
-        else {
-            continue;
-        };
-
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
-    }
+    let llvm_support = llvm_lib_dir.join("libLLVMSupport.a");
 
     // Static libraries have no metadata indicating a dependency on other
     // libraries. Given that zlib and zstd might or might be not enabled in
     // different LLVM builds, check whether libLLVMSupport references their
     // symbols.
     let (mut needs_zlib, mut needs_zstd) = (false, false);
-    let llvm_support = llvm_lib_dir.join("libLLVMSupport.a");
     let data = fs::read(&llvm_support)
         .with_context(|| format!("failed to read library {}", llvm_support.display()))?;
     let archive = ArchiveFile::parse(data.as_slice())
@@ -455,6 +434,28 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: PathBuf) -> a
                 }
             }
         }
+    }
+
+    // Link the LLVM library files found inside the directory.
+    let dir_entries = fs::read_dir(&llvm_lib_dir)
+        .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
+    for entry in dir_entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read entry of the directory {}",
+                llvm_lib_dir.display()
+            )
+        })?;
+        let file_name = entry.file_name();
+        let file_name = file_name.as_bytes();
+        let Some(trimmed) = file_name
+            .strip_prefix(b"libLLVM")
+            .and_then(|name| name.strip_suffix(b".a"))
+        else {
+            continue;
+        };
+
+        write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
     }
 
     let cxxstdlib = Library::cxxstdlib(stdout)?;
