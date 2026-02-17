@@ -158,6 +158,13 @@ where
     }
 }
 
+/// Validates the set of candidate `paths` for `library`.
+///
+/// Does nothing if exactly one path is provided.
+///
+/// Emits a warning (including content hashes) if multiple paths are present.
+///
+/// Returns an error if `paths` is empty.
 fn check_library<S: Display>(
     stdout: &mut io::StdoutLock<'_>,
     ld_paths: &OsStr,
