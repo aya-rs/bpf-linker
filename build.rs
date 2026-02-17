@@ -162,59 +162,57 @@ fn check_library<S: Display>(
     stdout: &mut io::StdoutLock<'_>,
     ld_paths: &OsStr,
     library: S,
-    paths: Option<Vec<PathBuf>>,
+    paths: Vec<PathBuf>,
 ) -> anyhow::Result<()> {
-    if let Some(paths) = paths {
-        match paths.as_slice() {
-            [] => {
-                anyhow::bail!(
-                    "could not find {library} in any of the following directories: {}",
-                    ld_paths.display()
-                );
-            }
-            [_] => {}
-            paths => {
-                let mut hashes = std::collections::HashMap::new();
-                let mut buffer = [0; 8 * 1024];
-                for path in paths {
-                    use std::{hash::Hasher as _, io::Read as _};
-                    let mut hasher = std::hash::DefaultHasher::new();
-                    let mut file = fs::File::open(path)
-                        .with_context(|| format!("failed to open file {}", path.display()))?;
-                    loop {
-                        let n = file
-                            .read(&mut buffer)
-                            .with_context(|| format!("failed to read file {}", path.display()))?;
-                        if n == 0 {
-                            break;
-                        }
-                        hasher.write(&buffer[..n]);
+    match paths.as_slice() {
+        [] => {
+            anyhow::bail!(
+                "could not find {library} in any of the following directories: {}",
+                ld_paths.display()
+            );
+        }
+        [_] => {}
+        paths => {
+            let mut hashes = std::collections::HashMap::new();
+            let mut buffer = [0; 8 * 1024];
+            for path in paths {
+                use std::{hash::Hasher as _, io::Read as _};
+                let mut hasher = std::hash::DefaultHasher::new();
+                let mut file = fs::File::open(path)
+                    .with_context(|| format!("failed to open file {}", path.display()))?;
+                loop {
+                    let n = file
+                        .read(&mut buffer)
+                        .with_context(|| format!("failed to read file {}", path.display()))?;
+                    if n == 0 {
+                        break;
                     }
-                    hashes
-                        .entry(hasher.finish())
-                        .or_insert_with(Vec::new)
-                        .push(path);
+                    hasher.write(&buffer[..n]);
                 }
-                if hashes.len() > 1 {
-                    write!(
-                        stdout,
-                        "cargo:warning={library} was found in multiple locations: "
-                    )?;
-                    for (i, (hash, paths)) in hashes.iter().enumerate() {
+                hashes
+                    .entry(hasher.finish())
+                    .or_insert_with(Vec::new)
+                    .push(path);
+            }
+            if hashes.len() > 1 {
+                write!(
+                    stdout,
+                    "cargo:warning={library} was found in multiple locations: "
+                )?;
+                for (i, (hash, paths)) in hashes.iter().enumerate() {
+                    if i != 0 {
+                        write!(stdout, ", ")?;
+                    }
+                    write!(stdout, "[")?;
+                    for (i, path) in paths.iter().enumerate() {
                         if i != 0 {
                             write!(stdout, ", ")?;
                         }
-                        write!(stdout, "[")?;
-                        for (i, path) in paths.iter().enumerate() {
-                            if i != 0 {
-                                write!(stdout, ", ")?;
-                            }
-                            write!(stdout, "{}", path.display())?;
-                        }
-                        write!(stdout, "]=0x{hash:x}")?;
+                        write!(stdout, "{}", path.display())?;
                     }
-                    writeln!(stdout)?;
+                    write!(stdout, "]=0x{hash:x}")?;
                 }
+                writeln!(stdout)?;
             }
         }
     }
@@ -486,9 +484,15 @@ to an appropriate compiler"
             }
         }
 
-        check_library(stdout, ld_paths, &cxxstdlib, cxxstdlib_paths)?;
-        check_library(stdout, ld_paths, ZLIB, zlib_paths)?;
-        check_library(stdout, ld_paths, ZSTD, zstd_paths)?;
+        if let Some(cxxstdlib_paths) = cxxstdlib_paths {
+            check_library(stdout, ld_paths, &cxxstdlib, cxxstdlib_paths)?;
+        }
+        if let Some(zlib_paths) = zlib_paths {
+            check_library(stdout, ld_paths, ZLIB, zlib_paths)?;
+        }
+        if let Some(zstd_paths) = zstd_paths {
+            check_library(stdout, ld_paths, ZSTD, zstd_paths)?;
+        }
     }
 
     for cxxstdlib in cxxstdlib.iter() {
