@@ -155,7 +155,7 @@ where
 /// Checks whether the given environment variable `env_var` exists and if yes,
 /// emits its content as a search path for the linker.
 ///
-/// Returns a boolean indicating whether the variable was found
+/// Returns a boolean indicating whether the variable was found.
 fn emit_search_path_if_defined(
     stdout: &mut io::StdoutLock<'_>,
     env_var: &str,
