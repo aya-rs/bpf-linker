@@ -506,10 +506,18 @@ to an appropriate compiler"
 /// beforehand.
 fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
     const LIB_LLVM: &[u8] = b"libLLVM";
-    #[cfg(target_os = "macos")]
-    const DYLIB_EXT: &[u8] = b".dylib";
-    #[cfg(not(target_os = "macos"))]
-    const DYLIB_EXT: &[u8] = b".so";
+    const CARGO_CFG_TARGET_OS: &str = "CARGO_CFG_TARGET_OS";
+    let dylib_ext = match env::var_os(CARGO_CFG_TARGET_OS)
+        .ok_or_else(|| {
+            anyhow!(
+                "{CARGO_CFG_TARGET_OS} is not defined, cannot determine the target architecture"
+            )
+        })?
+        .as_encoded_bytes()
+    {
+        b"macos" => b".dylib".as_slice(),
+        _ => b".so".as_slice(),
+    };
 
     let dir_entries = fs::read_dir(llvm_lib_dir).with_context(|| {
         format!(
@@ -528,8 +536,8 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
                 })
                 .map(|entry| {
                     let mut file_name = entry.file_name().into_encoded_bytes();
-                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(DYLIB_EXT) {
-                        drop(file_name.drain((file_name.len() - DYLIB_EXT.len())..));
+                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(dylib_ext) {
+                        drop(file_name.drain((file_name.len() - dylib_ext.len())..));
                         drop(file_name.drain(..LIB_LLVM.len()));
                         // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
                         // Since then, it was only trimmed.
