@@ -66,9 +66,23 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - rust: 1.90.0
-            llvm: 20
-            exclude-features: default,llvm-19,llvm-21,llvm-22,rust-llvm-19,rust-llvm-21,rust-llvm-22
+          # `llvm-from=rust-ci` downloads `rust-dev` tarballs from Rust CI's
+          # `rustc-builds` bucket, not from the stable release distribution.
+          #
+          # As of 2026-03-05:
+          #
+          # - 1.90.0 URLs for both x86_64-unknown-linux-gnu and
+          #   x86_64-apple-darwin return 404.
+          # - 1.91.0 URLs still return 200 and include
+          #   `x-amz-expiration: expiry-date="Wed, 15 Apr 2026 00:00:00 GMT"`.
+          #
+          # In practice, the currently visible S3 expiration metadata on these
+          # `rust-dev` objects is about 168 days after `Last-Modified`, so we
+          # expect the 1.91.0 artifacts used by these jobs to disappear on or
+          # shortly after 2026-04-15 00:00:00 UTC.
+          - rust: 1.91.0
+            llvm: 21
+            exclude-features: default,llvm-19,llvm-20,llvm-22,rust-llvm-19,rust-llvm-20,rust-llvm-22
           - rust: stable
             llvm: 21
             exclude-features: default,llvm-19,llvm-20,llvm-22,rust-llvm-19,rust-llvm-20,rust-llvm-22
