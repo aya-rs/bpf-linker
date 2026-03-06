@@ -118,6 +118,17 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             "-DLLVM_LINK_LLVM_DYLIB=ON",
             "-DLLVM_TARGETS_TO_BUILD=BPF",
             "-DLLVM_USE_LINKER=lld",
+            // We build a minimal LLVM (only the BPF target). If its version matches the
+            // system LLVM and our libLLVM ends up on LD_LIBRARY_PATH, binaries like clang
+            // may accidentally load *our* libLLVM. That can fail at runtime because this
+            // build omits components/targets the system binaries expect (missing symbols).
+            //
+            // Give our shared library a unique version suffix so it cannot be confused
+            // with the system libLLVM. Our build script (build.rs) determines the exact
+            // filename of the produced library, as long as our llvm-config appears first
+            // in PATH. We can then safely add our install directory to LD_LIBRARY_PATH
+            // without worrying about conflicts.
+            "-DLLVM_VERSION_SUFFIX=-bpf-linker-1",
         ])
         .arg(install_arg);
     println!("Configuring LLVM with command {cmake_configure:?}");
