@@ -56,3 +56,22 @@ run_in_sysroot() {
     --unsetenv RUSTC \
     "$@"
 }
+
+exec_compiler() {
+  compiler="$1"
+  target="$2"
+  sysroot="$3"
+  shift 3
+
+  # Enforce lld as a linker, it allows linking objects built for other
+  # architectures without additional wrappers.
+  #
+  # With the default option of using GNU linker, clang would first try to find
+  # a wrapper, then fall back to searching for a linker in the sysroot, which
+  # then would fail to execute (as it's a foreign binary).
+  exec "${compiler}" \
+    "--target=${target}" \
+    "--sysroot=${sysroot}" \
+    -fuse-ld=lld \
+    "$@"
+}
