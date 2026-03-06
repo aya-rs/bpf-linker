@@ -349,3 +349,4 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml
+    needs: llvm
