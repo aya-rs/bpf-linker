@@ -2,44 +2,95 @@ name: LLVM
 
 on:
   workflow_call:
-    outputs:
-      cache-key:
-        value: ${{ jobs.llvm.outputs.cache-key }}
 
-permissions: {}
+permissions:
+  # Needed to upload LLVM binaries as OCI artifacts to GHCR.
+  contents: read
+  packages: write
 
 jobs:
   llvm:
-    runs-on: ubuntu-22.04
-    name: llvm
-    outputs:
-      cache-key: ${{ steps.cache-key.outputs.cache-key }}
+    runs-on: ${{ matrix.platform.host-os }}
+    name: llvm=${{ matrix.llvm.version }} target=${{ matrix.platform.target }}
+    strategy:
+      matrix:
+        platform:
+          - host-os: macos-latest
+            target: aarch64-apple-darwin
+            c-compiler: clang
+            cxx-compiler: clang++
+            cross: false
+          - host-os: macos-15-intel
+            target: x86_64-apple-darwin
+            c-compiler: clang
+            cxx-compiler: clang++
+            cross: false
+          - host-os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            c-compiler: clang
+            cxx-compiler: clang++
+            cross: false
+          - host-os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            c-compiler: aarch64-linux-musl-clang
+            cxx-compiler: aarch64-linux-musl-clang++
+            cross: true
+            processor: aarch64
+          - host-os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            c-compiler: clang
+            cxx-compiler: clang++
+            cross: false
+          - host-os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            c-compiler: x86_64-linux-musl-clang
+            cxx-compiler: x86_64-linux-musl-clang++
+            cross: true
+            processor: x86_64
+        llvm:
+          - version: 20
+            git-ref: rustc/20.1-2025-02-13
+          - version: 21
+            git-ref: rustc/21.1-2025-08-01
+          - version: 22
+            git-ref: rustc/22.1-2026-01-27
+    env:
+      TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
     steps:
       - id: ls-remote
         run: |
           set -euxo pipefail
-          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/rustc/22.1-2026-01-27 | cut -f1)
+          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/${{ matrix.llvm.git-ref }} | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
-      - id: cache-key
-        run: echo "cache-key=llvm-${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+      - id: sha
+        run: |
+          set -euxo pipefail
+          echo "sha=${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
 
-      - name: Cache
-        id: cache-llvm
-        uses: actions/cache@v5
-        with:
-          path: llvm-install
-          key: ${{ steps.cache-key.outputs.cache-key }}
-          lookup-only: true
+      - uses: oras-project/setup-oras@v1
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - name: Download LLVM artifact
+        id: artifact-restore
+        continue-on-error: true
+        run: |
+          oras pull "${{ env.TAG_PREFIX }}:${{ steps.sha.outputs.sha }}-${{ matrix.platform.target }}"
 
       - uses: actions/checkout@v6
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
 
       - name: Install Tools
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success' && runner.os == 'Linux'
         run: |
           set -euxo pipefail
           wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
@@ -51,8 +102,25 @@ jobs:
           sudo apt update
           sudo apt -y install cmake ninja-build clang lld
 
+      - name: Install tools
+        if: steps.artifact-restore.outcome != 'success' && runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          brew install lld zlib zstd
+          echo "$(brew --prefix lld)/bin" >> $GITHUB_PATH
+
+      - name: Prepare sysroot
+        if: steps.artifact-restore.outcome != 'success' && matrix.platform.cross
+        run: |
+          set -euxo pipefail
+          sudo apt -y install bubblewrap
+          ./ci/prepare-musl-sysroot.sh \
+            ${{ matrix.platform.processor }} \
+            sysroot >> $GITHUB_ENV
+          echo "$(pwd)/ci" >> $GITHUB_PATH
+
       - name: Checkout LLVM Source
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
         uses: actions/checkout@v6
         with:
           repository: aya-rs/llvm-project
@@ -60,10 +128,32 @@ jobs:
           path: llvm-project
 
       - name: Build LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        if: steps.artifact-restore.outcome != 'success'
         run: |
           set -euxo pipefail
           cargo xtask build-llvm \
             --src-dir llvm-project \
             --build-dir llvm-build \
-            --install-prefix "${{ github.workspace }}/llvm-install"
+            --install-prefix "${{ github.workspace }}/llvm-install" \
+            --c-compiler "${{ matrix.platform.c-compiler }}" \
+            --cxx-compiler "${{ matrix.platform.cxx-compiler}}" \
+            ${{ matrix.platform.processor && format('--processor {0}', matrix.platform.processor ) || '' }} \
+            ${{ matrix.platform.cross && '--system-name Linux' || '' }} \
+            ${{ matrix.platform.cross && format('--sysroot {0}/sysroot', github.workspace) || '' }}
+
+      - name: Package LLVM artifact
+        if: steps.artifact-restore.outcome != 'success'
+        run: |
+          set -euxo pipefail
+          tar --zstd -C "$GITHUB_WORKSPACE/llvm-install" -cf llvm-install.tar.zst .
+
+      - name: Publish LLVM OCI artifact
+        if: steps.artifact-restore.outcome != 'success'
+        run: |
+          set -euxo pipefail
+          sha_tag="${{ env.TAG_PREFIX }}:${{ steps.sha.outputs.sha }}-${{ matrix.platform.target }}"
+          version_tag="${{ env.TAG_PREFIX }}:${{ matrix.llvm.version }}-${{ matrix.platform.target }}"
+          oras push "${sha_tag}" \
+            --artifact-type application/vnd.aya.llvm.install \
+            llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
+          oras tag "${sha_tag}" "${version_tag}"

@@ -1,10 +1,7 @@
 name: Release
 
 on:
-  pull_request:
-
-  release:
-    types: [published]
+  workflow_call:
 
 permissions:
   # This is used by the upload-rust-binary-action to upload the binary to the release.
@@ -17,15 +14,21 @@ jobs:
       matrix:
         platform:
           - os: macos-latest
-            llvm-target: aarch64-apple-darwin
+            target: aarch64-apple-darwin
+            linker: clang
           - os: macos-15-intel
-            llvm-target: x86_64-apple-darwin
+            target: x86_64-apple-darwin
+            linker: clang
           - os: ubuntu-22.04
-            llvm-target: x86_64-unknown-linux-musl
+            cross-arch: x86_64
+            target: x86_64-unknown-linux-musl
+            linker: x86_64-linux-musl-clang
           - os: ubuntu-22.04-arm
-            llvm-target: aarch64-unknown-linux-musl
+            cross-arch: aarch64
+            target: aarch64-unknown-linux-musl
+            linker: aarch64-linux-musl-clang
     env:
-      RUST_CI_LLVM_INSTALL_DIR: /tmp/rustc-llvm
+      LLVM_VERSION: 22
     steps:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
@@ -42,24 +45,69 @@ jobs:
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
 
-      - name: Install LLVM from Rust CI
+      - name: Prepare sysroot
+        if: matrix.platform.cross-arch
         run: |
           set -euxo pipefail
-          sudo mkdir -p $RUST_CI_LLVM_INSTALL_DIR
-          rustc_date="$(curl -s https://static.rust-lang.org/dist/channel-rust-nightly-date.txt)"
-          rustc_sha="$(curl -s "https://static.rust-lang.org/dist/$rustc_date/channel-rust-nightly-git-commit-hash.txt")"
-          wget -q -O - "https://ci-artifacts.rust-lang.org/rustc-builds/$rustc_sha/rust-dev-nightly-${{ matrix.platform.llvm-target }}.tar.xz" | \
-            sudo tar -xJ --strip-components 2 -C $RUST_CI_LLVM_INSTALL_DIR
-          echo "${RUST_CI_LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
+          sudo apt update
+          sudo apt -y install bubblewrap
+          ./ci/prepare-musl-sysroot.sh \
+            ${{ matrix.platform.cross-arch }} \
+            sysroot \
+            stable >> $GITHUB_ENV
+          echo "$(pwd)/ci" >> $GITHUB_PATH
+
+      - uses: oras-project/setup-oras@v1
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - name: Restore LLVM from ghcr.io
+        run: |
+          set -euxo pipefail
+          oras pull "ghcr.io/${{ github.repository_owner }}/llvm:${{ env.LLVM_VERSION }}-${{ matrix.platform.target }}"
+          # Make sure LLVM is available from the current directory, so
+          # bubblewrap is able to access it. See the `ci/*-run` scripts.
+          LLVM_INSTALL_DIR="$(pwd)/llvm-install"
+          mkdir -p "$LLVM_INSTALL_DIR"
+          tar --zstd -xf llvm-install.tar.zst -C "$LLVM_INSTALL_DIR"
+          rm -f llvm-install.tar.zst
+          echo "${LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
+
+      - name: Install static libraries (macOS)
+        if: runner.os == 'macOS'
+        # macOS does not provide any static libraries. Homebrew does provide
+        # them, but in custom paths that the system-wide clang is not aware of.
+        # Point build.rs to them by setting environment variables.
+        #
+        # We install llvm package only for libc++.
+        #
+        # libLLVM from homebrew requires zstd.
+        run: |
+          set -euxo pipefail
+          brew install llvm zlib zstd
+          echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
+          echo "LIBZSTD_PATH=$(brew --prefix zstd)/lib" >> $GITHUB_ENV
+          echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
 
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bpf-linker
+          target: ${{ matrix.platform.target }}
           features: llvm-22,llvm-link-static
           no-default-features: true
+          # By default, the action tries to use cross-rs when `target` is
+          # defined. We want to use vanilla cargo, because we manage our own
+          # clang wrappers and sysroots.
+          build-tool: cargo
           dry-run: ${{ github.event_name != 'release' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTFLAGS: -C linker=${{ matrix.platform.linker }} -C target-feature=+crt-static
 
       - name: Report disk usage
         if: ${{ always() }}
