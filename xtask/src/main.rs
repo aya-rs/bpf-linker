@@ -42,6 +42,24 @@ struct BuildLlvm {
     /// Directory in which the built LLVM artifacts are installed.
     #[arg(long)]
     install_prefix: PathBuf,
+    /// C compiler.
+    #[arg(long, default_value = "clang")]
+    c_compiler: String,
+    /// C++ compiler.
+    #[arg(long, default_value = "clang++")]
+    cxx_compiler: String,
+    /// Target architecture to build LLVM for, must match the syntax of
+    /// `CMAKE_SYSTEM_PROCESSOR` option, e.g. `aarch64`, `riscv64`.
+    #[arg(long, requires = "system_name")]
+    cmake_system_processor: Option<String>,
+    /// Target system to build LLVM for, must match the syntax of
+    /// `CMAKE_SYSTEM_NAME` option, e.g. `Linux`.
+    #[arg(long)]
+    cmake_system_name: Option<String>,
+    /// Sysroot that contains necessary libraries for the given target, e.g.
+    /// `/usr/aarch64-unknown-linux-musl`.
+    #[arg(long)]
+    sysroot: Option<PathBuf>,
 }
 
 #[derive(clap::Subcommand)]
@@ -94,12 +112,17 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
         src_dir,
         build_dir,
         install_prefix,
+        c_compiler,
+        cxx_compiler,
+        cmake_system_processor,
+        cmake_system_name,
+        sysroot,
     } = options;
 
     let mut install_arg = OsString::from("-DCMAKE_INSTALL_PREFIX=");
     install_arg.push(install_prefix.as_os_str());
     let mut cmake_configure = Command::new("cmake");
-    let cmake_configure = cmake_configure
+    let _: &mut _ = cmake_configure
         .arg("-S")
         .arg(src_dir.join("llvm"))
         .arg("-B")
@@ -108,8 +131,6 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             "-G",
             "Ninja",
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
-            "-DCMAKE_C_COMPILER=clang",
-            "-DCMAKE_CXX_COMPILER=clang++",
             "-DLLVM_BUILD_LLVM_DYLIB=ON",
             "-DLLVM_ENABLE_ASSERTIONS=ON",
             "-DLLVM_ENABLE_PROJECTS=",
@@ -130,7 +151,45 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             // without worrying about conflicts.
             "-DLLVM_VERSION_SUFFIX=-bpf-linker-1",
         ])
+        .args([
+            format!("-DCMAKE_C_COMPILER={c_compiler}"),
+            format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"),
+        ])
         .arg(install_arg);
+    if let Some(cmake_system_processor) = cmake_system_processor {
+        let _: &mut _ =
+            cmake_configure.arg(format!("-DCMAKE_SYSTEM_PROCESSOR={cmake_system_processor}"));
+    }
+    if let Some(cmake_system_name) = cmake_system_name {
+        let _: &mut _ = cmake_configure.arg(format!("-DCMAKE_SYSTEM_NAME={cmake_system_name}"));
+    }
+    if let Some(sysroot) = sysroot {
+        // CMake expects the sysroot path to be absolute.
+        let sysroot = fs::canonicalize(&sysroot).with_context(|| {
+            format!(
+                "failed to canonicalize the sysroot path {}",
+                sysroot.display()
+            )
+        })?;
+        let mut sysroot_arg = OsString::from("-DCMAKE_SYSROOT=");
+        sysroot_arg.push(sysroot.as_os_str());
+        let _: &mut _ = cmake_configure.arg(sysroot_arg);
+        let _: &mut _ = cmake_configure.args([
+            // Tell CMake to:
+            //
+            // - Search for libraries and include files only in the sysroot.
+            // - Never try to execute any binaries (e.g. ar, llvm-min-tblgen) from
+            //   the sysroot and instead try to find them on the host system.
+            "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER",
+            "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY",
+            "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY",
+            // CMake's "try compile" check for -fPIC does not work for cross
+            // builds that require a sysroot, because the sysroot arguments are
+            // not passed to the compile flags for the test.
+            "-DC_SUPPORTS_FPIC=ON",
+            "-DCXX_SUPPORTS_FPIC=ON",
+        ]);
+    }
     println!("Configuring LLVM with command {cmake_configure:?}");
     let status = cmake_configure.status().with_context(|| {
         format!("failed to configure LLVM build with command {cmake_configure:?}")
