@@ -1,10 +1,7 @@
 name: Release
 
 on:
-  pull_request:
-
-  release:
-    types: [published]
+  workflow_call:
 
 permissions:
   # This is used by the upload-rust-binary-action to upload the binary to the release.

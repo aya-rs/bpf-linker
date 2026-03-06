@@ -5,6 +5,9 @@ on:
 
   pull_request:
 
+  release:
+    types: [published]
+
   schedule:
     - cron: 00 4 * * *
 
@@ -341,3 +344,8 @@ jobs:
       - name: Report disk usage
         if: ${{ always() }}
         uses: ./bpf-linker/.github/actions/report-disk-usage
+
+  release:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
