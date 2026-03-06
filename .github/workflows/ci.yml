@@ -87,8 +87,8 @@ jobs:
             llvm: 21
             exclude-features: default,llvm-19,llvm-20,llvm-22,rust-llvm-19,rust-llvm-20,rust-llvm-22
           - rust: beta
-            llvm: 21
-            exclude-features: default,llvm-20,llvm-22,rust-llvm-20,rust-llvm-22
+            llvm: 22
+            exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
           - rust: nightly
             llvm: 22
             exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
