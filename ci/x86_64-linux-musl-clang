@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+. "$(dirname -- "$0")/common.sh"
+
+exec_compiler \
+  clang \
+  x86_64-alpine-linux-musl \
+  "${BPF_LINKER_SYSROOT_X86_64_LINUX_MUSL}" \
+  "$@"
