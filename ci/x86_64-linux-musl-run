@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Script that allows running x86_64-linux-musl binaries using the provided
+# sysroot as an execution environment.
+
+set -eu
+
+. "$(dirname -- "$0")/common.sh"
+
+run_in_sysroot "${BPF_LINKER_SYSROOT_X86_64_LINUX_MUSL}" "$@"
