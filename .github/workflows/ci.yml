@@ -410,11 +410,10 @@ jobs:
         # libLLVM from homebrew requires zstd.
         run: |
           set -euxo pipefail
-          brew install llvm zlib
+          brew bundle
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
           if [[ "${{ matrix.llvm-from }}" == "packages" ]]; then
-            brew install zstd
             echo "LIBZSTD_PATH=$(brew --prefix zstd)/lib" >> $GITHUB_ENV
           fi
 
@@ -475,7 +474,7 @@ jobs:
         # wire their paths into build.rs expectations.
         run: |
           set -euxo pipefail
-          brew install llvm zlib
+          brew bundle
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
 
