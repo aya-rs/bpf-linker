@@ -474,6 +474,7 @@ jobs:
         # macOS lacks system static libraries; install them via homebrew and
         # wire their paths into build.rs expectations.
         run: |
+          set -euxo pipefail
           brew install llvm zlib
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
