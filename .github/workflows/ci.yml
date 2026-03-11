@@ -5,6 +5,9 @@ on:
 
   pull_request:
 
+  release:
+    types: [published]
+
   schedule:
     - cron: 00 4 * * *
 
@@ -442,3 +445,58 @@ jobs:
       - name: Report disk usage
         if: ${{ always() }}
         uses: ./bpf-linker/.github/actions/report-disk-usage
+
+  release:
+    name: release
+    runs-on: ${{ matrix.platform.os }}
+    permissions:
+      # This is used by the upload-rust-binary-action to upload the binary to the release.
+      contents: write
+    strategy:
+      matrix:
+        platform:
+          - os: macos-latest
+            llvm-target: aarch64-apple-darwin
+          - os: macos-15-intel
+            llvm-target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            llvm-target: x86_64-unknown-linux-musl
+          - os: ubuntu-22.04-arm
+            llvm-target: aarch64-unknown-linux-musl
+    env:
+      RUST_CI_LLVM_INSTALL_DIR: /tmp/rustc-llvm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install prerequisites
+        if: runner.os == 'macOS'
+        # macOS lacks system static libraries; install them via homebrew and
+        # wire their paths into build.rs expectations.
+        run: |
+          brew install llvm zlib
+          echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
+          echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
+
+      - name: Install LLVM from Rust CI
+        run: |
+          set -euxo pipefail
+          sudo mkdir -p $RUST_CI_LLVM_INSTALL_DIR
+          rustc_date="$(curl -s https://static.rust-lang.org/dist/channel-rust-nightly-date.txt)"
+          rustc_sha="$(curl -s "https://static.rust-lang.org/dist/$rustc_date/channel-rust-nightly-git-commit-hash.txt")"
+          wget -q -O - "https://ci-artifacts.rust-lang.org/rustc-builds/$rustc_sha/rust-dev-nightly-${{ matrix.platform.llvm-target }}.tar.xz" | \
+            sudo tar -xJ --strip-components 2 -C $RUST_CI_LLVM_INSTALL_DIR
+          echo "${RUST_CI_LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
+
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: bpf-linker
+          features: llvm-22,llvm-link-static
+          no-default-features: true
+          dry-run: ${{ github.event_name != 'release' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report disk usage
+        if: ${{ always() }}
+        uses: ./.github/actions/report-disk-usage
