@@ -12,8 +12,6 @@ use std::{
 };
 
 use anyhow::{Context as _, anyhow};
-use object::{Object as _, ObjectSymbol as _, read::archive::ArchiveFile};
-
 macro_rules! write_bytes {
     ($dst:expr, $($bytes:expr),* $(,)?) => {
         (|| {
@@ -180,8 +178,8 @@ fn emit_search_path_if_defined(
 /// That includes figuring out which libraries LLVM depends on:
 ///
 /// - Standard C++ library (GNU stdc++ or LLVM libc++).
-/// - zlib (optional).
-/// - zstd (optional).
+/// - zlib.
+/// - zstd.
 ///
 /// It's necessary, because static libraries have no equivalent of `DT_NEEDED`
 /// entries. They come with undefined symbols that must be filled in by other
@@ -211,55 +209,6 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
     }
 
-    // Static libraries have no metadata indicating a dependency on other
-    // libraries. Given that zlib and zstd might or might be not enabled in
-    // different LLVM builds, check whether libLLVMSupport references their
-    // symbols.
-    let (mut needs_zlib, mut needs_zstd) = (false, false);
-    let llvm_support = llvm_lib_dir.join("libLLVMSupport.a");
-    let data = fs::read(&llvm_support)
-        .with_context(|| format!("failed to read library {}", llvm_support.display()))?;
-    let archive = ArchiveFile::parse(data.as_slice())
-        .with_context(|| format!("failed to parse library archive {}", llvm_support.display()))?;
-    'outer: for member in archive.members() {
-        let member = member.with_context(|| {
-            format!(
-                "failed to process the member of library archive {}",
-                llvm_support.display()
-            )
-        })?;
-        let member_data = member.data(data.as_slice()).with_context(|| {
-            format!(
-                "failed to read data of static library archive member {}",
-                OsStr::from_bytes(member.name()).display()
-            )
-        })?;
-        let obj = object::File::parse(member_data).with_context(|| {
-            format!(
-                "failed to parse data of static library archive member {} as object file",
-                OsStr::from_bytes(member.name()).display()
-            )
-        })?;
-        for symbol in obj.symbols() {
-            if symbol.is_undefined() {
-                let sym_name = symbol.name().with_context(|| {
-                    format!(
-                        "failed to retrieve the symbol name in static library archive member {}",
-                        OsStr::from_bytes(member.name()).display()
-                    )
-                })?;
-                if sym_name.contains("crc32") {
-                    needs_zlib = true;
-                } else if sym_name.contains("ZSTD") {
-                    needs_zstd = true;
-                }
-                if needs_zlib && needs_zstd {
-                    break 'outer;
-                }
-            }
-        }
-    }
-
     let cxxstdlibs = Cxxstdlibs::new(stdout)?;
 
     // Find directories with static libraries we're interested in:
@@ -270,10 +219,10 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
     // Check whether custom paths were provided. If yes, point the linker to
     // them.
     let cxxstdlib_found = emit_search_path_if_defined(stdout, "CXXSTDLIB_PATH")?;
-    let zlib_found = needs_zlib && emit_search_path_if_defined(stdout, "ZLIB_PATH")?;
-    let zstd_found = needs_zstd && emit_search_path_if_defined(stdout, "LIBZSTD_PATH")?;
+    let zlib_found = emit_search_path_if_defined(stdout, "ZLIB_PATH")?;
+    let zstd_found = emit_search_path_if_defined(stdout, "LIBZSTD_PATH")?;
 
-    if !cxxstdlib_found || (needs_zlib && !zlib_found) || (needs_zstd && !zstd_found) {
+    if !cxxstdlib_found || !zlib_found || !zstd_found {
         // Unfortunately, Rust/cargo don't look for static libraries in system
         // directories, like C compilers do, so we had to implement the logic
         // of searching for them ourselves.
@@ -375,8 +324,8 @@ to an appropriate compiler"
         const ZLIB: &str = "libz.a";
         const ZSTD: &str = "libzstd.a";
         let mut cxxstdlib_paths = (!cxxstdlib_found).then(Vec::new);
-        let mut zlib_paths = (needs_zlib && !zlib_found).then(Vec::new);
-        let mut zstd_paths = (needs_zstd && !zstd_found).then(Vec::new);
+        let mut zlib_paths = (!zlib_found).then(Vec::new);
+        let mut zstd_paths = (!zstd_found).then(Vec::new);
         for ld_path in env::split_paths(ld_paths) {
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
@@ -488,12 +437,8 @@ to an appropriate compiler"
     for cxxstdlib in cxxstdlibs.iter() {
         write_bytes!(stdout, "cargo:rustc-link-lib=static=", cxxstdlib)?;
     }
-    if needs_zlib {
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
-    }
-    if needs_zstd {
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
-    }
+    write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
+    write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
 
     Ok(())
 }
