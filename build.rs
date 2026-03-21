@@ -1,14 +1,11 @@
 use std::{
-    borrow::Cow,
     env,
-    ffi::{OsStr, OsString},
-    fmt::{self, Display, Formatter},
+    ffi::OsString,
     fs,
     io::{self, Write as _},
     iter,
     os::unix::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
 };
 
 use anyhow::{Context as _, anyhow};
@@ -94,37 +91,6 @@ impl Cxxstdlibs<'_> {
             ),
         }
     }
-
-    fn iter_static_filenames(&self) -> impl Iterator<Item = OsString> {
-        self.iter().map(|lib| {
-            let mut filename = OsString::from("lib");
-            filename.push(OsStr::from_bytes(lib));
-            filename.push(".a");
-            filename
-        })
-    }
-}
-
-impl Display for Cxxstdlibs<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EnvVar(p) => {
-                Display::fmt(&p.display(), f)?;
-            }
-            Self::Single(s) => Display::fmt(&OsStr::from_bytes(s).display(), f)?,
-            Self::Multiple(m) => {
-                f.write_str("[")?;
-                for (i, lib) in m.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, ", ")?;
-                    }
-                    Display::fmt(&OsStr::from_bytes(lib).display(), f)?;
-                }
-                f.write_str("]")?;
-            }
-        }
-        Ok(())
-    }
 }
 
 enum CxxstdlibsIter<P, S, M> {
@@ -151,42 +117,30 @@ where
 }
 
 /// Checks whether the given environment variable `env_var` exists and if yes,
-/// emits its content as a search path for the linker.
-///
-/// Returns a boolean indicating whether the variable was found.
+/// emits its content as a `-L` search path for the linker.
 fn emit_search_path_if_defined(
     stdout: &mut io::StdoutLock<'_>,
     env_var: &str,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<()> {
     writeln!(stdout, "cargo:rerun-if-env-changed={env_var}")?;
-    match env::var_os(env_var) {
-        Some(path) => {
-            write_bytes!(
-                stdout,
-                "cargo:rustc-link-search=",
-                path.as_os_str().as_bytes(),
-            )?;
-            Ok(true)
-        }
-        None => Ok(false),
+    if let Some(path) = env::var_os(env_var) {
+        write_bytes!(
+            stdout,
+            "cargo:rustc-link-arg=-L",
+            path.as_os_str().as_bytes()
+        )?;
     }
+    Ok(())
 }
 
-/// Points cargo to static library names of LLVM and dependencies needed by
-/// LLVM.
-///
-/// That includes figuring out which libraries LLVM depends on:
+/// Links LLVM and its dependencies statically:
 ///
 /// - Standard C++ library (GNU stdc++ or LLVM libc++).
 /// - zlib.
 /// - zstd.
-///
-/// It's necessary, because static libraries have no equivalent of `DT_NEEDED`
-/// entries. They come with undefined symbols that must be filled in by other
-/// libraries at link time. Since static archives do not explicitly express
-/// which additional libraries are required, we have to determine that set
-/// ourselves using the undefined symbols, and instruct Cargo to link them.
 fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+    writeln!(stdout, "cargo:rustc-link-arg=-Wl,-Bstatic")?;
+
     // Link the library files found inside the directory.
     let dir_entries = fs::read_dir(llvm_lib_dir)
         .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
@@ -211,234 +165,17 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
 
     let cxxstdlibs = Cxxstdlibs::new(stdout)?;
 
-    // Find directories with static libraries we're interested in:
-    // - C++ standard library
-    // - zlib (if needed)
-    // - zstd (if needed)
-
-    // Check whether custom paths were provided. If yes, point the linker to
-    // them.
-    let cxxstdlib_found = emit_search_path_if_defined(stdout, "CXXSTDLIB_PATH")?;
-    let zlib_found = emit_search_path_if_defined(stdout, "ZLIB_PATH")?;
-    let zstd_found = emit_search_path_if_defined(stdout, "LIBZSTD_PATH")?;
-
-    if !cxxstdlib_found || !zlib_found || !zstd_found {
-        // Unfortunately, Rust/cargo don't look for static libraries in system
-        // directories, like C compilers do, so we had to implement the logic
-        // of searching for them ourselves.
-
-        // Use C compiler to retrieve the system library paths with
-        // `-print-search-dirs` option.
-        const CC: &str = "CC";
-        const RUSTC_LINKER: &str = "RUSTC_LINKER";
-        /// Executes `maybe_cc` with `-print-search-dirs` argument. On success,
-        /// returns the output.
-        fn print_search_dirs<'a>(
-            stdout: &mut io::StdoutLock<'_>,
-            var: Option<&str>,
-        ) -> anyhow::Result<Option<(Cow<'a, OsStr>, Vec<u8>)>> {
-            let maybe_cc = match var {
-                Some(var) => {
-                    writeln!(stdout, "cargo:rerun-if-env-changed={var}")?;
-                    match env::var_os(var).map(Cow::Owned) {
-                        Some(var) => var,
-                        // If the environment variable is not defined, proceed with
-                        // the next candidate.
-                        None => return Ok(None),
-                    }
-                }
-                // Use `cc` as the last option. Pretty much all UNIX-like operating
-                // systems provide `/usr/bin/cc` as a symlink to the default
-                // compiler (either clang or gcc).
-                None => Cow::Borrowed(OsStr::from_bytes(b"cc")),
-            };
-            let mut cmd = Command::new(&maybe_cc);
-            let linker_output = cmd
-                .arg("-print-search-dirs")
-                .output()
-                .with_context(|| format!("failed to run {cmd:?}"))?;
-            if linker_output.status.success() {
-                Ok(Some((maybe_cc, linker_output.stdout)))
-            } else {
-                // We don't return an error here, instead we log a warning and
-                // proceed with trying next candidates.
-                // The failure here usually means that `maybe_cc` is a regular
-                // linker (e.g. rust-lld, bfd, lld), not a C compiler (e.g.
-                // clang, gcc).
-                if let Some(var) = var {
-                    writeln!(
-                        stdout,
-                        "cargo:warning=`command `{cmd:?}` (specified by environment variable
-{var}: {}) failed: {}",
-                        maybe_cc.display(),
-                        linker_output.status
-                    )?;
-                } else {
-                    writeln!(
-                        stdout,
-                        "cargo:warning=`command `{cmd:?}` failed: {}",
-                        linker_output.status
-                    )?;
-                }
-                Ok(None)
-            }
-        }
-        let (cc, linker_stdout) = [
-            // Try to use the `CC` environment variable, allowing users to
-            // overwrite defaults.
-            Some(CC),
-            // Try to retrieve it from `RUSTC_LINKER` environment
-            // variable. It's defined by cargo only if `-C linker` option is
-            // provided. Users are not supposed to define this variable on
-            // their own.
-            // Note that it might be either a C compiler or a regular linker.
-            Some(RUSTC_LINKER),
-            None,
-        ]
-        .into_iter()
-        .find_map(|var| print_search_dirs(stdout, var).transpose())
-        .transpose()?
-        .ok_or_else(|| {
-            anyhow!(
-                "could not find C compiler capable of reporting library search paths,
-(with `-print-search-dirs`), consider setting `CC` environment variable pointing
-to an appropriate compiler"
-            )
-        })?;
-        let ld_paths = linker_stdout
-            .split(|&b| b == b'\n')
-            .find_map(|line| line.strip_prefix(b"libraries: ="))
-            .ok_or_else(|| {
-                anyhow!(
-                    "failed to find library paths in the output of `{} -print-search-dirs`: {}",
-                    cc.display(),
-                    OsStr::from_bytes(&linker_stdout).display()
-                )
-            })?;
-        let ld_paths = OsStr::from_bytes(ld_paths);
-
-        // Find directories with static libraries we're interested in:
-        // - C++ standard library
-        // - zlib (if needed)
-        // - zstd (if needed)
-        const ZLIB: &str = "libz.a";
-        const ZSTD: &str = "libzstd.a";
-        let mut cxxstdlib_paths = (!cxxstdlib_found).then(Vec::new);
-        let mut zlib_paths = (!zlib_found).then(Vec::new);
-        let mut zstd_paths = (!zstd_found).then(Vec::new);
-        for ld_path in env::split_paths(ld_paths) {
-            let mut found_any = false;
-            if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
-                for cxxstdlib in cxxstdlibs.iter_static_filenames() {
-                    let cxxstdlib_path = ld_path.join(cxxstdlib);
-                    if cxxstdlib_path.try_exists().with_context(|| {
-                        format!("failed to inspect the file {}", cxxstdlib_path.display(),)
-                    })? {
-                        cxxstdlib_paths.push(cxxstdlib_path);
-                        found_any = true;
-                    }
-                }
-            }
-            if let Some(ref mut zlib_paths) = zlib_paths {
-                let zlib_path = ld_path.join(ZLIB);
-                if zlib_path.try_exists().with_context(|| {
-                    format!("failed to inspect the file {}", zlib_path.display())
-                })? {
-                    zlib_paths.push(zlib_path);
-                    found_any = true;
-                }
-            }
-            if let Some(ref mut zstd_paths) = zstd_paths {
-                let zstd_path = ld_path.join("libzstd.a");
-                if zstd_path.try_exists().with_context(|| {
-                    format!("failed to inspect the file {}", zstd_path.display())
-                })? {
-                    zstd_paths.push(zstd_path);
-                    found_any = true;
-                }
-            }
-            if found_any {
-                write_bytes!(
-                    stdout,
-                    "cargo:rustc-link-search=",
-                    ld_path.as_os_str().as_bytes(),
-                )?;
-            }
-        }
-
-        fn check_library<S: Display>(
-            stdout: &mut io::StdoutLock<'_>,
-            ld_paths: &OsStr,
-            library: S,
-            paths: Option<Vec<PathBuf>>,
-        ) -> anyhow::Result<()> {
-            if let Some(paths) = paths {
-                match paths.as_slice() {
-                    [] => {
-                        anyhow::bail!(
-                            "could not find {library} in any of the following directories: {}",
-                            ld_paths.display()
-                        );
-                    }
-                    [_] => {}
-                    paths => {
-                        let mut hashes = std::collections::HashMap::new();
-                        let mut buffer = [0; 8 * 1024];
-                        for path in paths {
-                            use std::{hash::Hasher as _, io::Read as _};
-                            let mut hasher = std::hash::DefaultHasher::new();
-                            let mut file = fs::File::open(path).with_context(|| {
-                                format!("failed to open file {}", path.display())
-                            })?;
-                            loop {
-                                let n = file.read(&mut buffer).with_context(|| {
-                                    format!("failed to read file {}", path.display())
-                                })?;
-                                if n == 0 {
-                                    break;
-                                }
-                                hasher.write(&buffer[..n]);
-                            }
-                            hashes
-                                .entry(hasher.finish())
-                                .or_insert_with(Vec::new)
-                                .push(path);
-                        }
-                        if hashes.len() > 1 {
-                            write!(
-                                stdout,
-                                "cargo:warning={library} was found in multiple locations: "
-                            )?;
-                            for (i, (hash, paths)) in hashes.iter().enumerate() {
-                                if i != 0 {
-                                    write!(stdout, ", ")?;
-                                }
-                                write!(stdout, "[")?;
-                                for (i, path) in paths.iter().enumerate() {
-                                    if i != 0 {
-                                        write!(stdout, ", ")?;
-                                    }
-                                    write!(stdout, "{}", path.display())?;
-                                }
-                                write!(stdout, "]=0x{hash:x}")?;
-                            }
-                            writeln!(stdout)?;
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }
-        check_library(stdout, ld_paths, &cxxstdlibs, cxxstdlib_paths)?;
-        check_library(stdout, ld_paths, ZLIB, zlib_paths)?;
-        check_library(stdout, ld_paths, ZSTD, zstd_paths)?;
-    }
+    // Let the final linker resolve libc++ wrappers and any directory search
+    // semantics. Explicit override directories are forwarded via `-L`.
+    emit_search_path_if_defined(stdout, "CXXSTDLIB_PATH")?;
+    emit_search_path_if_defined(stdout, "ZLIB_PATH")?;
+    emit_search_path_if_defined(stdout, "LIBZSTD_PATH")?;
 
     for cxxstdlib in cxxstdlibs.iter() {
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=", cxxstdlib)?;
+        write_bytes!(stdout, "cargo:rustc-link-arg=-l", cxxstdlib)?;
     }
-    write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
-    write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
+    writeln!(stdout, "cargo:rustc-link-arg=-lz")?;
+    writeln!(stdout, "cargo:rustc-link-arg=-lzstd")?;
 
     Ok(())
 }
