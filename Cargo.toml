@@ -50,13 +50,6 @@ scopeguard = { version = "1.2.0", default-features = false }
 
 [build-dependencies]
 anyhow = { workspace = true }
-object = { version = "0.38.0", default-features = false, features = [
-  "archive",
-  "elf",
-  "macho",
-  "read_core",
-  "unaligned",
-] }
 
 [dev-dependencies]
 assert_matches = { version = "1.5.0", default-features = false }
