@@ -133,65 +133,6 @@ fn emit_search_path_if_defined(
     Ok(())
 }
 
-/// Links LLVM and its dependencies statically:
-///
-/// - Standard C++ library (GNU stdc++ or LLVM libc++).
-/// - zlib.
-/// - zstd.
-fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
-    writeln!(stdout, "cargo:rustc-link-arg=-Wl,-static")?;
-
-    // Link the library files found inside the directory.
-    let dir_entries = fs::read_dir(llvm_lib_dir)
-        .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
-    for entry in dir_entries {
-        let entry = entry.with_context(|| {
-            format!(
-                "failed to read entry of the directory {}",
-                llvm_lib_dir.display()
-            )
-        })?;
-        let file_name = entry.file_name();
-        let file_name = file_name.as_bytes();
-        let Some(trimmed) = file_name
-            .strip_prefix(b"libLLVM")
-            .and_then(|name| name.strip_suffix(b".a"))
-        else {
-            continue;
-        };
-
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
-    }
-
-    let cxxstdlibs = Cxxstdlibs::new(stdout)?;
-
-    // Let the final linker resolve libc++ wrappers and any directory search
-    // semantics. Explicit override directories are forwarded via `-L`.
-    emit_search_path_if_defined(stdout, "CXXSTDLIB_PATH")?;
-    emit_search_path_if_defined(stdout, "ZLIB_PATH")?;
-    emit_search_path_if_defined(stdout, "LIBZSTD_PATH")?;
-
-    for cxxstdlib in cxxstdlibs.iter() {
-        write_bytes!(stdout, "cargo:rustc-link-arg=-l", cxxstdlib)?;
-    }
-    writeln!(stdout, "cargo:rustc-link-arg=-lz")?;
-    writeln!(stdout, "cargo:rustc-link-arg=-lzstd")?;
-
-    Ok(())
-}
-
-/// Points cargo to shared library name of LLVM.
-///
-/// Unlike [`link_llvm_static`], it does not require explicit search for
-/// dependencies, since shared libraries contain `DT_NEEDED` entries that
-/// specify the names of libaries that the dynamic linker should link
-/// beforehand.
-fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>) -> anyhow::Result<()> {
-    write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
-
-    Ok(())
-}
-
 /// Points cargo to the path containing LLVM libraries and to the LLVM library
 /// files.
 fn main() -> anyhow::Result<()> {
@@ -259,8 +200,52 @@ variable `{var_name}` {}",
     )?;
 
     if cfg!(feature = "llvm-link-static") {
-        link_llvm_static(&mut stdout, &llvm_lib_dir)
+        // Link LLVM and its dependencies statically:
+        // - Standard C++ library (GNU stdc++ or LLVM libc++).
+        // - zlib.
+        // - zstd.
+        writeln!(stdout, "cargo:rustc-link-arg=-Wl,-static")?;
+
+        // Link the library files found inside the directory.
+        let dir_entries = fs::read_dir(&llvm_lib_dir)
+            .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
+        for entry in dir_entries {
+            let entry = entry.with_context(|| {
+                format!(
+                    "failed to read entry of the directory {}",
+                    llvm_lib_dir.display()
+                )
+            })?;
+            let file_name = entry.file_name();
+            let file_name = file_name.as_bytes();
+            let Some(trimmed) = file_name
+                .strip_prefix(b"libLLVM")
+                .and_then(|name| name.strip_suffix(b".a"))
+            else {
+                continue;
+            };
+
+            write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
+        }
+
+        let cxxstdlibs = Cxxstdlibs::new(&mut stdout)?;
+
+        // Let the final linker resolve libc++ wrappers and any directory search
+        // semantics. Explicit override directories are forwarded via `-L`.
+        emit_search_path_if_defined(&mut stdout, "CXXSTDLIB_PATH")?;
+        emit_search_path_if_defined(&mut stdout, "ZLIB_PATH")?;
+        emit_search_path_if_defined(&mut stdout, "LIBZSTD_PATH")?;
+
+        for cxxstdlib in cxxstdlibs.iter() {
+            write_bytes!(stdout, "cargo:rustc-link-arg=-l", cxxstdlib)?;
+        }
+        writeln!(stdout, "cargo:rustc-link-arg=-lz")?;
+        writeln!(stdout, "cargo:rustc-link-arg=-lzstd")?;
     } else {
-        link_llvm_dynamic(&mut stdout)
+        // Link against shared LLVM. Unlike the static case, its dependencies
+        // are discovered via `DT_NEEDED` entries in the shared object.
+        write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
     }
+
+    Ok(())
 }
