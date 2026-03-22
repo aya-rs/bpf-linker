@@ -186,74 +186,8 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
 /// dependencies, since shared libraries contain `DT_NEEDED` entries that
 /// specify the names of libaries that the dynamic linker should link
 /// beforehand.
-fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
-    const LIB_LLVM: &[u8] = b"libLLVM";
-    const CARGO_CFG_TARGET_OS: &str = "CARGO_CFG_TARGET_OS";
-    let dylib_ext = match env::var_os(CARGO_CFG_TARGET_OS)
-        .ok_or_else(|| {
-            anyhow!(
-                "{CARGO_CFG_TARGET_OS} is not defined, cannot determine the target architecture"
-            )
-        })?
-        .as_encoded_bytes()
-    {
-        b"macos" => b".dylib".as_slice(),
-        _ => b".so".as_slice(),
-    };
-
-    let dir_entries = fs::read_dir(llvm_lib_dir).with_context(|| {
-        format!(
-            "failed to read entry of the directory {}",
-            llvm_lib_dir.display()
-        )
-    })?;
-    let libraries = dir_entries
-        .filter_map(|entry| {
-            entry
-                .with_context(|| {
-                    format!(
-                        "failed to read entry of the directory {}",
-                        llvm_lib_dir.display()
-                    )
-                })
-                .map(|entry| {
-                    let mut file_name = entry.file_name().into_encoded_bytes();
-                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(dylib_ext) {
-                        drop(file_name.drain((file_name.len() - dylib_ext.len())..));
-                        drop(file_name.drain(..LIB_LLVM.len()));
-                        // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
-                        // Since then, it was only trimmed.
-                        Some(unsafe { OsString::from_encoded_bytes_unchecked(file_name) })
-                    } else {
-                        None
-                    }
-                })
-                .transpose()
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let library = match libraries.as_slice() {
-        [] => {
-            anyhow::bail!(
-                "could not find dynamic libLLVM in the directory {}",
-                llvm_lib_dir.display()
-            );
-        }
-        [library] => library,
-        libraries @ [library, ..] => {
-            writeln!(
-                stdout,
-                "cargo:warning=found multiple libLLVM files in directory {}:
-{libraries:?}",
-                llvm_lib_dir.display()
-            )?;
-            library
-        }
-    };
-    write_bytes!(
-        stdout,
-        "cargo:rustc-link-lib=dylib=LLVM",
-        library.as_bytes(),
-    )?;
+fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>) -> anyhow::Result<()> {
+    write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
 
     Ok(())
 }
@@ -261,16 +195,12 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
 /// Points cargo to the path containing LLVM libraries and to the LLVM library
 /// files.
 fn main() -> anyhow::Result<()> {
-    let link_fn = if cfg!(feature = "no-llvm-linking") {
+    if cfg!(feature = "no-llvm-linking") {
         if cfg!(feature = "llvm-link-static") {
             anyhow::bail!("`no-llvm-linking` and `llvm-link-static` are mutually exclusive");
         }
         return Ok(());
-    } else if cfg!(feature = "llvm-link-static") {
-        link_llvm_static
-    } else {
-        link_llvm_dynamic
-    };
+    }
 
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -328,5 +258,9 @@ variable `{var_name}` {}",
         llvm_lib_dir.as_os_str().as_bytes(),
     )?;
 
-    link_fn(&mut stdout, &llvm_lib_dir)
+    if cfg!(feature = "llvm-link-static") {
+        link_llvm_static(&mut stdout, &llvm_lib_dir)
+    } else {
+        link_llvm_dynamic(&mut stdout)
+    }
 }
