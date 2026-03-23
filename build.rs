@@ -195,7 +195,7 @@ variable `{var_name}` {}",
     })?;
     write_bytes!(
         stdout,
-        b"cargo:rustc-link-search=",
+        b"cargo:rustc-link-arg=-L",
         llvm_lib_dir.as_os_str().as_bytes(),
     )?;
 
@@ -225,7 +225,7 @@ variable `{var_name}` {}",
                 continue;
             };
 
-            write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
+            write_bytes!(stdout, "cargo:rustc-link-arg=-lLLVM", trimmed)?;
         }
 
         let cxxstdlibs = Cxxstdlibs::new(&mut stdout)?;
@@ -244,7 +244,7 @@ variable `{var_name}` {}",
     } else {
         // Link against shared LLVM. Unlike the static case, its dependencies
         // are discovered via `DT_NEEDED` entries in the shared object.
-        write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
+        write_bytes!(stdout, "cargo:rustc-link-arg=-lLLVM")?;
     }
 
     Ok(())
