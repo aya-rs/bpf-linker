@@ -1,14 +1,16 @@
 use std::{
     env,
     ffi::OsString,
-    fs,
+    fmt, fs,
     io::{self, Write as _},
     iter,
     os::unix::ffi::OsStrExt as _,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context as _, anyhow};
+use object::{AddressSize, Architecture};
+
 macro_rules! write_bytes {
     ($dst:expr, $($bytes:expr),* $(,)?) => {
         (|| {
@@ -116,6 +118,82 @@ where
     }
 }
 
+/// Parses an [`Architecture`] from the `CARGO_CFG_TARGET_ARCH` variable, that
+/// determines the target architecture of the build.
+fn target_architecture_from_env() -> anyhow::Result<(Architecture, OsString)> {
+    const CARGO_CFG_TARGET_ARCH: &str = "CARGO_CFG_TARGET_ARCH";
+    let arch = env::var_os(CARGO_CFG_TARGET_ARCH).ok_or_else(|| {
+        anyhow::anyhow!(
+            "`{CARGO_CFG_TARGET_ARCH}` is not set, cannot determine the target architecture"
+        )
+    })?;
+    let parsed_arch = match arch.as_bytes() {
+        b"aarch64" => Architecture::Aarch64,
+        b"aarch64_ilp32" => Architecture::Aarch64_Ilp32,
+        b"alpha" => Architecture::Alpha,
+        b"arm" => Architecture::Arm,
+        b"avr" => Architecture::Avr,
+        b"bpf" => Architecture::Bpf,
+        b"csky" => Architecture::Csky,
+        b"loongarch32" => Architecture::LoongArch32,
+        b"loongarch64" => Architecture::LoongArch64,
+        b"m68k" => Architecture::M68k,
+        b"mips" => Architecture::Mips,
+        b"mips64" => Architecture::Mips64,
+        b"msp430" => Architecture::Msp430,
+        b"powerpc" => Architecture::PowerPc,
+        b"powerpc64" => Architecture::PowerPc64,
+        b"riscv32" => Architecture::Riscv32,
+        b"riscv64" => Architecture::Riscv64,
+        b"s390x" => Architecture::S390x,
+        b"sbf" => Architecture::Sbf,
+        b"sparc" => Architecture::Sparc,
+        b"sparc64" => Architecture::Sparc64,
+        b"wasm32" => Architecture::Wasm32,
+        b"wasm64" => Architecture::Wasm64,
+        b"xtensa" => Architecture::Xtensa,
+        b"x86" => Architecture::I386,
+        b"x86_64" => Architecture::X86_64,
+        _ => anyhow::bail!(
+            "`{CARGO_CFG_TARGET_ARCH}` references unknown architecture `{}`",
+            arch.display()
+        ),
+    };
+    Ok((parsed_arch, arch))
+}
+
+/// Finds an existing library directory among provided `candidates` in the
+/// `basedir`.
+fn find_libdir<P>(
+    stdout: &mut io::StdoutLock<'_>,
+    basedir: &Path,
+    candidates: &[P],
+) -> anyhow::Result<PathBuf>
+where
+    P: AsRef<Path> + fmt::Debug,
+{
+    candidates
+        .iter()
+        .find_map(|candidate| {
+            || -> anyhow::Result<Option<PathBuf>> {
+                let candidate = basedir.join(candidate);
+                if candidate.exists() {
+                    Ok(Some(candidate))
+                } else {
+                    write_bytes!(
+                        stdout,
+                        "cargo:warning=directory does not exist: ",
+                        candidate.as_os_str().as_bytes()
+                    )?;
+                    Ok(None)
+                }
+            }()
+            .transpose()
+        })
+        .transpose()?
+        .ok_or_else(|| anyhow!("none of the candidate directories exist: {candidates:?}"))
+}
+
 /// Checks whether the given environment variable `env_var` exists and if yes,
 /// emits its content as a `-L` search path for the linker.
 fn emit_search_path_if_defined(
@@ -177,7 +255,7 @@ variable `{var_name}` {}",
                 paths_os.display()
             )
         })?;
-    let llvm_lib_dir = llvm_config
+    let llvm_basedir = llvm_config
         .parent()
         .and_then(|p| p.parent())
         .ok_or_else(|| {
@@ -185,19 +263,49 @@ variable `{var_name}` {}",
                 "llvm-config location has no parent: {}",
                 llvm_config.display()
             )
-        })?
-        .join("lib");
+        })?;
+    let (target_arch, target_arch_ostr) = target_architecture_from_env()?;
+    let target_address_size = target_arch.address_size().ok_or_else(|| {
+        anyhow!(
+            "address size of target architecture {} is unknown",
+            target_arch_ostr.display()
+        )
+    })?;
+    // Support systems that provide libraries for multiple address sizes,
+    // usually 64-bit and 32-bit, to allow 32-bit applications on 64-bit hosts.
+    // Prefer directories with an explicit address size, such as `lib32` or
+    // `lib64` for the target, then fall back to `lib`.
+    let (target_bits, lib_dir_candidates) = match target_address_size {
+        AddressSize::U32 => (32, ["lib32", "lib"]),
+        AddressSize::U64 => (64, ["lib64", "lib"]),
+        _ => anyhow::bail!(
+            "target {} with address size {target_address_size:?} is not supported",
+            target_arch_ostr.display()
+        ),
+    };
+    writeln!(
+        stdout,
+        "cargo:warning={} is a {}-bit target, searching for LLVM library directories {lib_dir_candidates:?} in {}",
+        target_arch_ostr.display(),
+        target_bits,
+        llvm_basedir.display(),
+    )?;
+    let llvm_lib_dir = find_libdir(&mut stdout, llvm_basedir, &lib_dir_candidates)
+        .with_context(|| "could not find LLVM lib directory")?;
+
     let llvm_lib_dir = fs::canonicalize(&llvm_lib_dir).with_context(|| {
         format!(
             "failed to canonicalize LLVM lib directory {}",
             llvm_lib_dir.display()
         )
     })?;
+    let llvm_lib_dir_b = llvm_lib_dir.as_os_str().as_bytes();
     write_bytes!(
         stdout,
-        b"cargo:rustc-link-arg=-L",
-        llvm_lib_dir.as_os_str().as_bytes(),
+        b"cargo:warning=found LLVM library directory: ",
+        llvm_lib_dir_b
     )?;
+    write_bytes!(stdout, b"cargo:rustc-link-arg=-L", llvm_lib_dir_b)?;
 
     if cfg!(feature = "llvm-link-static") {
         // Link LLVM and its dependencies statically:
