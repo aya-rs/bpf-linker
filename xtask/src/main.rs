@@ -42,6 +42,10 @@ struct BuildLlvm {
     /// Directory in which the built LLVM artifacts are installed.
     #[arg(long)]
     install_prefix: PathBuf,
+    /// Library install directory, must match the syntax of
+    /// `CMAKE_INSTALL_LIBDIR`.
+    #[arg(long, default_value = "lib")]
+    install_libdir: PathBuf,
     /// C compiler.
     #[arg(long, default_value = "clang")]
     c_compiler: String,
@@ -112,6 +116,7 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
         src_dir,
         build_dir,
         install_prefix,
+        install_libdir,
         c_compiler,
         cxx_compiler,
         cmake_system_processor,
@@ -121,6 +126,8 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
 
     let mut install_arg = OsString::from("-DCMAKE_INSTALL_PREFIX=");
     install_arg.push(install_prefix.as_os_str());
+    let mut install_libdir_arg = OsString::from("-DCMAKE_INSTALL_LIBDIR=");
+    install_libdir_arg.push(install_libdir.as_os_str());
     let mut cmake_configure = Command::new("cmake");
     let _: &mut _ = cmake_configure
         .arg("-S")
@@ -155,7 +162,7 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             format!("-DCMAKE_C_COMPILER={c_compiler}"),
             format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"),
         ])
-        .arg(install_arg);
+        .args([install_arg, install_libdir_arg]);
     if let Some(cmake_system_processor) = cmake_system_processor {
         let _: &mut _ =
             cmake_configure.arg(format!("-DCMAKE_SYSTEM_PROCESSOR={cmake_system_processor}"));
