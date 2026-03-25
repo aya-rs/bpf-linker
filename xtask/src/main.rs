@@ -64,6 +64,9 @@ struct BuildLlvm {
     /// `/usr/aarch64-unknown-linux-musl`.
     #[arg(long)]
     sysroot: Option<PathBuf>,
+    /// Suffix used to distinguish incompatible LLVM build variants in CI.
+    #[arg(long, default_value_t = 0)]
+    build_rev: u32,
 }
 
 #[derive(clap::Subcommand)]
@@ -122,6 +125,7 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
         cmake_system_processor,
         cmake_system_name,
         sysroot,
+        build_rev,
     } = options;
 
     let mut install_arg = OsString::from("-DCMAKE_INSTALL_PREFIX=");
@@ -146,18 +150,18 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
             "-DLLVM_LINK_LLVM_DYLIB=ON",
             "-DLLVM_TARGETS_TO_BUILD=BPF",
             "-DLLVM_USE_LINKER=lld",
-            // We build a minimal LLVM (only the BPF target). If its version matches the
-            // system LLVM and our libLLVM ends up on LD_LIBRARY_PATH, binaries like clang
-            // may accidentally load *our* libLLVM. That can fail at runtime because this
-            // build omits components/targets the system binaries expect (missing symbols).
-            //
-            // Give our shared library a unique version suffix so it cannot be confused
-            // with the system libLLVM. Our build script (build.rs) determines the exact
-            // filename of the produced library, as long as our llvm-config appears first
-            // in PATH. We can then safely add our install directory to LD_LIBRARY_PATH
-            // without worrying about conflicts.
-            "-DLLVM_VERSION_SUFFIX=-bpf-linker-1",
         ])
+        // We build a minimal LLVM (only the BPF target). If its version matches the
+        // system LLVM and our libLLVM ends up on LD_LIBRARY_PATH, binaries like clang
+        // may accidentally load *our* libLLVM. That can fail at runtime because this
+        // build omits components/targets the system binaries expect (missing symbols).
+        //
+        // Give our shared library a unique version suffix so it cannot be confused
+        // with the system libLLVM. Our build script (build.rs) determines the exact
+        // filename of the produced library, as long as our llvm-config appears first
+        // in PATH. We can then safely add our install directory to LD_LIBRARY_PATH
+        // without worrying about conflicts.
+        .arg(format!("-DLLVM_VERSION_SUFFIX=-bpf-linker-{build_rev}"))
         .args([
             format!("-DCMAKE_C_COMPILER={c_compiler}"),
             format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"),
