@@ -165,7 +165,15 @@ jobs:
           tar --zstd -C "$GITHUB_WORKSPACE/llvm-install" -cf llvm-install.tar.zst .
 
       - name: Publish LLVM OCI artifact
-        if: steps.artifact-restore.outcome != 'success'
+        # GitHub does not allow foreign-repository pull requests to push
+        # container images. Attempting to do so fails with:
+        #
+        #   Error response from registry: denied: installation not allowed to
+        #   Write organization package
+        #
+        # Disable artifact publishing for forked pull requests. This
+        # restriction is a reasonable security measure.
+        if: steps.artifact-restore.outcome != 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           set -euxo pipefail
           oras push "${{ steps.image-tag.outputs.sha }}" \
