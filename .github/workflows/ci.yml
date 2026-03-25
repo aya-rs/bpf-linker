@@ -13,6 +13,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
+  # Suffix used to distinguish incompatible LLVM build variants.
+  # This lets us roll out changes to the LLVM build in a pull request
+  # without conflicting with artifacts produced on the main branch.
+  LLVM_BUILD_REV: 2
 
 permissions: {}
 
@@ -23,8 +28,6 @@ jobs:
       packages: write
     runs-on: ${{ matrix.platform.os }}
     name: llvm
-    outputs:
-      cache-key: ${{ steps.cache-key.outputs.cache-key }}
     strategy:
       matrix:
         platform:
@@ -60,8 +63,6 @@ jobs:
             git-ref: rustc/21.1-2025-08-01
           - version: 22
             git-ref: rustc/22.1-2026-01-27
-    env:
-      TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
     steps:
       - id: ls-remote
         run: |
@@ -69,10 +70,15 @@ jobs:
           value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/${{ matrix.llvm.git-ref }} | cut -f1)
           echo "sha=$value" >> "$GITHUB_OUTPUT"
 
-      - id: sha
+      - id: image-tag
         run: |
           set -euxo pipefail
-          echo "sha=${{ steps.ls-remote.outputs.sha }}-1" >> "$GITHUB_OUTPUT"
+          # Tag based on the LLVM git commit SHA. Used by the `artifact-restore`
+          # step to pull the exact build for this source revision.
+          echo "sha=${{ env.TAG_PREFIX }}:${{ steps.ls-remote.outputs.sha }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
+          # Tag based on the LLVM version. Used by the other CI jobs to pull the
+          # expected artifact for this platform.
+          echo "version=${{ env.TAG_PREFIX }}:${{ matrix.llvm.version }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
 
       - uses: oras-project/setup-oras@v1
 
@@ -87,7 +93,7 @@ jobs:
         id: artifact-restore
         continue-on-error: true
         run: |
-          oras pull "${{ env.TAG_PREFIX }}:${{ steps.sha.outputs.sha }}-${{ matrix.platform.target }}"
+          oras pull "${{ steps.image-tag.outputs.sha }}"
 
       - uses: actions/checkout@v6
         if: steps.artifact-restore.outcome != 'success'
@@ -162,12 +168,10 @@ jobs:
         if: steps.artifact-restore.outcome != 'success'
         run: |
           set -euxo pipefail
-          sha_tag="${{ env.TAG_PREFIX }}:${{ steps.sha.outputs.sha }}-${{ matrix.platform.target }}"
-          version_tag="${{ env.TAG_PREFIX }}:${{ matrix.llvm.version }}-${{ matrix.platform.target }}"
-          oras push "${sha_tag}" \
+          oras push "${{ steps.image-tag.outputs.sha }}" \
             --artifact-type application/vnd.aya.llvm.install \
             llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
-          oras tag "${sha_tag}" "${version_tag}"
+          oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
 
   lint-stable:
     runs-on: ubuntu-latest
@@ -321,7 +325,7 @@ jobs:
       - name: Restore LLVM from ghcr.io
         run: |
           set -euxo pipefail
-          ref="ghcr.io/${{ github.repository_owner }}/llvm:${{ matrix.toolchain.llvm }}-${{ matrix.platform.target }}"
+          ref="${{ env.TAG_PREFIX }}:${{ matrix.toolchain.llvm }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
           digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
           # Make sure LLVM is available from the current directory, so
           # bubblewrap is able to access it. See the `ci/*-run` scripts.
@@ -555,7 +559,7 @@ jobs:
       - name: Restore LLVM from ghcr.io
         run: |
           set -euxo pipefail
-          oras pull "ghcr.io/${{ github.repository_owner }}/llvm:${{ env.LLVM_VERSION }}-${{ matrix.platform.target }}"
+          oras pull "${{ env.TAG_PREFIX }}:${{ env.LLVM_VERSION }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
           # Make sure LLVM is available from the current directory, so
           # bubblewrap is able to access it. See the `ci/*-run` scripts.
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
