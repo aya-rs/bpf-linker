@@ -50,7 +50,7 @@ struct BuildLlvm {
     cxx_compiler: String,
     /// Target architecture to build LLVM for, must match the syntax of
     /// `CMAKE_SYSTEM_PROCESSOR` option, e.g. `aarch64`, `riscv64`.
-    #[arg(long, requires = "system_name")]
+    #[arg(long, requires = "cmake_system_name")]
     cmake_system_processor: Option<String>,
     /// Target system to build LLVM for, must match the syntax of
     /// `CMAKE_SYSTEM_NAME` option, e.g. `Linux`.
