@@ -51,6 +51,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             c-compiler: clang
             cxx-compiler: clang++
+            libdir: lib64
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
             c-compiler: x86_64-linux-musl-clang
@@ -152,6 +153,7 @@ jobs:
             --src-dir llvm-project \
             --build-dir llvm-build \
             --install-prefix "${{ github.workspace }}/llvm-install" \
+            ${{ matrix.platform.libdir && format('--install-libdir {0}', matrix.platform.libdir) }} \
             --c-compiler "${{ matrix.platform.c-compiler }}" \
             --cxx-compiler "${{ matrix.platform.cxx-compiler }}" \
             ${{ endsWith(matrix.platform.target, 'musl') && format('--cmake-system-processor "$arch" --cmake-system-name Linux --sysroot {0}/sysroot', github.workspace) || '' }}
