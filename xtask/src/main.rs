@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs, path::PathBuf, process::Command};
+use std::{ffi::OsString, fs, io, path::PathBuf, process::Command};
 
 use anyhow::{Context as _, Result};
 use rustc_build_sysroot::{BuildMode, SysrootConfig, SysrootStatus};
@@ -153,8 +153,9 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
         ])
         // We build a minimal LLVM (only the BPF target). If its version matches the
         // system LLVM and our libLLVM ends up on LD_LIBRARY_PATH, binaries like clang
-        // may accidentally load *our* libLLVM. That can fail at runtime because this
-        // build omits components/targets the system binaries expect (missing symbols).
+        // or rustc may accidentally load *our* libLLVM. That can fail at runtime because
+        // this build omits components/targets the system binaries expect (missing
+        // symbols).
         //
         // Give our shared library a unique version suffix so it cannot be confused
         // with the system libLLVM. Our build script (build.rs) determines the exact
@@ -255,6 +256,31 @@ fn build_llvm(options: BuildLlvm) -> Result<()> {
                     link_path.display()
                 )
             })?;
+        }
+    }
+
+    // Remove the unversioned libLLVM dynamic library symlink (libLLVM.so).
+    // Otherwise binaries like clang or rustc might accidently load our
+    // libLLVM. That can fail at runtime because this build omits
+    // components/targets the system binaries expect. Unfortunately, CMake does
+    // not provide any option to skip producing that symlink.
+    for dylib_ext in ["dylib", "so"] {
+        let libllvm_unversioned = install_prefix
+            .join(&install_libdir)
+            .join(format!("libLLVM.{dylib_ext}"));
+        match fs::remove_file(&libllvm_unversioned) {
+            Ok(()) => {}
+            Err(err) => {
+                if err.kind() == io::ErrorKind::NotFound {
+                    continue;
+                }
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to remove the unversioned libLLVM shared library symlink {}",
+                        libllvm_unversioned.display()
+                    )
+                });
+            }
         }
     }
 
