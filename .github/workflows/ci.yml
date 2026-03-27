@@ -17,7 +17,7 @@ env:
   # Suffix used to distinguish incompatible LLVM build variants.
   # This lets us roll out changes to the LLVM build in a pull request
   # without conflicting with artifacts produced on the main branch.
-  LLVM_BUILD_REV: 1
+  LLVM_BUILD_REV: 2
 
 permissions: {}
 
