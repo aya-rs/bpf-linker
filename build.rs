@@ -450,65 +450,23 @@ to an appropriate compiler"
 /// specify the names of libaries that the dynamic linker should link
 /// beforehand.
 fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
-    const LIB_LLVM: &[u8] = b"libLLVM";
-    #[cfg(target_os = "macos")]
-    const DYLIB_EXT: &[u8] = b".dylib";
-    #[cfg(not(target_os = "macos"))]
-    const DYLIB_EXT: &[u8] = b".so";
-
-    let dir_entries = fs::read_dir(llvm_lib_dir).with_context(|| {
-        format!(
-            "failed to read entry of the directory {}",
-            llvm_lib_dir.display()
-        )
-    })?;
-    let libraries = dir_entries
-        .filter_map(|entry| {
-            entry
-                .with_context(|| {
-                    format!(
-                        "failed to read entry of the directory {}",
-                        llvm_lib_dir.display()
-                    )
-                })
-                .map(|entry| {
-                    let mut file_name = entry.file_name().into_encoded_bytes();
-                    if file_name.starts_with(LIB_LLVM) && file_name.ends_with(DYLIB_EXT) {
-                        drop(file_name.drain((file_name.len() - DYLIB_EXT.len())..));
-                        drop(file_name.drain(..LIB_LLVM.len()));
-                        // SAFETY: `file_name` originates from `OsString::into_encoded_bytes`.
-                        // Since then, it was only trimmed.
-                        Some(unsafe { OsString::from_encoded_bytes_unchecked(file_name) })
-                    } else {
-                        None
-                    }
-                })
-                .transpose()
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let library = match libraries.as_slice() {
-        [] => {
-            anyhow::bail!(
-                "could not find dynamic libLLVM in the directory {}",
-                llvm_lib_dir.display()
-            );
-        }
-        [library] => library,
-        libraries @ [library, ..] => {
-            writeln!(
-                stdout,
-                "cargo:warning=found multiple libLLVM files in directory {}:
-{libraries:?}",
-                llvm_lib_dir.display()
-            )?;
-            library
-        }
-    };
+    // Emit an rpath so `bpf-linker` loads the intended `libLLVM`, even when
+    // the build uses a custom LLVM via `LLVM_PREFIX` or a custom `llvm-config`
+    // found through `PATH`.
+    //
+    // This matters especially for LLVM built with `cargo xtask build-llvm`,
+    // which produces a minimal LLVM containing only the BPF target. Using
+    // rpath keeps that override scoped to the `bpf-linker` binaries, unlike
+    // global linker configuration or `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH`
+    // which could also affect `rustc` on targets where it links LLVM
+    // dynamically. That makes rpath the only isolation mechanism suitable for
+    // `cargo run` and `cargo test`.
     write_bytes!(
         stdout,
-        "cargo:rustc-link-lib=dylib=LLVM",
-        library.as_bytes(),
+        "cargo:rustc-link-arg=-Wl,-rpath,",
+        llvm_lib_dir.as_os_str().as_bytes()
     )?;
+    write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
 
     Ok(())
 }
