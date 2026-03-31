@@ -327,12 +327,6 @@ jobs:
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
           echo "${LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            DYLIB_ENV_VAR=LD_LIBRARY_PATH
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            DYLIB_ENV_VAR=DYLD_LIBRARY_PATH
-          fi
-          echo "${DYLIB_ENV_VAR}=${LLVM_INSTALL_DIR}/lib" >> $GITHUB_ENV
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
