@@ -248,17 +248,32 @@ jobs:
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
+            # `rustc-llvm-proxy` does not work reliably on macOS. Stable Rust
+            # toolchains for macOS link `libLLVM` statically. Nightly tried to
+            # switch to dynamic linking[0][1], but those attempts were reverted
+            # twice[2][3], which makes the behavior uncertain.
+            #
+            # [0] https://github.com/rust-lang/rust/pull/152768
+            # [1] https://github.com/rust-lang/rust/pull/151063
+            # [2] https://github.com/rust-lang/rust/pull/153079
+            # [3] https://github.com/rust-lang/rust/pull/154485
+            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
           # We don't use ubuntu-latest because we care about the apt packages available.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
+            # `rustc-llvm-proxy` does not work on musl targets because Rust
+            # toolchains for musl link libLLVM statically.
+            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-musl
+            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
     name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain.rust }} llvm=${{ matrix.toolchain.llvm }}
     needs: llvm
 
@@ -356,14 +371,14 @@ jobs:
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             check --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build (dynamic linking, feature powerset)
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             hack build --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # Toolchains provided by rustup include standard library artifacts
@@ -378,7 +393,7 @@ jobs:
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack --target ${{ matrix.platform.target }} \
             test --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # To make things easier for package maintainers, the step of building a
@@ -406,7 +421,7 @@ jobs:
           BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
             cargo hack --target ${{ matrix.platform.target }} test \
             --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v6
