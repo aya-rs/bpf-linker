@@ -4,6 +4,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -109,6 +110,64 @@ fn is_nightly() -> bool {
     output.stdout.windows(NIGHTLY.len()).any(|b| NIGHTLY.eq(b))
 }
 
+/// Returns the active toolchain sysroot if it supports the requested BPF
+/// target.
+///
+/// This currently works only with custom Rust toolchains built with BPF target
+/// support.
+fn toolchain_bpf_sysroot(target: &str) -> Option<PathBuf> {
+    let output = rustc_cmd()
+        .args(["--print", "sysroot"])
+        .output()
+        .expect("failed to determine rustc sysroot");
+    if !output.status.success() {
+        panic!("failed to determine rustc sysroot: {output:?}");
+    }
+
+    let mut sysroot = output.stdout;
+    while matches!(sysroot.last(), Some(b'\n' | b'\r')) {
+        let _newline = sysroot.pop();
+    }
+    let sysroot = PathBuf::from(OsString::from_vec(sysroot));
+    let target_libdir = sysroot.join("lib/rustlib").join(target).join("lib");
+    if !target_libdir.is_dir() {
+        eprintln!(
+            "toolchain sysroot {} does not contain target {target} sysroot {}; falling back to building a sysroot",
+            sysroot.display(),
+            target_libdir.display(),
+        );
+        return None;
+    }
+
+    let has_core = fs::read_dir(&target_libdir)
+        .unwrap_or_else(|err| {
+            panic!(
+                "failed to read target libdir {}: {err}",
+                target_libdir.display()
+            )
+        })
+        .any(|entry| {
+            let entry = entry.unwrap_or_else(|err| {
+                panic!(
+                    "failed to read entry in target libdir {}: {err}",
+                    target_libdir.display()
+                )
+            });
+            let name = entry.file_name();
+            let name = name.as_os_str().as_bytes();
+            name.starts_with(b"libcore-") && name.ends_with(b".rlib")
+        });
+    if !has_core {
+        eprintln!(
+            "toolchain sysroot {} has target {} but does not contain libcore; falling back to building a sysroot",
+            sysroot.display(),
+            target
+        );
+    }
+
+    has_core.then_some(sysroot)
+}
+
 fn btf_dump(src: &Path, dst: &Path) {
     let dst = fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
@@ -130,9 +189,10 @@ fn compile_test() {
     let root_dir = Path::new(&root_dir);
     let bpf_sysroot = if let Some(bpf_sysroot) = env::var_os("BPFEL_SYSROOT_DIR") {
         PathBuf::from(bpf_sysroot)
+    } else if let Some(bpf_sysroot) = toolchain_bpf_sysroot(target) {
+        bpf_sysroot
     } else {
-        let rustc = Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")));
-        let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc)
+        let rustc_src = rustc_build_sysroot::rustc_sysroot_src(rustc_cmd())
             .expect("could not determine sysroot source directory");
         let directory = root_dir.join("target/sysroot");
         match rustc_build_sysroot::SysrootBuilder::new(&directory, target)
