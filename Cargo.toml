@@ -93,7 +93,7 @@ edition = "2024"
 [workspace.dependencies]
 # cli deps
 anyhow = { version = "1.0.102", default-features = false }
-clap = { version = "4.5.60", features = ["derive", "env"] }
+clap = { version = "4.6.0", features = ["derive", "env"] }
 # dev deps
 reqwest = { version = "0.12.24", default-features = false }
 rustc-build-sysroot = { version = "0.5.13", default-features = false }
