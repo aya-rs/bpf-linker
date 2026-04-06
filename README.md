@@ -184,8 +184,9 @@ OPTIONS:
         --cpu <cpu>                  Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3` [default:
                                      generic]
         --cpu-features <features>    Enable or disable CPU features. The available features are: alu32, dummy, dwarfris.
-                                     Use +feature to enable a feature, or -feature to disable it.  For example --cpu-
-                                     features=+alu32,-dwarfris [default: ]
+                                     LLVM 22 builds also support allows-misaligned-mem-access. Use +feature to
+                                     enable a feature, or -feature to disable it. For example --cpu-features=+allows-
+                                     misaligned-mem-access,+alu32,-dwarfris [default: ]
         --dump-module <path>         Dump the final IR module to the given `path` before generating the code
         --emit <emit>                Output type. Can be one of `llvm-bc`, `asm`, `llvm-ir`, `obj` [default: obj]
         --export <symbols>...        Comma separated list of symbols to export. See also `--export-symbols`
