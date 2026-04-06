@@ -88,9 +88,10 @@ struct CommandLine {
     #[clap(long, default_value = "generic")]
     cpu: Cpu,
 
-    /// Enable or disable CPU features. The available features are: alu32, dummy, dwarfris. Use
-    /// +feature to enable a feature, or -feature to disable it.  For example
-    /// --cpu-features=+alu32,-dwarfris
+    /// Enable or disable CPU features. The available features are: alu32, dummy, dwarfris.
+    /// LLVM 22 builds also support allows-misaligned-mem-access. Use +feature to enable a
+    /// feature, or -feature to disable it. For example
+    /// --cpu-features=+allows-misaligned-mem-access,+alu32,-dwarfris
     #[clap(long, value_name = "features", default_value = "")]
     cpu_features: CString,
 
