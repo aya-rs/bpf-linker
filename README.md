@@ -18,78 +18,68 @@ inside ar archives (.a).
 
 ## Installation
 
-The linker requires LLVM 21. It can use the same LLVM used by the rust compiler,
-or it can use an external LLVM installation.
+### cargo-binstall
 
-### Using LLVM provided by rustc
-
-All you need to do is run:
+The recommended installation method is via
+[cargo-binstall][cargo-binstall]. Install `cargo-binstall` first, then run:
 
 ```sh
-cargo install bpf-linker
+cargo binstall bpf-linker
 ```
 
-However, this method works only for Linux x86_64 (`x86_64-unknown-linux-gnu`),
-which is the only target that rustup provides a shared libLLVM library for.
-For any other platform, use the *external LLVM* method.
+[cargo-binstall]: https://github.com/cargo-bins/cargo-binstall
 
-### Using external LLVM
+### Manual download
 
-#### System packages
+Download the tarball from the [releases page][releases] that matches your Rust
+target triple. The published binaries currently use `*-apple-darwin` for macOS
+and `*-unknown-linux-musl` for Linux.
 
-On Debian based distributions you need to install the `llvm-21-dev` and `libclang-21-dev`
-packages, from the official LLVM repo at https://apt.llvm.org.
+After downloading, unpack the archive into a directory that is included in your
+`PATH`.
 
-You may need to build LLVM from source if a recent version is not available
-through any package manager that supports your platform.
-
-Once you have installed LLVM 21 you can install the linker running:
+Example:
 
 ```sh
-cargo install bpf-linker --no-default-features --features llvm-21
+# Linux ARM64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-unknown-linux-musl.tar.gz
+# Linux x86_64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-unknown-linux-musl.tar.gz
+# macOS ARM64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-apple-darwin.tar.gz
+# macOS x86_64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-apple-darwin.tar.gz
+
+mkdir -p "$HOME/.local/bin"
+tar -xpf bpf-linker-*.tar.gz -C "$HOME/.local/bin"
+# Add this line to your shell startup file. If you use a different shell,
+# refer to its documentation for adding directories to PATH.
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-#### Building LLVM from source
+[releases]: https://github.com/aya-rs/bpf-linker/releases
 
-LLVM can be built from source using the `xtask build-llvm` subcommand, included
-in bpf-linker sources.
+### Packages
 
-First, the LLVM sources offered in [our fork][llvm-fork] need to be cloned,
-using the branch matching the Rust toolchain you want to use. For current
-nightly:
+bpf-linker may also be available through your operating system's package
+repositories. In general, packaged builds are expected to work with Rust
+toolchains provided by the same package manager. If you use Rust via rustup,
+prefer installing bpf-linker with cargo-binstall or from the release tarballs
+instead.
 
-```sh
-git clone -b rustc/21.1-2025-08-01 https://github.com/aya-rs/llvm-project ./llvm-project
-```
+Current packaging status:
 
-If in doubt about which branch to use, check the LLVM version used by your Rust
-compiler:
+[![Packaging status](https://repology.org/badge/vertical-allrepos/bpf-linker.svg)](https://repology.org/project/bpf-linker/versions)
 
-```sh
-rustc [+toolchain] --version -v | grep LLVM
-```
+### Building from source
 
-When the sources are ready, the LLVM artifacts can be built and installed in
-the directory provided in the `--install-prefix` argument, using `--build-dir`
-to store the state of the build.
+Building from source, including even a plain `cargo install bpf-linker`
+invocation, is **not** recommended for regular users due to dependency on
+specific LLVM version, system libraries and overall complexity of getting
+the setup right.
 
-```sh
-cargo xtask llvm build \
-    --src-dir ./llvm-project \
-    --build-dir ./llvm-build \
-    --install-prefix ./llvm-install
-```
-
-After that, bpf-linker can be built with the `LLVM_PREFIX` environment
-variable pointing to that directory:
-
-```sh
-LLVM_PREFIX=./llvm-install cargo install --path .
-```
-
-If you don't have cargo you can get it from https://rustup.rs or from your distro's package manager.
-
-[llvm-fork]: https://github.com/aya-rs/llvm-project
+If you're interested in packaging or contributing to bpf-linker, you're
+welcome to check the build instructions in [BUILDING.md](./BUILDING.md).
 
 ## Usage
 
