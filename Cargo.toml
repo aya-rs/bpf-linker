@@ -42,7 +42,7 @@ llvm-sys-21 = { package = "llvm-sys", features = [
 llvm-sys-22 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
   "no-llvm-linking",
-], version = "221.0.0-rc1", optional = true }
+], version = "221.0.1", optional = true }
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
 tracing = { version = "0.1.44" }

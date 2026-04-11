@@ -89,7 +89,7 @@ dependencies = [
  "cargo_metadata",
  "libc",
  "libloading",
- "llvm-sys 221.0.0-rc1",
+ "llvm-sys 221.0.1",
  "prettyplease",
  "quote",
  "rustversion",
@@ -116,7 +116,7 @@ dependencies = [
  "libc",
  "llvm-sys 201.0.1",
  "llvm-sys 211.0.0",
- "llvm-sys 221.0.0-rc1",
+ "llvm-sys 221.0.1",
  "log",
  "object",
  "regex",
@@ -495,9 +495,9 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "221.0.0-rc1"
+version = "221.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db90a0a8ba6f1668c2d22ec6cf25d01ab8dd0c5fee77732c2fd751120940090b"
+checksum = "2abcc34a3b190f03c2a61b555f218f529589ff13657bdd2ff8ac3e85f2abe6bb"
 dependencies = [
  "anyhow",
  "cc",
