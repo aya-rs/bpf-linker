@@ -1,6 +1,8 @@
 use std::{ffi::CStr, marker::PhantomData};
 
 use libc::c_char;
+#[cfg(feature = "llvm-22")]
+use llvm_sys::target::LLVMGetModuleDataLayout;
 use llvm_sys::{
     bit_writer::LLVMWriteBitcodeToFile,
     core::{
@@ -11,6 +13,8 @@ use llvm_sys::{
     prelude::{LLVMModuleRef, LLVMValueRef},
 };
 
+#[cfg(feature = "llvm-22")]
+use crate::llvm::DataLayout;
 use crate::llvm::{
     MemoryBuffer, Message,
     iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _},
@@ -22,7 +26,7 @@ pub(crate) struct LLVMModule<'ctx> {
     pub(super) _marker: PhantomData<&'ctx LLVMContext>,
 }
 
-impl LLVMModule<'_> {
+impl<'ctx> LLVMModule<'ctx> {
     /// Returns an unsafe mutable pointer to the LLVM module.
     ///
     /// The caller must ensure that the [`LLVMModule`] outlives the pointer this
@@ -88,7 +92,12 @@ impl LLVMModule<'_> {
         unsafe { LLVMStripModuleDebugInfo(self.module) != 0 }
     }
 
-    pub(crate) fn functions(&self) -> impl Iterator<Item = Function<'_>> {
+    #[cfg(feature = "llvm-22")]
+    pub(crate) fn data_layout(&self) -> DataLayout<'ctx> {
+        unsafe { DataLayout::from_ref(LLVMGetModuleDataLayout(self.module)) }
+    }
+
+    pub(crate) fn functions(&self) -> impl Iterator<Item = Function<'ctx>> + '_ {
         self.module
             .functions_iter()
             .map(|value_ref| unsafe { Function::from_value_ref(value_ref) })

@@ -1,5 +1,11 @@
 use std::{fmt, marker::PhantomData};
 
+#[cfg(feature = "llvm-22")]
+use llvm_sys::{
+    LLVMDbgRecordKind,
+    core::{LLVMDbgRecordGetKind, LLVMDbgVariableRecordGetValue, LLVMDbgVariableRecordGetVariable},
+    prelude::LLVMDbgRecordRef,
+};
 use llvm_sys::{
     core::{
         LLVMCountParams, LLVMDisposeValueMetadataEntries, LLVMGetNumOperands, LLVMGetOperand,
@@ -19,7 +25,10 @@ use crate::llvm::{
     LLVMContext, Message,
     iter::{IterBasicBlocks as _, IterInstructions as _},
     symbol_name,
-    types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+    types::{
+        di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+        instruction::InstructionKind,
+    },
 };
 
 pub(crate) fn replace_name(
@@ -102,7 +111,11 @@ pub(crate) enum Metadata<'ctx> {
     DICompositeType(DICompositeType<'ctx>),
     DIDerivedType(DIDerivedType<'ctx>),
     DISubprogram(DISubprogram<'ctx>),
-    Other(#[expect(dead_code)] LLVMValueRef),
+    #[cfg_attr(
+        not(feature = "llvm-22"),
+        expect(dead_code, reason = "used by CO-RE support on LLVM 22")
+    )]
+    Other(LLVMValueRef),
 }
 
 impl Metadata<'_> {
@@ -289,14 +302,52 @@ impl Drop for MetadataEntries {
     }
 }
 
-/// Represents a basic block.
+#[cfg(feature = "llvm-22")]
+/// Represents a metadata node.
+#[derive(Clone)]
+pub(crate) struct DbgRecord<'ctx> {
+    value_ref: LLVMDbgRecordRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+#[cfg(feature = "llvm-22")]
+impl DbgRecord<'_> {
+    /// Constructs a new [`DbgRecord`] from the given debug record value.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a
+    /// valid instance of [LLVM `DbgRecord`](https://llvm.org/doxygen/classllvm_1_1DbgRecord.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub(crate) unsafe fn from_dbg_record_ref(value_ref: LLVMDbgRecordRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn kind(&self) -> LLVMDbgRecordKind {
+        unsafe { LLVMDbgRecordGetKind(self.value_ref) }
+    }
+
+    pub(crate) fn value(&self, index: u32) -> LLVMValueRef {
+        unsafe { LLVMDbgVariableRecordGetValue(self.value_ref, index) }
+    }
+
+    pub(crate) fn variable(&self) -> LLVMMetadataRef {
+        unsafe { LLVMDbgVariableRecordGetVariable(self.value_ref) }
+    }
+}
+
+/// Represents a metadata node.
 #[derive(Clone)]
 pub(crate) struct BasicBlock<'ctx> {
     value_ref: LLVMBasicBlockRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl BasicBlock<'_> {
+impl<'ctx> BasicBlock<'ctx> {
     /// Constructs a new [`BasicBlock`] from the given basic block value.
     ///
     /// # Safety
@@ -312,8 +363,10 @@ impl BasicBlock<'_> {
         }
     }
 
-    pub(crate) fn instructions(&self) -> impl Iterator<Item = LLVMValueRef> + '_ {
-        self.value_ref.instructions_iter()
+    pub(crate) fn instructions(&self) -> impl Iterator<Item = InstructionKind<'ctx>> + '_ {
+        self.value_ref
+            .instructions_iter()
+            .map(InstructionKind::from_value_ref)
     }
 }
 
