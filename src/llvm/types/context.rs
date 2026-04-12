@@ -10,9 +10,10 @@ use std::{
 use llvm_sys::{
     core::{
         LLVMContextCreate, LLVMContextDispose, LLVMContextSetDiagnosticHandler,
-        LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity, LLVMModuleCreateWithNameInContext,
+        LLVMCreateTypeAttribute, LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity,
+        LLVMGetMDKindIDInContext, LLVMModuleCreateWithNameInContext,
     },
-    prelude::{LLVMContextRef, LLVMDiagnosticInfoRef},
+    prelude::{LLVMAttributeRef, LLVMContextRef, LLVMDiagnosticInfoRef, LLVMTypeRef},
 };
 
 use crate::llvm::{LLVMDiagnosticHandler, Message, types::module::LLVMModule};
@@ -60,6 +61,14 @@ impl LLVMContext {
         })
     }
 
+    pub(crate) fn create_type_attribute(
+        &self,
+        kind: u32,
+        type_ref: LLVMTypeRef,
+    ) -> LLVMAttributeRef {
+        unsafe { LLVMCreateTypeAttribute(self.as_mut_ptr(), kind, type_ref) }
+    }
+
     /// Install a context-local diagnostic handler.
     pub(crate) fn set_diagnostic_handler<T>(&mut self, handler: T) -> InstalledDiagnosticHandler<T>
     where
@@ -95,6 +104,16 @@ impl LLVMContext {
         // deal with an Option. It also contributes to keeping the handler alive
         // for as long as the handle (or the context-held clone) exists.
         InstalledDiagnosticHandler { inner: pinrc }
+    }
+
+    pub(crate) fn md_kind_id(&self, name: &CStr) -> u32 {
+        unsafe {
+            LLVMGetMDKindIDInContext(
+                self.as_mut_ptr(),
+                name.as_ptr(),
+                name.to_bytes().len() as u32,
+            )
+        }
     }
 }
 

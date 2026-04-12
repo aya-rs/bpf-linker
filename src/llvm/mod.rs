@@ -1,3 +1,8 @@
+// CO-RE relocations rely on debug info record API that was introduced in LLVM
+// 22:
+// https://llvm.org/docs/RemoveDIsDebugInfo.html
+#[cfg(feature = "llvm-22")]
+mod core_reloc;
 mod di;
 mod iter;
 mod types;
@@ -10,6 +15,8 @@ use std::{
     ptr, slice, str,
 };
 
+#[cfg(feature = "llvm-22")]
+pub(crate) use core_reloc::{CoreRelocError, CoreRelocPass};
 pub(crate) use di::DISanitizer;
 use iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _};
 use llvm_sys::{
@@ -45,7 +52,9 @@ use llvm_sys::{
 use tracing::{debug, error};
 pub(crate) use types::{
     context::{InstalledDiagnosticHandler, LLVMContext},
+    data_layout::DataLayout,
     di_builder::DIBuilder,
+    ir_builder::IRBuilder,
     memory_buffer::MemoryBuffer,
     module::LLVMModule,
     target_machine::LLVMTargetMachine,
