@@ -86,7 +86,6 @@ impl<'ctx> DISanitizer<'ctx> {
                         }
 
                         let mut is_data_carrying_enum = false;
-                        let mut remove_name = false;
                         let mut members: Vec<DIType<'_>> = Vec::new();
                         for element in di_composite_type.elements() {
                             match element {
@@ -120,31 +119,7 @@ impl<'ctx> DISanitizer<'ctx> {
                                     }
                                 }
                                 Metadata::DIDerivedType(di_derived_type) => {
-                                    let base_type = di_derived_type.base_type();
-
-                                    match base_type {
-                                        Metadata::DICompositeType(base_type_di_composite_type) => {
-                                            if let Some(base_type_name) =
-                                                base_type_di_composite_type.name()
-                                            {
-                                                // `AyaBtfMapMarker` is a type which is used in fields of BTF map
-                                                // structs. We need to make such structs anonymous in order to get
-                                                // BTF maps accepted by the Linux kernel.
-                                                if base_type_name == b"AyaBtfMapMarker" {
-                                                    // Remove the name from the struct.
-                                                    remove_name = true;
-                                                    // And don't include the field in the sanitized DI.
-                                                } else {
-                                                    members.push(di_derived_type.into());
-                                                }
-                                            } else {
-                                                members.push(di_derived_type.into());
-                                            }
-                                        }
-                                        _ => {
-                                            members.push(di_derived_type.into());
-                                        }
-                                    }
+                                    members.push(di_derived_type.into());
                                 }
                                 _ => {}
                             }
@@ -157,12 +132,7 @@ impl<'ctx> DISanitizer<'ctx> {
                                 MDNode::with_elements(self.context, members.as_mut_slice());
                             di_composite_type.replace_elements(sorted_elements);
                         }
-                        if remove_name {
-                            // `AyaBtfMapMarker` is a type which is used in fields of BTF map
-                            // structs. We need to make such structs anonymous in order to get
-                            // BTF maps accepted by the Linux kernel.
-                            di_composite_type.replace_name(self.context, &[])
-                        } else if let Some((_, sanitized_name)) = names {
+                        if let Some((_, sanitized_name)) = names {
                             // Clear the name from characters incompatible with C.
                             di_composite_type.replace_name(self.context, sanitized_name.as_slice())
                         }
