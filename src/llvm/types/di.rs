@@ -146,22 +146,6 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
     }
 }
 
-/// Represents the operands for a [`DIDerivedType`]. The enum values correspond
-/// to the operand indices within metadata nodes.
-#[repr(u32)]
-enum DIDerivedTypeOperand {
-    /// [`DIType`] representing a base type of the given derived type.
-    /// Reference in [LLVM 20][llvm-20] and [LLVM 21][llvm-21].
-    ///
-    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1106
-    /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386
-    ///
-    #[cfg(feature = "llvm-20")]
-    BaseType = 3,
-    #[cfg(not(feature = "llvm-20"))]
-    BaseType = 5,
-}
-
 /// Represents the debug information for a derived type in LLVM IR.
 ///
 /// The types derived from other types usually add a level of indirection or an
@@ -188,14 +172,6 @@ impl DIDerivedType<'_> {
             metadata_ref,
             value_ref,
             _marker: PhantomData,
-        }
-    }
-
-    /// Returns the base type of this derived type.
-    pub(crate) fn base_type(&self) -> Metadata<'_> {
-        unsafe {
-            let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
-            Metadata::from_value_ref(value)
         }
     }
 
