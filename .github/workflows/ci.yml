@@ -233,7 +233,10 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - rust: 1.91.0
+          - rust: 1.90.0
+            llvm: 20
+            exclude-features: default,llvm-21,llvm-22,rust-llvm-21,rust-llvm-22
+          - rust: 1.94.0
             llvm: 21
             exclude-features: default,llvm-20,llvm-22,rust-llvm-20,rust-llvm-22
           - rust: stable
