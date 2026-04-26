@@ -8,12 +8,12 @@ use llvm_sys::{
         LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
         LLVMGetDINodeTag,
     },
-    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
+    prelude::{LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
-    LLVMGetMDString,
     types::ir::{MDNode, Metadata},
+    LLVMContext, LLVMGetMDString,
 };
 
 fn mdstring<'a>(mdstring: LLVMValueRef) -> &'a [u8] {
@@ -205,8 +205,13 @@ impl DIDerivedType<'_> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub(crate) fn replace_name(&mut self, context: LLVMContextRef, name: &[u8]) {
-        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
+    pub(crate) fn replace_name(&mut self, context: &LLVMContext, name: &[u8]) {
+        super::ir::replace_name(
+            self.value_ref,
+            context.as_mut_ptr(),
+            DITypeOperand::Name as u32,
+            name,
+        )
     }
 
     /// Returns a DWARF tag of the given derived type.
@@ -317,8 +322,13 @@ impl DICompositeType<'_> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub(crate) fn replace_name(&mut self, context: LLVMContextRef, name: &[u8]) {
-        super::ir::replace_name(self.value_ref, context, DITypeOperand::Name as u32, name)
+    pub(crate) fn replace_name(&mut self, context: &LLVMContext, name: &[u8]) {
+        super::ir::replace_name(
+            self.value_ref,
+            context.as_mut_ptr(),
+            DITypeOperand::Name as u32,
+            name,
+        )
     }
 
     /// Returns a DWARF tag of the given composite type.
@@ -401,10 +411,10 @@ impl DISubprogram<'_> {
     ///
     /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
     /// be converted into a `CString`.
-    pub(crate) fn replace_name(&mut self, context: LLVMContextRef, name: &[u8]) {
+    pub(crate) fn replace_name(&mut self, context: &LLVMContext, name: &[u8]) {
         super::ir::replace_name(
             self.value_ref,
-            context,
+            context.as_mut_ptr(),
             DISubprogramOperand::Name as u32,
             name,
         )
