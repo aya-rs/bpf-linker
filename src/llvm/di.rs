@@ -14,7 +14,7 @@ use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
+use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found across kernel versions to ensure
@@ -24,7 +24,7 @@ const MAX_KSYM_NAME_LEN: usize = 128;
 pub(crate) struct DISanitizer<'ctx> {
     context: &'ctx LLVMContext,
     module: &'ctx LLVMModule<'ctx>,
-    builder: LLVMDIBuilderRef,
+    builder: DIBuilder<'ctx>,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types_lossy: Vec<String>,
@@ -60,7 +60,7 @@ impl<'ctx> DISanitizer<'ctx> {
         DISanitizer {
             context,
             module,
-            builder: unsafe { LLVMCreateDIBuilder(module.as_mut_ptr()) },
+            builder: DIBuilder::new(module),
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types_lossy: Vec::new(),
@@ -321,43 +321,28 @@ impl<'ctx> DISanitizer<'ctx> {
                 continue;
             };
 
-            let (name, name_len) = subprogram
-                .name()
-                .map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
-            let (linkage_name, linkage_name_len) = subprogram
-                .linkage_name()
-                .map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
             let ty = subprogram.ty();
 
             // Create a new subprogram that has DISPFlagLocalToUnit set, so the BTF backend emits it
             // with linkage=static
-            let mut new_program = unsafe {
-                let new_program = LLVMDIBuilderCreateFunction(
-                    self.builder,
-                    subprogram.scope().unwrap(),
-                    name.cast(),
-                    name_len,
-                    linkage_name.cast(),
-                    linkage_name_len,
-                    subprogram.file(),
-                    subprogram.line(),
-                    ty,
-                    1,
-                    1,
-                    subprogram.line(),
-                    subprogram.type_flags(),
-                    1,
-                );
-                // Technically this must be called as part of the builder API, but effectively does
-                // nothing because we don't add any variables through the builder API, instead we
-                // replace retained nodes manually below.
-                LLVMDIBuilderFinalizeSubprogram(self.builder, new_program);
-
-                DISubprogram::from_value_ref(LLVMMetadataAsValue(
-                    self.context.as_mut_ptr(),
-                    new_program,
-                ))
-            };
+            let mut new_program = self.builder.create_function(
+                self.context,
+                subprogram.scope().unwrap(),
+                subprogram.name(),
+                subprogram.linkage_name(),
+                subprogram.file(),
+                subprogram.line(),
+                ty,
+                true,
+                true,
+                subprogram.line(),
+                subprogram.type_flags(),
+                true,
+            );
+            // Technically this must be called as part of the builder API, but effectively does
+            // nothing because we don't add any variables through the builder API, instead we
+            // replace retained nodes manually below.
+            self.builder.finalize_subprogram(&new_program);
 
             // Point the function to the new subprogram.
             function.set_subprogram(&new_program);
@@ -391,12 +376,6 @@ impl<'ctx> DISanitizer<'ctx> {
         }
 
         replace
-    }
-}
-
-impl Drop for DISanitizer<'_> {
-    fn drop(&mut self) {
-        unsafe { LLVMDisposeDIBuilder(self.builder) };
     }
 }
 
