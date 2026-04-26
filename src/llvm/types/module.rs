@@ -8,10 +8,14 @@ use llvm_sys::{
         LLVMGetTarget, LLVMPrintModuleToFile, LLVMPrintModuleToString,
     },
     debuginfo::LLVMStripModuleDebugInfo,
-    prelude::LLVMModuleRef,
+    prelude::{LLVMModuleRef, LLVMValueRef},
 };
 
-use crate::llvm::{MemoryBuffer, Message, types::context::LLVMContext};
+use crate::llvm::{
+    MemoryBuffer, Message,
+    iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _},
+    types::context::LLVMContext,
+};
 
 pub(crate) struct LLVMModule<'ctx> {
     pub(super) module: LLVMModuleRef,
@@ -82,6 +86,18 @@ impl LLVMModule<'_> {
     /// strips debug information, returns true if DI got stripped
     pub(crate) fn strip_debug_info(&mut self) -> bool {
         unsafe { LLVMStripModuleDebugInfo(self.module) != 0 }
+    }
+
+    pub(crate) fn functions(&self) -> impl Iterator<Item = LLVMValueRef> {
+        self.module.functions_iter()
+    }
+
+    pub(crate) fn globals(&self) -> impl Iterator<Item = LLVMValueRef> {
+        self.module.globals_iter()
+    }
+
+    pub(crate) fn global_aliases(&self) -> impl Iterator<Item = LLVMValueRef> {
+        self.module.global_aliases_iter()
     }
 }
 

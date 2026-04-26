@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::Hasher as _,
     io::Write as _,
-    marker::PhantomData,
     ptr,
 };
 
@@ -24,13 +23,11 @@ const MAX_KSYM_NAME_LEN: usize = 128;
 
 pub(crate) struct DISanitizer<'ctx> {
     context: &'ctx LLVMContext,
-    module: LLVMModuleRef,
+    module: &'ctx LLVMModule<'ctx>,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
     skipped_types_lossy: Vec<String>,
-    // TODO: use references of safe wrappers instead of PhantomData
-    _marker: PhantomData<LLVMModule<'ctx>>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -59,15 +56,14 @@ fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
 }
 
 impl<'ctx> DISanitizer<'ctx> {
-    pub(crate) fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
+    pub(crate) fn new(context: &'ctx LLVMContext, module: &'ctx LLVMModule<'ctx>) -> Self {
         DISanitizer {
             context,
-            module: module.as_mut_ptr(),
+            module,
             builder: unsafe { LLVMCreateDIBuilder(module.as_mut_ptr()) },
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
             skipped_types_lossy: Vec::new(),
-            _marker: PhantomData,
         }
     }
 
@@ -273,14 +269,14 @@ impl<'ctx> DISanitizer<'ctx> {
 
         self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
 
-        for value in module.globals_iter() {
+        for value in module.globals() {
             self.visit_item(Item::GlobalVariable(value));
         }
-        for value in module.global_aliases_iter() {
+        for value in module.global_aliases() {
             self.visit_item(Item::GlobalAlias(value));
         }
 
-        for function in module.functions_iter() {
+        for function in module.functions() {
             self.visit_item(Item::Function(function));
         }
 
@@ -313,7 +309,7 @@ impl<'ctx> DISanitizer<'ctx> {
 
         for mut function in self
             .module
-            .functions_iter()
+            .functions()
             .map(|value| unsafe { Function::from_value_ref(value) })
         {
             if export_symbols.contains(function.name()) {
