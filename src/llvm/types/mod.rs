@@ -1,5 +1,6 @@
 pub(super) mod context;
 pub(super) mod di;
+pub(super) mod di_builder;
 pub(super) mod ir;
 pub(super) mod memory_buffer;
 pub(super) mod module;
