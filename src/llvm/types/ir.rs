@@ -16,7 +16,7 @@ use llvm_sys::{
 };
 
 use crate::llvm::{
-    Message,
+    LLVMContext, Message,
     iter::IterBasicBlocks as _,
     symbol_name,
     types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
@@ -221,9 +221,10 @@ impl MDNode<'_> {
     }
 
     /// Constructs an empty metadata node.
-    pub(crate) fn empty(context: LLVMContextRef) -> Self {
-        let metadata = unsafe { LLVMMDNodeInContext2(context, core::ptr::null_mut(), 0) };
-        unsafe { Self::from_metadata_ref(context, metadata) }
+    pub(crate) fn empty(context: &LLVMContext) -> Self {
+        let metadata =
+            unsafe { LLVMMDNodeInContext2(context.as_mut_ptr(), core::ptr::null_mut(), 0) };
+        unsafe { Self::from_metadata_ref(context.as_mut_ptr(), metadata) }
     }
 
     /// Constructs a new metadata node from an array of [`DIType`] elements.
@@ -231,19 +232,19 @@ impl MDNode<'_> {
     /// This function is used to create composite metadata structures, such as
     /// arrays or tuples of different types or values, which can then be used
     /// to represent complex data structures within the metadata system.
-    pub(crate) fn with_elements(context: LLVMContextRef, elements: &[DIType<'_>]) -> Self {
+    pub(crate) fn with_elements(context: &LLVMContext, elements: &[DIType<'_>]) -> Self {
         let metadata = unsafe {
             let mut elements: Vec<LLVMMetadataRef> = elements
                 .iter()
                 .map(|di_type| LLVMValueAsMetadata(di_type.value_ref))
                 .collect();
             LLVMMDNodeInContext2(
-                context,
+                context.as_mut_ptr(),
                 elements.as_mut_slice().as_mut_ptr(),
                 elements.len(),
             )
         };
-        unsafe { Self::from_metadata_ref(context, metadata) }
+        unsafe { Self::from_metadata_ref(context.as_mut_ptr(), metadata) }
     }
 }
 

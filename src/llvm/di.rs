@@ -23,7 +23,7 @@ use crate::llvm::{LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
 const MAX_KSYM_NAME_LEN: usize = 128;
 
 pub(crate) struct DISanitizer<'ctx> {
-    context: LLVMContextRef,
+    context: &'ctx LLVMContext,
     module: LLVMModuleRef,
     builder: LLVMDIBuilderRef,
     visited_nodes: HashSet<u64>,
@@ -61,7 +61,7 @@ fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
 impl<'ctx> DISanitizer<'ctx> {
     pub(crate) fn new(context: &'ctx LLVMContext, module: &mut LLVMModule<'ctx>) -> Self {
         DISanitizer {
-            context: context.as_mut_ptr(),
+            context,
             module: module.as_mut_ptr(),
             builder: unsafe { LLVMCreateDIBuilder(module.as_mut_ptr()) },
             visited_nodes: HashSet::new(),
@@ -219,7 +219,9 @@ impl<'ctx> DISanitizer<'ctx> {
             // seen its value or not, since the same value can appear as an operand in multiple
             // nodes in the tree.
             if let Some(new_metadata) = self.replace_operands.get(&value_id) {
-                operand.replace(unsafe { LLVMMetadataAsValue(self.context, *new_metadata) })
+                operand.replace(unsafe {
+                    LLVMMetadataAsValue(self.context.as_mut_ptr(), *new_metadata)
+                })
             }
         }
 
@@ -245,7 +247,8 @@ impl<'ctx> DISanitizer<'ctx> {
 
         if let Some(entries) = value.metadata_entries() {
             for (index, (metadata, kind)) in entries.iter().enumerate() {
-                let metadata_value = unsafe { LLVMMetadataAsValue(self.context, metadata) };
+                let metadata_value =
+                    unsafe { LLVMMetadataAsValue(self.context.as_mut_ptr(), metadata) };
                 self.visit_item(Item::MetadataEntry(metadata_value, kind, index));
             }
         }
@@ -318,7 +321,7 @@ impl<'ctx> DISanitizer<'ctx> {
             }
 
             // Skip functions that don't have subprograms.
-            let Some(mut subprogram) = function.subprogram(self.context) else {
+            let Some(mut subprogram) = function.subprogram(self.context.as_mut_ptr()) else {
                 continue;
             };
 
@@ -354,7 +357,10 @@ impl<'ctx> DISanitizer<'ctx> {
                 // replace retained nodes manually below.
                 LLVMDIBuilderFinalizeSubprogram(self.builder, new_program);
 
-                DISubprogram::from_value_ref(LLVMMetadataAsValue(self.context, new_program))
+                DISubprogram::from_value_ref(LLVMMetadataAsValue(
+                    self.context.as_mut_ptr(),
+                    new_program,
+                ))
             };
 
             // Point the function to the new subprogram.
@@ -376,7 +382,8 @@ impl<'ctx> DISanitizer<'ctx> {
             // Remove retained nodes from the old program or we'll hit a debug assertion since
             // its debug variables no longer point to the program. See the
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
-            let empty_node = unsafe { LLVMMDNodeInContext2(self.context, ptr::null_mut(), 0) };
+            let empty_node =
+                unsafe { LLVMMDNodeInContext2(self.context.as_mut_ptr(), ptr::null_mut(), 0) };
             subprogram.set_retained_nodes(empty_node);
 
             assert_eq!(
