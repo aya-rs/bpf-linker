@@ -6,6 +6,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     ffi::{CStr, CString},
+    fmt,
     os::raw::c_char,
     ptr, slice, str,
 };
@@ -366,6 +367,12 @@ impl Message {
             .map(CStr::to_bytes)
             .map(String::from_utf8_lossy)
             .unwrap_or("<null>".into())
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.as_string_lossy())
     }
 }
 
