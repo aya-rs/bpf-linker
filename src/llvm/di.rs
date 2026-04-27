@@ -163,7 +163,7 @@ impl<'ctx> DISanitizer<'ctx> {
     }
 
     // navigate the tree of LLVMValueRefs (DFS-pre-order)
-    fn visit_item(&mut self, mut item: Item) {
+    fn visit_item(&mut self, mut item: Item<'_>) {
         let value_ref = item.value_ref();
         let value_id = item.value_id();
 
@@ -277,11 +277,7 @@ impl<'ctx> DISanitizer<'ctx> {
     ) -> HashMap<u64, LLVMMetadataRef> {
         let mut replace = HashMap::new();
 
-        for mut function in self
-            .module
-            .functions()
-            .map(|value| unsafe { Function::from_value_ref(value) })
-        {
+        for mut function in self.module.functions() {
             if export_symbols.contains(function.name()) {
                 continue;
             }
@@ -350,10 +346,10 @@ impl<'ctx> DISanitizer<'ctx> {
 }
 
 #[derive(Clone, Debug)]
-enum Item {
+enum Item<'ctx> {
     GlobalVariable(LLVMValueRef),
     GlobalAlias(LLVMValueRef),
-    Function(LLVMValueRef),
+    Function(Function<'ctx>),
     FunctionParam(LLVMValueRef),
     Instruction(LLVMValueRef),
     Operand(Operand),
@@ -385,16 +381,16 @@ impl Operand {
     }
 }
 
-impl Item {
+impl Item<'_> {
     fn value_ref(&self) -> LLVMValueRef {
         match self {
             Self::GlobalVariable(value)
             | Self::GlobalAlias(value)
-            | Self::Function(value)
             | Self::FunctionParam(value)
             | Self::Instruction(value)
             | Self::Operand(Operand { value, .. })
             | Self::MetadataEntry(value) => *value,
+            Self::Function(function) => function.value_ref,
         }
     }
 
