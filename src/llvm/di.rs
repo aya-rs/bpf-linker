@@ -316,6 +316,11 @@ impl<'ctx> DISanitizer<'ctx> {
                 continue;
             }
 
+            let num_blocks = unsafe { LLVMCountBasicBlocks(function.value_ref) };
+            if num_blocks == 0 {
+                continue;
+            }
+
             // Skip functions that don't have subprograms.
             let Some(mut subprogram) = function.subprogram(self.context.as_mut_ptr()) else {
                 continue;
