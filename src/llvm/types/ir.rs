@@ -32,6 +32,12 @@ pub(crate) fn replace_name(
     unsafe { LLVMReplaceMDNodeOperandWith(value_ref, name_operand_index, name) };
 }
 
+pub(super) fn value_to_message(value_ref: LLVMValueRef) -> Message {
+    Message {
+        ptr: unsafe { LLVMPrintValueToString(value_ref) },
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Value<'ctx> {
     MDNode(MDNode<'ctx>),
@@ -41,25 +47,18 @@ pub(crate) enum Value<'ctx> {
 
 impl std::fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value_to_string = |value| {
-            Message {
-                ptr: unsafe { LLVMPrintValueToString(value) },
-            }
-            .as_string_lossy()
-            .to_string()
-        };
         match self {
             Self::MDNode(node) => f
                 .debug_struct("MDNode")
-                .field("value", &value_to_string(node.value_ref))
+                .field("value", &value_to_message(node.value_ref).as_string_lossy())
                 .finish(),
             Self::Function(fun) => f
                 .debug_struct("Function")
-                .field("value", &value_to_string(fun.value_ref))
+                .field("value", &value_to_message(fun.value_ref).as_string_lossy())
                 .finish(),
             Self::Other(value) => f
                 .debug_struct("Other")
-                .field("value", &value_to_string(*value))
+                .field("value", &value_to_message(*value).as_string_lossy())
                 .finish(),
         }
     }
