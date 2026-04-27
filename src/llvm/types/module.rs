@@ -14,7 +14,7 @@ use llvm_sys::{
 use crate::llvm::{
     MemoryBuffer, Message,
     iter::{IterModuleFunctions as _, IterModuleGlobalAliases as _, IterModuleGlobals as _},
-    types::context::LLVMContext,
+    types::{context::LLVMContext, ir::Function},
 };
 
 pub(crate) struct LLVMModule<'ctx> {
@@ -88,8 +88,10 @@ impl LLVMModule<'_> {
         unsafe { LLVMStripModuleDebugInfo(self.module) != 0 }
     }
 
-    pub(crate) fn functions(&self) -> impl Iterator<Item = LLVMValueRef> {
-        self.module.functions_iter()
+    pub(crate) fn functions(&self) -> impl Iterator<Item = Function<'_>> {
+        self.module
+            .functions_iter()
+            .map(|value_ref| unsafe { Function::from_value_ref(value_ref) })
     }
 
     pub(crate) fn globals(&self) -> impl Iterator<Item = LLVMValueRef> {

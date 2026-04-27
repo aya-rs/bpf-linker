@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use llvm_sys::{
     core::{
@@ -45,8 +45,8 @@ pub(crate) enum Value<'ctx> {
     Other(LLVMValueRef),
 }
 
-impl std::fmt::Debug for Value<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Value<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MDNode(node) => f
                 .debug_struct("MDNode")
@@ -294,6 +294,14 @@ impl Drop for MetadataEntries {
 pub(crate) struct Function<'ctx> {
     pub value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
+}
+
+impl fmt::Debug for Function<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Function")
+            .field("value", &value_to_message(self.value_ref).as_string_lossy())
+            .finish()
+    }
 }
 
 impl<'ctx> Function<'ctx> {
