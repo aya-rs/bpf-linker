@@ -212,10 +212,10 @@ impl<'ctx> DISanitizer<'ctx> {
         }
 
         if let Some(entries) = value.metadata_entries() {
-            for (index, (metadata, kind)) in entries.iter().enumerate() {
+            for (metadata, _) in entries.iter() {
                 let metadata_value =
                     unsafe { LLVMMetadataAsValue(self.context.as_mut_ptr(), metadata) };
-                self.visit_item(Item::MetadataEntry(metadata_value, kind, index));
+                self.visit_item(Item::MetadataEntry(metadata_value));
             }
         }
 
@@ -349,7 +349,7 @@ impl<'ctx> DISanitizer<'ctx> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum Item {
     GlobalVariable(LLVMValueRef),
     GlobalAlias(LLVMValueRef),
@@ -357,7 +357,7 @@ enum Item {
     FunctionParam(LLVMValueRef),
     Instruction(LLVMValueRef),
     Operand(Operand),
-    MetadataEntry(LLVMValueRef, u32, usize),
+    MetadataEntry(LLVMValueRef),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -394,7 +394,7 @@ impl Item {
             | Self::FunctionParam(value)
             | Self::Instruction(value)
             | Self::Operand(Operand { value, .. })
-            | Self::MetadataEntry(value, _, _) => *value,
+            | Self::MetadataEntry(value) => *value,
         }
     }
 
