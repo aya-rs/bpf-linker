@@ -13,7 +13,7 @@ use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*};
+use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found across kernel versions to ensure
@@ -25,7 +25,7 @@ pub(crate) struct DISanitizer<'ctx> {
     module: &'ctx LLVMModule<'ctx>,
     builder: DIBuilder<'ctx>,
     visited_nodes: HashSet<u64>,
-    replace_operands: HashMap<u64, LLVMMetadataRef>,
+    replace_subprograms: HashMap<u64, DISubprogram<'ctx>>,
     skipped_types_lossy: Vec<String>,
 }
 
@@ -61,7 +61,7 @@ impl<'ctx> DISanitizer<'ctx> {
             module,
             builder: DIBuilder::new(module),
             visited_nodes: HashSet::new(),
-            replace_operands: HashMap::new(),
+            replace_subprograms: HashMap::new(),
             skipped_types_lossy: Vec::new(),
         }
     }
@@ -183,10 +183,8 @@ impl<'ctx> DISanitizer<'ctx> {
             // When we have an operand to replace, we must do so regardless of whether we've already
             // seen its value or not, since the same value can appear as an operand in multiple
             // nodes in the tree.
-            if let Some(new_metadata) = self.replace_operands.get(&value_id) {
-                operand.replace(unsafe {
-                    LLVMMetadataAsValue(self.context.as_mut_ptr(), *new_metadata)
-                })
+            if let Some(new_subprogram) = self.replace_subprograms.get(&value_id) {
+                operand.replace(new_subprogram.value_ref);
             }
         }
 
@@ -236,7 +234,7 @@ impl<'ctx> DISanitizer<'ctx> {
     pub(crate) fn run(mut self, exported_symbols: &HashSet<Cow<'_, [u8]>>) {
         let module = self.module;
 
-        self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
+        self.replace_subprograms = self.fix_subprogram_linkage(exported_symbols);
 
         for value in module.globals() {
             self.visit_item(Item::GlobalVariable(value));
@@ -273,7 +271,7 @@ impl<'ctx> DISanitizer<'ctx> {
     fn fix_subprogram_linkage(
         &mut self,
         export_symbols: &HashSet<Cow<'_, [u8]>>,
-    ) -> HashMap<u64, LLVMMetadataRef> {
+    ) -> HashMap<u64, DISubprogram<'ctx>> {
         let mut replace = HashMap::new();
 
         for mut function in self.module.functions() {
@@ -331,11 +329,10 @@ impl<'ctx> DISanitizer<'ctx> {
             let empty_node = MDNode::empty(self.context);
             subprogram.set_retained_nodes(&empty_node);
 
-            assert_eq!(
-                replace.insert(subprogram.value_ref as u64, unsafe {
-                    LLVMValueAsMetadata(new_program.value_ref)
-                }),
-                None
+            assert!(
+                replace
+                    .insert(subprogram.value_ref as u64, new_program)
+                    .is_none()
             );
         }
 
