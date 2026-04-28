@@ -290,7 +290,7 @@ impl Drop for MetadataEntries {
     }
 }
 
-/// Represents a metadata node.
+/// Represents a function.
 #[derive(Clone)]
 pub(crate) struct Function<'ctx> {
     pub value_ref: LLVMValueRef,
