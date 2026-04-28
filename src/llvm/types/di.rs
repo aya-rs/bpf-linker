@@ -416,19 +416,19 @@ impl DISubprogram<'_> {
         };
     }
 
-    pub(crate) fn retained_nodes(&self) -> Option<LLVMMetadataRef> {
+    pub(crate) fn retained_nodes(&self) -> Option<MDNode<'_>> {
         unsafe {
             let nodes = LLVMGetOperand(self.value_ref, DISubprogramOperand::RetainedNodes as u32);
-            (!nodes.is_null()).then(|| LLVMValueAsMetadata(nodes))
+            (!nodes.is_null()).then(|| MDNode::from_value_ref(nodes))
         }
     }
 
-    pub(crate) fn set_retained_nodes(&mut self, nodes: LLVMMetadataRef) {
+    pub(crate) fn set_retained_nodes(&mut self, nodes: &MDNode<'_>) {
         unsafe {
             LLVMReplaceMDNodeOperandWith(
                 self.value_ref,
                 DISubprogramOperand::RetainedNodes as u32,
-                nodes,
+                LLVMValueAsMetadata(nodes.value_ref),
             )
         };
     }
