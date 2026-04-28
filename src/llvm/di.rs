@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::Hasher as _,
     io::Write as _,
-    ptr,
 };
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type, DW_TAG_variant_part};
@@ -323,15 +322,14 @@ impl<'ctx> DISanitizer<'ctx> {
             // variables, including function arguments which otherwise become "anon". See
             // LLVMDIBuilderFinalizeSubprogram and DISubprogram::replaceRetainedNodes.
             if let Some(retained_nodes) = subprogram.retained_nodes() {
-                new_program.set_retained_nodes(retained_nodes);
+                new_program.set_retained_nodes(&retained_nodes);
             }
 
             // Remove retained nodes from the old program or we'll hit a debug assertion since
             // its debug variables no longer point to the program. See the
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
-            let empty_node =
-                unsafe { LLVMMDNodeInContext2(self.context.as_mut_ptr(), ptr::null_mut(), 0) };
-            subprogram.set_retained_nodes(empty_node);
+            let empty_node = MDNode::empty(self.context);
+            subprogram.set_retained_nodes(&empty_node);
 
             assert_eq!(
                 replace.insert(subprogram.value_ref as u64, unsafe {
