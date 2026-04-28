@@ -13,7 +13,7 @@ use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*, types::di::DISubprogram};
+use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found across kernel versions to ensure
@@ -224,7 +224,7 @@ impl<'ctx> DISanitizer<'ctx> {
             }
 
             for basic_block in fun.basic_blocks() {
-                for instruction in basic_block.instructions_iter() {
+                for instruction in basic_block.instructions() {
                     self.visit_item(Item::Instruction(instruction));
                 }
             }

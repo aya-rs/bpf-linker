@@ -17,7 +17,7 @@ use llvm_sys::{
 
 use crate::llvm::{
     LLVMContext, Message,
-    iter::IterBasicBlocks as _,
+    iter::{IterBasicBlocks as _, IterInstructions as _},
     symbol_name,
     types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
 };
@@ -289,6 +289,34 @@ impl Drop for MetadataEntries {
     }
 }
 
+/// Represents a basic block.
+#[derive(Clone)]
+pub(crate) struct BasicBlock<'ctx> {
+    value_ref: LLVMBasicBlockRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl BasicBlock<'_> {
+    /// Constructs a new [`BasicBlock`] from the given basic block value.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a
+    /// valid instance of [LLVM `BasicBlock`](https://llvm.org/doxygen/classllvm_1_1BasicBlock.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMBasicBlockRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn instructions(&self) -> impl Iterator<Item = LLVMValueRef> + '_ {
+        self.value_ref.instructions_iter()
+    }
+}
+
 /// Represents a function.
 #[derive(Clone)]
 pub(crate) struct Function<'ctx> {
@@ -330,8 +358,10 @@ impl<'ctx> Function<'ctx> {
         (0..params_count).map(move |i| unsafe { LLVMGetParam(value, i) })
     }
 
-    pub(crate) fn basic_blocks(&self) -> impl Iterator<Item = LLVMBasicBlockRef> + '_ {
-        self.value_ref.basic_blocks_iter()
+    pub(crate) fn basic_blocks(&self) -> impl Iterator<Item = BasicBlock<'ctx>> + '_ {
+        self.value_ref
+            .basic_blocks_iter()
+            .map(|value_ref| unsafe { BasicBlock::from_value_ref(value_ref) })
     }
 
     pub(crate) fn subprogram(&self, context: LLVMContextRef) -> Option<DISubprogram<'ctx>> {
