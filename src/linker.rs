@@ -55,6 +55,11 @@ pub enum LinkerError {
     #[error("LLVMRunPasses failed: {0}")]
     OptimizeError(String),
 
+    /// Rewriting CO-RE relocations failed.
+    #[cfg(feature = "llvm-22")]
+    #[error("failed to rewrite CO-RE relocations: {0}")]
+    CoreRelocError(llvm::CoreRelocError),
+
     /// Generating the BPF code failed.
     #[error("LLVMTargetMachineEmitToFile failed: {0}")]
     EmitCodeError(String),
@@ -709,8 +714,17 @@ where
     // programs and maps and remove dead code.
 
     if *btf {
-        // if we want to emit BTF, we need to sanitize the debug information
-        llvm::DISanitizer::new(context, module).run(&export_symbols);
+        // If we want to emit BTF, we need to sanitize the debug information
+        // and emit relocations.
+        let preserve_access_types = llvm::DISanitizer::new(context, module).run(&export_symbols);
+        // CO-RE relocations rely on debug info record API that was introduced
+        // in LLVM 22:
+        // https://llvm.org/docs/RemoveDIsDebugInfo.html
+        #[cfg(feature = "llvm-22")]
+        if !preserve_access_types.is_empty() {
+            let mut pass = llvm::CoreRelocPass::new(context, module, &preserve_access_types);
+            pass.run().map_err(LinkerError::CoreRelocError)?;
+        }
     } else {
         // if we don't need BTF emission, we can strip DI
         let ok = module.strip_debug_info();

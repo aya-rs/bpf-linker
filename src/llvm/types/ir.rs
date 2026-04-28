@@ -1,25 +1,31 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use llvm_sys::{
+    LLVMDbgRecordKind,
     core::{
-        LLVMCountParams, LLVMDisposeValueMetadataEntries, LLVMGetNumOperands, LLVMGetOperand,
-        LLVMGetParam, LLVMGlobalCopyAllMetadata, LLVMIsAFunction, LLVMIsAGlobalObject,
-        LLVMIsAInstruction, LLVMIsAMDNode, LLVMIsAUser, LLVMMDNodeInContext2,
+        LLVMCountParams, LLVMDbgRecordGetKind, LLVMDbgVariableRecordGetValue,
+        LLVMDbgVariableRecordGetVariable, LLVMDisposeValueMetadataEntries, LLVMGetNumOperands,
+        LLVMGetOperand, LLVMGetParam, LLVMGlobalCopyAllMetadata, LLVMIsAFunction,
+        LLVMIsAGlobalObject, LLVMIsAInstruction, LLVMIsAMDNode, LLVMIsAUser, LLVMMDNodeInContext2,
         LLVMMDStringInContext2, LLVMMetadataAsValue, LLVMPrintValueToString,
         LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata, LLVMValueMetadataEntriesGetKind,
         LLVMValueMetadataEntriesGetMetadata,
     },
     debuginfo::{LLVMGetMetadataKind, LLVMGetSubprogram, LLVMMetadataKind, LLVMSetSubprogram},
     prelude::{
-        LLVMBasicBlockRef, LLVMContextRef, LLVMMetadataRef, LLVMValueMetadataEntry, LLVMValueRef,
+        LLVMBasicBlockRef, LLVMContextRef, LLVMDbgRecordRef, LLVMMetadataRef,
+        LLVMValueMetadataEntry, LLVMValueRef,
     },
 };
 
 use crate::llvm::{
     LLVMContext, Message,
-    iter::IterBasicBlocks as _,
+    iter::{IterBasicBlocks as _, IterInstructions as _},
     symbol_name,
-    types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+    types::{
+        di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+        instruction::InstructionKind,
+    },
 };
 
 pub(crate) fn replace_name(
@@ -32,6 +38,12 @@ pub(crate) fn replace_name(
     unsafe { LLVMReplaceMDNodeOperandWith(value_ref, name_operand_index, name) };
 }
 
+pub(super) fn value_to_message(value_ref: LLVMValueRef) -> Message {
+    Message {
+        ptr: unsafe { LLVMPrintValueToString(value_ref) },
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Value<'ctx> {
     MDNode(MDNode<'ctx>),
@@ -39,27 +51,20 @@ pub(crate) enum Value<'ctx> {
     Other(LLVMValueRef),
 }
 
-impl std::fmt::Debug for Value<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value_to_string = |value| {
-            Message {
-                ptr: unsafe { LLVMPrintValueToString(value) },
-            }
-            .as_string_lossy()
-            .to_string()
-        };
+impl fmt::Debug for Value<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MDNode(node) => f
                 .debug_struct("MDNode")
-                .field("value", &value_to_string(node.value_ref))
+                .field("value", &value_to_message(node.value_ref).as_string_lossy())
                 .finish(),
             Self::Function(fun) => f
                 .debug_struct("Function")
-                .field("value", &value_to_string(fun.value_ref))
+                .field("value", &value_to_message(fun.value_ref).as_string_lossy())
                 .finish(),
             Self::Other(value) => f
                 .debug_struct("Other")
-                .field("value", &value_to_string(*value))
+                .field("value", &value_to_message(*value).as_string_lossy())
                 .finish(),
         }
     }
@@ -103,7 +108,7 @@ pub(crate) enum Metadata<'ctx> {
     DICompositeType(DICompositeType<'ctx>),
     DIDerivedType(DIDerivedType<'ctx>),
     DISubprogram(DISubprogram<'ctx>),
-    Other(#[expect(dead_code)] LLVMValueRef),
+    Other(LLVMValueRef),
 }
 
 impl Metadata<'_> {
@@ -292,9 +297,83 @@ impl Drop for MetadataEntries {
 
 /// Represents a metadata node.
 #[derive(Clone)]
+pub(crate) struct DbgRecord<'ctx> {
+    value_ref: LLVMDbgRecordRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl DbgRecord<'_> {
+    /// Constructs a new [`DbgRecord`] from the given debug record value.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a
+    /// valid instance of [LLVM `DbgRecord`](https://llvm.org/doxygen/classllvm_1_1DbgRecord.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub(crate) unsafe fn from_dbg_record_ref(value_ref: LLVMDbgRecordRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn kind(&self) -> LLVMDbgRecordKind {
+        unsafe { LLVMDbgRecordGetKind(self.value_ref) }
+    }
+
+    pub(crate) fn value(&self, index: u32) -> LLVMValueRef {
+        unsafe { LLVMDbgVariableRecordGetValue(self.value_ref, index) }
+    }
+
+    pub(crate) fn variable(&self) -> LLVMMetadataRef {
+        unsafe { LLVMDbgVariableRecordGetVariable(self.value_ref) }
+    }
+}
+
+/// Represents a metadata node.
+#[derive(Clone)]
+pub(crate) struct BasicBlock<'ctx> {
+    value_ref: LLVMBasicBlockRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl<'ctx> BasicBlock<'ctx> {
+    /// Constructs a new [`BasicBlock`] from the given basic block value.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that the provided `value_ref` corresponds to a
+    /// valid instance of [LLVM `BasicBlock`](https://llvm.org/doxygen/classllvm_1_1BasicBlock.html).
+    /// It's the caller's responsibility to ensure this invariant, as this
+    /// method doesn't perform any validation checks.
+    pub(crate) unsafe fn from_value_ref(value_ref: LLVMBasicBlockRef) -> Self {
+        Self {
+            value_ref,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn instructions(&self) -> impl Iterator<Item = InstructionKind<'ctx>> + '_ {
+        self.value_ref
+            .instructions_iter()
+            .map(|value_ref| InstructionKind::from_value_ref(value_ref))
+    }
+}
+
+/// Represents a function.
+#[derive(Clone)]
 pub(crate) struct Function<'ctx> {
     pub value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
+}
+
+impl fmt::Debug for Function<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Function")
+            .field("value", &value_to_message(self.value_ref).as_string_lossy())
+            .finish()
+    }
 }
 
 impl<'ctx> Function<'ctx> {
@@ -323,8 +402,10 @@ impl<'ctx> Function<'ctx> {
         (0..params_count).map(move |i| unsafe { LLVMGetParam(value, i) })
     }
 
-    pub(crate) fn basic_blocks(&self) -> impl Iterator<Item = LLVMBasicBlockRef> + '_ {
-        self.value_ref.basic_blocks_iter()
+    pub(crate) fn basic_blocks(&self) -> impl Iterator<Item = BasicBlock<'ctx>> + '_ {
+        self.value_ref
+            .basic_blocks_iter()
+            .map(|value_ref| unsafe { BasicBlock::from_value_ref(value_ref) })
     }
 
     pub(crate) fn subprogram(&self, context: LLVMContextRef) -> Option<DISubprogram<'ctx>> {

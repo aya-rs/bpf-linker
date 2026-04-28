@@ -8,7 +8,7 @@ use llvm_sys::{
         LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
         LLVMGetDINodeTag,
     },
-    prelude::{LLVMMetadataRef, LLVMValueRef},
+    prelude::{LLVMContextRef, LLVMMetadataRef, LLVMValueRef},
 };
 
 use crate::llvm::{
@@ -146,6 +146,22 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
     }
 }
 
+/// Represents the operands for a [`DIDerivedType`]. The enum values correspond
+/// to the operand indices within metadata nodes.
+#[repr(u32)]
+enum DIDerivedTypeOperand {
+    /// [`DIType`] representing a base type of the given derived type.
+    /// Reference in [LLVM 20][llvm-20] and [LLVM 21][llvm-21].
+    ///
+    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1106
+    /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1386
+    ///
+    #[cfg(feature = "llvm-20")]
+    BaseType = 3,
+    #[cfg(not(feature = "llvm-20"))]
+    BaseType = 5,
+}
+
 /// Represents the debug information for a derived type in LLVM IR.
 ///
 /// The types derived from other types usually add a level of indirection or an
@@ -175,6 +191,14 @@ impl DIDerivedType<'_> {
         }
     }
 
+    /// Returns the base type of this derived type.
+    pub(crate) fn base_type(&self) -> Metadata<'_> {
+        unsafe {
+            let value = LLVMGetOperand(self.value_ref, DIDerivedTypeOperand::BaseType as u32);
+            Metadata::from_value_ref(value)
+        }
+    }
+
     /// Replaces the name of the type with a new name.
     ///
     /// # Errors
@@ -194,12 +218,28 @@ impl DIDerivedType<'_> {
     pub(crate) fn tag(&self) -> DwTag {
         unsafe { di_node_tag(self.metadata_ref) }
     }
+
+    pub(crate) fn offset_in_bits(&self) -> u64 {
+        unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) }
+    }
+
+    pub(crate) fn size_in_bits(&self) -> u64 {
+        unsafe { llvm_sys::debuginfo::LLVMDITypeGetSizeInBits(self.metadata_ref) }
+    }
+
+    pub(crate) const fn value_ref(&self) -> LLVMValueRef {
+        self.value_ref
+    }
 }
 
 /// Represents the operands for a [`DICompositeType`]. The enum values
 /// correspond to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DICompositeTypeOperand {
+    #[cfg(feature = "llvm-20")]
+    BaseType = 3,
+    #[cfg(not(feature = "llvm-20"))]
+    BaseType = 5,
     /// Elements of the composite type. Reference in [LLVM 20][llvm-20] and
     /// [LLVM 21][llvm-21].
     ///
@@ -255,6 +295,12 @@ impl DICompositeType<'_> {
         })
     }
 
+    pub(crate) fn base_type(&self) -> Option<Metadata<'_>> {
+        let operand =
+            unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::BaseType as u32) };
+        (!operand.is_null()).then(|| unsafe { Metadata::from_value_ref(operand) })
+    }
+
     /// Returns the name of the composite type.
     pub(crate) fn name(&self) -> Option<&[u8]> {
         unsafe { di_type_name(self.metadata_ref) }
@@ -276,6 +322,10 @@ impl DICompositeType<'_> {
     /// Returns the line number in the source code where the type is defined.
     pub(crate) fn line(&self) -> u32 {
         unsafe { LLVMDITypeGetLine(self.metadata_ref) }
+    }
+
+    pub(crate) fn size_in_bits(&self) -> u64 {
+        unsafe { llvm_sys::debuginfo::LLVMDITypeGetSizeInBits(self.metadata_ref) }
     }
 
     /// Replaces the elements of the composite type with a new metadata node.
@@ -310,6 +360,43 @@ impl DICompositeType<'_> {
     /// Returns a DWARF tag of the given composite type.
     pub(crate) fn tag(&self) -> DwTag {
         unsafe { di_node_tag(self.metadata_ref) }
+    }
+
+    pub(crate) const fn value_ref(&self) -> LLVMValueRef {
+        self.value_ref
+    }
+}
+
+pub(crate) struct DISubroutineType<'ctx> {
+    value_ref: LLVMValueRef,
+    _marker: PhantomData<&'ctx ()>,
+}
+
+impl DISubroutineType<'_> {
+    const TYPE_ARRAY_OPERAND: u32 = 5;
+
+    pub(crate) unsafe fn from_metadata_ref(
+        context: LLVMContextRef,
+        metadata_ref: LLVMMetadataRef,
+    ) -> Self {
+        Self {
+            value_ref: unsafe { llvm_sys::core::LLVMMetadataAsValue(context, metadata_ref) },
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn type_array(&self) -> impl Iterator<Item = Option<Metadata<'_>>> {
+        let type_array = unsafe { LLVMGetOperand(self.value_ref, Self::TYPE_ARRAY_OPERAND) };
+        let operands = if type_array.is_null() {
+            0
+        } else {
+            unsafe { LLVMGetNumOperands(type_array) }
+        };
+
+        (0..operands).map(move |i| {
+            let operand = unsafe { LLVMGetOperand(type_array, i.cast_unsigned()) };
+            (!operand.is_null()).then(|| unsafe { Metadata::from_value_ref(operand) })
+        })
     }
 }
 
@@ -416,19 +503,19 @@ impl DISubprogram<'_> {
         };
     }
 
-    pub(crate) fn retained_nodes(&self) -> Option<LLVMMetadataRef> {
+    pub(crate) fn retained_nodes(&self) -> Option<MDNode<'_>> {
         unsafe {
             let nodes = LLVMGetOperand(self.value_ref, DISubprogramOperand::RetainedNodes as u32);
-            (!nodes.is_null()).then(|| LLVMValueAsMetadata(nodes))
+            (!nodes.is_null()).then(|| MDNode::from_value_ref(nodes))
         }
     }
 
-    pub(crate) fn set_retained_nodes(&mut self, nodes: LLVMMetadataRef) {
+    pub(crate) fn set_retained_nodes(&mut self, nodes: &MDNode<'_>) {
         unsafe {
             LLVMReplaceMDNodeOperandWith(
                 self.value_ref,
                 DISubprogramOperand::RetainedNodes as u32,
-                nodes,
+                LLVMValueAsMetadata(nodes.value_ref),
             )
         };
     }

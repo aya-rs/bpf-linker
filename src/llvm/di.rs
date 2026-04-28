@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::Hasher as _,
     io::Write as _,
-    ptr,
 };
 
 use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type, DW_TAG_variant_part};
@@ -14,7 +13,7 @@ use super::types::{
     di::DIType,
     ir::{Function, MDNode, Metadata, Value},
 };
-use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*};
+use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, types::di::DISubprogram};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
 // to lower value found across kernel versions to ensure
@@ -26,9 +25,14 @@ pub(crate) struct DISanitizer<'ctx> {
     module: &'ctx LLVMModule<'ctx>,
     builder: DIBuilder<'ctx>,
     visited_nodes: HashSet<u64>,
-    replace_operands: HashMap<u64, LLVMMetadataRef>,
+    replace_subprograms: HashMap<u64, DISubprogram<'ctx>>,
     skipped_types_lossy: Vec<String>,
+    preserve_access_types: HashSet<usize>,
 }
+
+/// The marker type name that opts a composite type into CO-RE/BTF relocation
+/// emission when it appears as one of the type's fields.
+const RELOCATABLE_MARKER_TYPE: &[u8] = b"Relocatable";
 
 // Sanitize Rust type names to be valid C type names.
 fn sanitize_type_name(name: &[u8]) -> Vec<u8> {
@@ -62,8 +66,9 @@ impl<'ctx> DISanitizer<'ctx> {
             module,
             builder: DIBuilder::new(module),
             visited_nodes: HashSet::new(),
-            replace_operands: HashMap::new(),
+            replace_subprograms: HashMap::new(),
             skipped_types_lossy: Vec::new(),
+            preserve_access_types: HashSet::new(),
         }
     }
 
@@ -119,7 +124,29 @@ impl<'ctx> DISanitizer<'ctx> {
                                     }
                                 }
                                 Metadata::DIDerivedType(di_derived_type) => {
-                                    members.push(di_derived_type.into());
+                                    let base_type = di_derived_type.base_type();
+
+                                    match base_type {
+                                        Metadata::DICompositeType(base_type_di_composite_type) => {
+                                            if let Some(base_type_name) =
+                                                base_type_di_composite_type.name()
+                                            {
+                                                if base_type_name == RELOCATABLE_MARKER_TYPE {
+                                                    let _is_new =
+                                                        self.preserve_access_types
+                                                            .insert(di_composite_type.value_ref()
+                                                                as usize);
+                                                } else {
+                                                    members.push(di_derived_type.into());
+                                                }
+                                            } else {
+                                                members.push(di_derived_type.into());
+                                            }
+                                        }
+                                        _ => {
+                                            members.push(di_derived_type.into());
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
@@ -163,7 +190,7 @@ impl<'ctx> DISanitizer<'ctx> {
     }
 
     // navigate the tree of LLVMValueRefs (DFS-pre-order)
-    fn visit_item(&mut self, mut item: Item) {
+    fn visit_item(&mut self, mut item: Item<'_>) {
         let value_ref = item.value_ref();
         let value_id = item.value_id();
 
@@ -184,10 +211,8 @@ impl<'ctx> DISanitizer<'ctx> {
             // When we have an operand to replace, we must do so regardless of whether we've already
             // seen its value or not, since the same value can appear as an operand in multiple
             // nodes in the tree.
-            if let Some(new_metadata) = self.replace_operands.get(&value_id) {
-                operand.replace(unsafe {
-                    LLVMMetadataAsValue(self.context.as_mut_ptr(), *new_metadata)
-                })
+            if let Some(new_subprogram) = self.replace_subprograms.get(&value_id) {
+                operand.replace(new_subprogram.value_ref);
             }
         }
 
@@ -212,10 +237,10 @@ impl<'ctx> DISanitizer<'ctx> {
         }
 
         if let Some(entries) = value.metadata_entries() {
-            for (index, (metadata, kind)) in entries.iter().enumerate() {
+            for (metadata, _) in entries.iter() {
                 let metadata_value =
                     unsafe { LLVMMetadataAsValue(self.context.as_mut_ptr(), metadata) };
-                self.visit_item(Item::MetadataEntry(metadata_value, kind, index));
+                self.visit_item(Item::MetadataEntry(metadata_value));
             }
         }
 
@@ -227,17 +252,17 @@ impl<'ctx> DISanitizer<'ctx> {
             }
 
             for basic_block in fun.basic_blocks() {
-                for instruction in basic_block.instructions_iter() {
-                    self.visit_item(Item::Instruction(instruction));
+                for instruction in basic_block.instructions() {
+                    self.visit_item(Item::Instruction(instruction.value_ref()));
                 }
             }
         }
     }
 
-    pub(crate) fn run(mut self, exported_symbols: &HashSet<Cow<'_, [u8]>>) {
+    pub(crate) fn run(mut self, exported_symbols: &HashSet<Cow<'_, [u8]>>) -> HashSet<usize> {
         let module = self.module;
 
-        self.replace_operands = self.fix_subprogram_linkage(exported_symbols);
+        self.replace_subprograms = self.fix_subprogram_linkage(exported_symbols);
 
         for value in module.globals() {
             self.visit_item(Item::GlobalVariable(value));
@@ -256,6 +281,8 @@ impl<'ctx> DISanitizer<'ctx> {
                 self.skipped_types_lossy.join(", ")
             );
         }
+
+        self.preserve_access_types.clone()
     }
 
     // Make it so that only exported symbols (programs marked as #[no_mangle]) get BTF
@@ -274,14 +301,10 @@ impl<'ctx> DISanitizer<'ctx> {
     fn fix_subprogram_linkage(
         &mut self,
         export_symbols: &HashSet<Cow<'_, [u8]>>,
-    ) -> HashMap<u64, LLVMMetadataRef> {
+    ) -> HashMap<u64, DISubprogram<'ctx>> {
         let mut replace = HashMap::new();
 
-        for mut function in self
-            .module
-            .functions()
-            .map(|value| unsafe { Function::from_value_ref(value) })
-        {
+        for mut function in self.module.functions() {
             if export_symbols.contains(function.name()) {
                 continue;
             }
@@ -327,21 +350,19 @@ impl<'ctx> DISanitizer<'ctx> {
             // variables, including function arguments which otherwise become "anon". See
             // LLVMDIBuilderFinalizeSubprogram and DISubprogram::replaceRetainedNodes.
             if let Some(retained_nodes) = subprogram.retained_nodes() {
-                new_program.set_retained_nodes(retained_nodes);
+                new_program.set_retained_nodes(&retained_nodes);
             }
 
             // Remove retained nodes from the old program or we'll hit a debug assertion since
             // its debug variables no longer point to the program. See the
             // NumAbstractSubprograms assertion in DwarfDebug::endFunctionImpl in LLVM.
-            let empty_node =
-                unsafe { LLVMMDNodeInContext2(self.context.as_mut_ptr(), ptr::null_mut(), 0) };
-            subprogram.set_retained_nodes(empty_node);
+            let empty_node = MDNode::empty(self.context);
+            subprogram.set_retained_nodes(&empty_node);
 
-            assert_eq!(
-                replace.insert(subprogram.value_ref as u64, unsafe {
-                    LLVMValueAsMetadata(new_program.value_ref)
-                }),
-                None
+            assert!(
+                replace
+                    .insert(subprogram.value_ref as u64, new_program)
+                    .is_none()
             );
         }
 
@@ -349,15 +370,15 @@ impl<'ctx> DISanitizer<'ctx> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum Item {
+#[derive(Clone, Debug)]
+enum Item<'ctx> {
     GlobalVariable(LLVMValueRef),
     GlobalAlias(LLVMValueRef),
-    Function(LLVMValueRef),
+    Function(Function<'ctx>),
     FunctionParam(LLVMValueRef),
     Instruction(LLVMValueRef),
     Operand(Operand),
-    MetadataEntry(LLVMValueRef, u32, usize),
+    MetadataEntry(LLVMValueRef),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -385,16 +406,16 @@ impl Operand {
     }
 }
 
-impl Item {
+impl Item<'_> {
     fn value_ref(&self) -> LLVMValueRef {
         match self {
             Self::GlobalVariable(value)
             | Self::GlobalAlias(value)
-            | Self::Function(value)
             | Self::FunctionParam(value)
             | Self::Instruction(value)
             | Self::Operand(Operand { value, .. })
-            | Self::MetadataEntry(value, _, _) => *value,
+            | Self::MetadataEntry(value) => *value,
+            Self::Function(function) => function.value_ref,
         }
     }
 
