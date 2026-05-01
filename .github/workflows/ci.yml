@@ -80,7 +80,7 @@ jobs:
           # expected artifact for this platform.
           echo "version=${{ env.TAG_PREFIX }}:${{ matrix.llvm.version }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
 
-      - uses: oras-project/setup-oras@v1
+      - uses: oras-project/setup-oras@v2
 
       - name: Login to ghcr.io
         env:
@@ -339,7 +339,7 @@ jobs:
         if: ${{ !endsWith(matrix.platform.target, 'musl') }}
         run: cargo install btfdump
 
-      - uses: oras-project/setup-oras@v1
+      - uses: oras-project/setup-oras@v2
 
       - name: Login to ghcr.io
         env:
@@ -567,7 +567,7 @@ jobs:
             stable >> $GITHUB_ENV
           echo "$(pwd)/ci" >> $GITHUB_PATH
 
-      - uses: oras-project/setup-oras@v1
+      - uses: oras-project/setup-oras@v2
 
       - name: Login to ghcr.io
         env:
