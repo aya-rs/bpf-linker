@@ -299,6 +299,19 @@ fn main() -> anyhow::Result<()> {
         linker.set_dump_module_path(path);
     }
 
+    // LLVMEnablePrettyStackTrace registers a crash handler (via
+    // sys::AddSignalHandler) and installs LLVM's fatal signal handlers.
+    // The signal handlers can eventually be torn down with
+    // sys::unregisterHandlers via a C++ shim, but there is no API to
+    // unregister the crash handler, that registration is permanent for
+    // the process.
+    //
+    // For that reason we call LLVMEnablePrettyStackTrace here and not in
+    // bpf-linker library.
+    unsafe {
+        bpf_linker::llvm_sys::error_handling::LLVMEnablePrettyStackTrace();
+    }
+
     let inputs = inputs
         .iter()
         .map(|p| LinkerInput::new_from_file(p.as_path()));
