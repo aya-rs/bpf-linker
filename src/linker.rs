@@ -11,10 +11,7 @@ use std::{
 };
 
 use ar::Archive;
-use llvm_sys::{
-    error_handling::{LLVMEnablePrettyStackTrace, LLVMInstallFatalErrorHandler},
-    target_machine::LLVMCodeGenFileType,
-};
+use llvm_sys::{error_handling::LLVMInstallFatalErrorHandler, target_machine::LLVMCodeGenFileType};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -825,7 +822,6 @@ fn llvm_init(
 
     unsafe {
         LLVMInstallFatalErrorHandler(Some(llvm::fatal_error));
-        LLVMEnablePrettyStackTrace();
     }
 
     (context, diagnostic_handler)
