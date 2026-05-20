@@ -299,6 +299,10 @@ fn main() -> anyhow::Result<()> {
         linker.set_dump_module_path(path);
     }
 
+    unsafe {
+        bpf_linker::llvm_sys::error_handling::LLVMEnablePrettyStackTrace();
+    }
+
     let inputs = inputs
         .iter()
         .map(|p| LinkerInput::new_from_file(p.as_path()));
