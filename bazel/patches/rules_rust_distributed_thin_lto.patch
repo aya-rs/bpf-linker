@@ -1,0 +1,331 @@
+diff --git a/rust/private/lto.bzl b/rust/private/lto.bzl
+index 58c610936..905644ed2 100644
+--- a/rust/private/lto.bzl
++++ b/rust/private/lto.bzl
+@@ -43,7 +43,7 @@ rust_lto_flag = rule(
+     build_setting = config.string(flag = True),
+ )
+
+-def _determine_lto_object_format(ctx, toolchain, crate_info):
++def _determine_lto_object_format(ctx, toolchain, crate_info, mode = None):
+     """Determines if we should run LTO and what bitcode should get included in a built artifact.
+
+     Args:
+@@ -60,7 +60,7 @@ def _determine_lto_object_format(ctx, toolchain, crate_info):
+     if is_exec_configuration(ctx):
+         return "only_object"
+
+-    mode = toolchain.lto.mode
++    mode = mode or toolchain.lto.mode
+
+     if mode in ["off", "unspecified"]:
+         return "only_object"
+@@ -83,7 +83,7 @@ def _determine_lto_object_format(ctx, toolchain, crate_info):
+     else:
+         return "object_and_bitcode"
+
+-def construct_lto_arguments(ctx, toolchain, crate_info):
++def construct_lto_arguments(ctx, toolchain, crate_info, mode = None):
+     """Returns a list of 'rustc' flags to configure link time optimization.
+
+     Args:
+@@ -94,13 +94,13 @@ def construct_lto_arguments(ctx, toolchain, crate_info):
+     Returns:
+         list: A list of strings that are valid flags for 'rustc'.
+     """
+-    mode = toolchain.lto.mode
++    mode = mode or toolchain.lto.mode
+
+     # The user is handling LTO on their own, don't add any arguments.
+     if mode == "manual":
+         return []
+
+-    format = _determine_lto_object_format(ctx, toolchain, crate_info)
++    format = _determine_lto_object_format(ctx, toolchain, crate_info, mode)
+     args = []
+
+     # proc-macros do not benefit from LTO, and cannot be dynamically linked with LTO.
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+index f9dea5f45..32b776515 100644
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -871,6 +871,24 @@ def _will_emit_object_file(emit):
+             return True
+     return False
+
++def _use_distributed_thin_lto(ctx, crate_info, feature_configuration):
++    return (
++        feature_configuration != None and
++        cc_common.is_enabled(
++            feature_configuration = feature_configuration,
++            feature_name = "thin_lto",
++        ) and
++        not is_exec_configuration(ctx) and
++        crate_info.type in ("bin", "lib", "rlib")
++    )
++
++def _use_non_distributed_thin_lto(ctx, crate_info, feature_configuration):
++    return (
++        "thin_lto" in ctx.features and
++        "thin_lto" not in ctx.disabled_features and
++        not _use_distributed_thin_lto(ctx, crate_info, feature_configuration)
++    )
++
+ def _remove_codegen_units(flag):
+     return None if flag.startswith("-Ccodegen-units") else flag
+
+@@ -1274,7 +1292,16 @@ def construct_arguments(
+     data_paths = depset(direct = getattr(attr, "data", []), transitive = [crate_info.compile_data_targets]).to_list()
+
+     add_edition_flags(rustc_flags, crate_info)
+-    _add_lto_flags(ctx, toolchain, rustc_flags, crate_info)
++    if _use_distributed_thin_lto(ctx, crate_info, feature_configuration):
++        rustc_flags.add("-Clinker-plugin-lto")
++    else:
++        _add_lto_flags(
++            ctx,
++            toolchain,
++            rustc_flags,
++            crate_info,
++            mode = "thin" if _use_non_distributed_thin_lto(ctx, crate_info, feature_configuration) else None,
++        )
+     _add_codegen_units_flags(toolchain, emit, rustc_flags)
+
+     # Use linker_type to determine whether to use direct or indirect linker invocation
+@@ -1387,6 +1414,10 @@ def construct_arguments(
+
+     # Add environment variables from the Rust toolchain.
+     env.update(toolchain.env)
++    # Cross-compiled macOS binaries still invoke dsymutil from the exec platform.
++    if toolchain.target_os in ["macos", "darwin"] and "LLVM_DSYMUTIL" in env:
++        dsymutil_dir = "/".join(env["LLVM_DSYMUTIL"].split("/")[:-1])
++        env["PATH"] = dsymutil_dir + ":" + env.get("PATH", "")
+
+     # Update environment with user provided variables.
+     if skip_expanding_rustc_env:
+@@ -1644,6 +1675,15 @@ def rustc_compile(
+     if not cc_toolchain or not _are_linkstamps_supported(feature_configuration = feature_configuration):
+         linkstamps = depset([])
+
++    distributed_thin_lto = _use_distributed_thin_lto(
++        ctx,
++        crate_info,
++        feature_configuration,
++    )
++    use_cc_common_link = experimental_use_cc_common_link or (
++        distributed_thin_lto and crate_info.type == "bin"
++    )
++
+     runtime_libs = get_cc_toolchain_runtime_libs(cc_toolchain, feature_configuration, crate_info.type)
+
+     # Determine if the build is currently running with --stamp
+@@ -1668,7 +1708,7 @@ def rustc_compile(
+         build_info = build_info,
+         lint_files = lint_files,
+         stamp = stamp,
+-        experimental_use_cc_common_link = experimental_use_cc_common_link,
++        experimental_use_cc_common_link = use_cc_common_link,
+         runtime_libs = runtime_libs,
+     )
+
+@@ -1677,7 +1717,9 @@ def rustc_compile(
+     # Metadata is emitted by a separate -Zno-codegen action; the full action
+     # only produces the linked rlib.
+     emit = ["link"]
+-    if experimental_use_cc_common_link:
++    if distributed_thin_lto:
++        emit = ["link", "obj"]
++    if use_cc_common_link:
+         # Pass a `.o` to the cc_common.link action.
+         emit = ["obj"]
+
+@@ -1808,11 +1850,11 @@ def rustc_compile(
+     # When output_hash is set (e.g. for rust_test targets), include it in the
+     # filename to avoid collisions with other targets sharing the same crate name.
+     output_o = None
+-    if experimental_use_cc_common_link:
++    if use_cc_common_link or distributed_thin_lto:
+         obj_ext = ".o"
+         obj_basename = crate_info.name + ("-%s" % output_hash if output_hash else "")
+         output_o = ctx.actions.declare_file(obj_basename + obj_ext, sibling = crate_info.output)
+-        outputs = [output_o]
++        outputs = [output_o] if use_cc_common_link else [crate_info.output]
+
+     # For a cdylib that might be added as a dependency to a cc_* target on Windows, it is important to include the
+     # interface library that rustc generates in the output files.
+@@ -1825,6 +1867,8 @@ def rustc_compile(
+
+     # The action might generate extra output that we don't want to include in the `DefaultInfo` files.
+     action_outputs = list(outputs)
++    if distributed_thin_lto and not use_cc_common_link:
++        action_outputs.append(output_o)
+     if rustc_output:
+         action_outputs.append(rustc_output)
+
+@@ -1835,7 +1879,7 @@ def rustc_compile(
+     # types that benefit from having debug information in a separate file.
+     pdb_file = None
+     dsym_folder = None
+-    if crate_info.type in ("cdylib", "bin") and not experimental_use_cc_common_link:
++    if crate_info.type in ("cdylib", "bin") and not use_cc_common_link:
+         if rust_toolchain.target_abi == "msvc" and compilation_mode.strip_level == "none":
+             pdb_file = ctx.actions.declare_file(crate_info.output.basename[:-len(crate_info.output.extension)] + "pdb", sibling = crate_info.output)
+             action_outputs.append(pdb_file)
+@@ -1905,13 +1949,21 @@ def rustc_compile(
+             execution_requirements = {"supports-path-mapping": ""} if args.supports_path_mapping else None,
+         )
+
+-    if experimental_use_cc_common_link:
++    if use_cc_common_link:
+         # Wrap the main `.o` file into a compilation output suitable for
+         # cc_common.link. The main `.o` file is useful in both PIC and non-PIC
+         # modes.
++        lto_compilation_context = None
++        if distributed_thin_lto:
++            lto_compilation_context = cc_common.create_lto_compilation_context(
++                objects = {
++                    output_o: (None, []),
++                },
++            )
+         compilation_outputs = cc_common.create_compilation_outputs(
+             objects = depset([output_o]),
+             pic_objects = depset([output_o]),
++            lto_compilation_context = lto_compilation_context,
+         )
+
+         malloc_library = attr._custom_malloc or attr.malloc
+@@ -1919,7 +1971,12 @@ def rustc_compile(
+         # Collect the linking contexts of the standard library and dependencies.
+         linking_contexts = [
+             malloc_library[CcInfo].linking_context,
+-            _get_std_and_alloc_info(ctx, rust_toolchain, crate_info).linking_context,
++            _get_std_and_alloc_info(
++                ctx,
++                rust_toolchain,
++                crate_info,
++                force_rustc_allocator_libraries = distributed_thin_lto,
++            ).linking_context,
+             rust_toolchain.stdlib_linkflags.linking_context,
+         ]
+
+@@ -2090,7 +2147,16 @@ def rustc_compile(
+     else:
+         providers.extend([crate_info, dep_info])
+
+-    providers += establish_cc_info(ctx, attr, crate_info, rust_toolchain, cc_toolchain, feature_configuration, interface_library)
++    providers += establish_cc_info(
++        ctx,
++        attr,
++        crate_info,
++        rust_toolchain,
++        cc_toolchain,
++        feature_configuration,
++        interface_library,
++        lto_object = output_o if distributed_thin_lto else None,
++    )
+
+     output_group_info = {}
+
+@@ -2163,7 +2229,11 @@ def _should_use_rustc_allocator_libraries(toolchain):
+         return toolchain._experimental_use_allocator_libraries_with_mangled_symbols_setting
+     return bool(use_or_default)
+
+-def _get_std_and_alloc_info(ctx, toolchain, crate_info):
++def _get_std_and_alloc_info(
++        ctx,
++        toolchain,
++        crate_info,
++        force_rustc_allocator_libraries = False):
+     # Handles standard libraries and allocator shims.
+     #
+     # The standard libraries vary between "std" and "nostd" flavors.
+@@ -2179,7 +2249,7 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info):
+     libs = None
+     attr_allocator_library = None
+     attr_global_allocator_library = None
+-    if _should_use_rustc_allocator_libraries(toolchain) and hasattr(ctx.attr, "allocator_libraries"):
++    if (force_rustc_allocator_libraries or _should_use_rustc_allocator_libraries(toolchain)) and hasattr(ctx.attr, "allocator_libraries"):
+         libs = ctx.attr.allocator_libraries[AllocatorLibrariesInfo]
+         attr_allocator_library = libs.allocator_library
+         attr_global_allocator_library = libs.global_allocator_library
+@@ -2238,7 +2308,7 @@ def _collect_dep_cc_infos(dep):
+
+     return cc_infos
+
+-def _add_lto_flags(ctx, toolchain, args, crate):
++def _add_lto_flags(ctx, toolchain, args, crate, mode = None):
+     """Adds flags to an Args object to configure LTO for 'rustc'.
+
+     Args:
+@@ -2247,7 +2317,7 @@ def _add_lto_flags(ctx, toolchain, args, crate):
+         args (Args): A reference to an Args object
+         crate (CrateInfo): A CrateInfo provider
+     """
+-    lto_args = construct_lto_arguments(ctx, toolchain, crate)
++    lto_args = construct_lto_arguments(ctx, toolchain, crate, mode)
+     args.add_all(lto_args)
+
+ def _add_codegen_units_flags(toolchain, emit, args):
+@@ -2272,7 +2342,15 @@ def _add_codegen_units_flags(toolchain, emit, args):
+
+     args.add("-Ccodegen-units={}".format(toolchain._codegen_units))
+
+-def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_configuration, interface_library):
++def establish_cc_info(
++        ctx,
++        attr,
++        crate_info,
++        toolchain,
++        cc_toolchain,
++        feature_configuration,
++        interface_library,
++        lto_object = None):
+     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
+
+     Args:
+@@ -2283,6 +2361,7 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
+         cc_toolchain (CcToolchainInfo): The current `CcToolchainInfo`
+         feature_configuration (FeatureConfiguration): Feature configuration to be queried.
+         interface_library (File): Optional interface library for cdylib crates on Windows.
++        lto_object (File): Optional full LLVM bitcode object for distributed ThinLTO.
+
+     Returns:
+         list: A list containing the `CcInfo` provider and optionally `AllocatorLibrariesImplInfo`
+@@ -2318,6 +2397,14 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
+         dot_a = make_static_lib_symlink(ctx.label.package, ctx.actions, crate_info.output)
+
+         if cc_toolchain:
++            lto_compilation_context = None
++            if lto_object:
++                lto_compilation_context = cc_common.create_lto_compilation_context(
++                    objects = {
++                        lto_object: (None, []),
++                    },
++                )
++
+             # TODO(hlopko): handle PIC/NOPIC correctly
+             library_to_link = cc_common.create_library_to_link(
+                 actions = ctx.actions,
+@@ -2326,6 +2413,10 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
+                 static_library = dot_a,
+                 # TODO(hlopko): handle PIC/NOPIC correctly
+                 pic_static_library = dot_a,
++                objects = [lto_object] if lto_object else None,
++                pic_objects = [lto_object] if lto_object else None,
++                lto_compilation_context = lto_compilation_context,
++                pic_lto_compilation_context = lto_compilation_context,
+                 alwayslink = getattr(attr, "alwayslink", False),
+             )
+     elif crate_info.type == "cdylib":
+diff --git a/rust/private/utils.bzl b/rust/private/utils.bzl
+index 3bb3d7deb..7edd093cf 100644
+--- a/rust/private/utils.bzl
++++ b/rust/private/utils.bzl
+@@ -30,7 +30,6 @@ load(
+ )
+
+ UNSUPPORTED_FEATURES = [
+-    "thin_lto",
+     "module_maps",
+     "use_header_modules",
+     "fdo_instrument",

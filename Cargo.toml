@@ -82,7 +82,7 @@ llvm-link-static = []
 # Skip LLVM linking.
 no-llvm-linking = []
 
-default = ["llvm-22", "rust-llvm-22"]
+default = ["llvm-22"]
 
 [workspace]
 members = ["xtask"]

@@ -1,0 +1,45 @@
+name: Bazel CI
+
+on:
+  push:
+
+  pull_request:
+
+  schedule:
+    - cron: 00 4 * * *
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BAZELISK_GITHUB_TOKEN: ${{ github.token }}
+  BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-11-arm
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: |
+          set -euxo pipefail
+          bazel test //... \
+            --config=remote \
+            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"

@@ -1,0 +1,41 @@
+common --test_output=errors
+
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+
+common --experimental_platform_in_output_dir
+
+# Hermetic rust toolchain configuration
+common --@rules_rust//rust/toolchain/channel=nightly
+common --@llvm//config:experimental_stub_libgcc_s=True
+common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
+
+# Enable assertions and debug symbols
+common --@llvm//config:assertions=True
+common --copt=-g
+
+common:release --compilation_mode=opt
+common:release --copt=-flto=thin
+common:release --features=thin_lto
+common:release --strip=never
+common:release --@rules_rust//rust/settings:codegen_units=1
+common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebuginfo=2
+common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
+common:release --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
+
+common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+common:remote --bes_backend=grpcs://remote.buildbuddy.io
+common:remote --experimental_remote_downloader=grpcs://remote.buildbuddy.io
+common:remote --grpc_keepalive_time=30s
+common:remote --remote_cache=grpcs://remote.buildbuddy.io
+common:remote --remote_cache_compression
+common:remote --remote_download_toplevel
+common:remote --remote_timeout=120
+common:remote --noexperimental_throttle_remote_action_building
+common:remote --experimental_remote_execution_keepalive
+common:remote --remote_executor=grpcs://remote.buildbuddy.io
+common:remote --jobs=800
+common:remote --extra_execution_platforms=//bazel/toolchains:rbe_x86_64_linux
+common:remote --platforms=@rules_rs//rs/platforms:x86_64-unknown-linux-gnu
+
+try-import %workspace%/.bazelrc.user

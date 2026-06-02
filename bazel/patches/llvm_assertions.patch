@@ -1,0 +1,75 @@
+diff --git a/config/defs.bzl b/config/defs.bzl
+index 973145d..cef00de 100644
+--- a/config/defs.bzl
++++ b/config/defs.bzl
+@@ -92,6 +92,17 @@ def _declare_sanitizer_config_setting(sanitizer):
+     )
+
+ def config_settings():
++    bool_flag(
++        name = "assertions",
++        build_setting_default = False,
++    )
++    native.config_setting(
++        name = "assertions_enabled",
++        flag_values = {
++            ":assertions": "true",
++        },
++    )
++
+     # This flag controls the optimization mode for the compilation of the target
+     # prequisites like the standard C library, the C++ standard library,
+     # the unwinder, etc.
+diff --git a/extensions/llvm_source.bzl b/extensions/llvm_source.bzl
+index 7497b83..f5651a4 100644
+--- a/extensions/llvm_source.bzl
++++ b/extensions/llvm_source.bzl
+@@ -20,6 +20,7 @@ _DEFAULT_SOURCE_PATCHES = [
+     "//3rd_party/llvm-project/x.x/patches:lit_test_stub.patch",
+     "//3rd_party/llvm-project/x.x/patches:pfm-rules-cc-load.patch",
++    "//3rd_party/llvm-project/x.x/patches:llvm-assertions.patch",
+     "//3rd_party/llvm-project/x.x/patches:clang-hardlink-filenames.patch",
+ ]
+
+ _LLVM_21_SOURCE_PATCHES = _DEFAULT_SOURCE_PATCHES + [
+diff --git a/3rd_party/llvm-project/x.x/patches/llvm-assertions.patch b/3rd_party/llvm-project/x.x/patches/llvm-assertions.patch
+new file mode 100644
+index 0000000..4aabe0d
+--- /dev/null
++++ b/3rd_party/llvm-project/x.x/patches/llvm-assertions.patch
+@@ -0,0 +1,35 @@
++diff --git a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++index 7a220cc3b6a7..1b0997d36c38 100644
++--- a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+++++ b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++@@ -46,6 +46,9 @@ package(
++ llvm_copts = [
++     "$(STACK_FRAME_UNLIMITED)",
++-]
+++] + select({
+++    "@llvm//config:assertions_enabled": ["-UNDEBUG"],
+++    "//conditions:default": [],
+++})
++
++ enum_targets_gen(
++     name = "targets_def_gen",
++@@ -147,11 +150,15 @@ expand_template(
++     name = "abi_breaking_h_gen",
++     out = "include/llvm/Config/abi-breaking.h",
++     substitutions = {
++-        # Define to enable checks that alter the LLVM C++ ABI
++-        "#cmakedefine01 LLVM_ENABLE_ABI_BREAKING_CHECKS": "#define LLVM_ENABLE_ABI_BREAKING_CHECKS 0",
++-
++         # Define to enable reverse iteration of unordered llvm containers
++         "#cmakedefine01 LLVM_ENABLE_REVERSE_ITERATION": "#define LLVM_ENABLE_REVERSE_ITERATION 0",
++-    },
+++    } | select({
+++        "@llvm//config:assertions_enabled": {
+++            "#cmakedefine01 LLVM_ENABLE_ABI_BREAKING_CHECKS": "#define LLVM_ENABLE_ABI_BREAKING_CHECKS 1",
+++        },
+++        "//conditions:default": {
+++            "#cmakedefine01 LLVM_ENABLE_ABI_BREAKING_CHECKS": "#define LLVM_ENABLE_ABI_BREAKING_CHECKS 0",
+++        },
+++    }),
++     template = "include/llvm/Config/abi-breaking.h.cmake",
++ )

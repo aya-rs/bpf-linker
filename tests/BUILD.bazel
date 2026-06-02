@@ -1,0 +1,130 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load(
+    ":defs.bzl",
+    "bpf_assembly_test",
+    "bpf_aux_library",
+    "bpf_btf_test",
+)
+
+exports_files(["link_ir.rs"])
+
+bpf_aux_library(
+    name = "assembly-loop-panic-handler",
+    src = "assembly/auxiliary/loop-panic-handler.rs",
+)
+
+bpf_aux_library(
+    name = "btf-loop-panic-handler",
+    src = "btf/assembly/auxiliary/loop-panic-handler.rs",
+)
+
+bpf_aux_library(
+    name = "assembly-dep-section",
+    src = "assembly/auxiliary/dep-section.rs",
+)
+
+bpf_aux_library(
+    name = "assembly-dep-exports",
+    src = "assembly/auxiliary/dep-exports.rs",
+)
+
+bpf_aux_library(
+    name = "btf-dep-exports",
+    src = "btf/assembly/auxiliary/dep-exports.rs",
+    rustc_flags = ["-Cdebuginfo=2"],
+)
+
+run_binary(
+    name = "anon-bc",
+    srcs = ["c/anon.c"],
+    outs = ["anon.bc"],
+    args = [
+        "-target",
+        "bpf",
+        "-g",
+        "-c",
+        "-emit-llvm",
+        "-o",
+        "$@",
+        "$(location c/anon.c)",
+    ],
+    tool = "@llvm//tools:clang",
+)
+
+bpf_assembly_test(
+    name = "assembly-bin",
+    src = "assembly/bin.rs",
+    deps = [":assembly-dep-section"],
+)
+
+bpf_assembly_test(
+    name = "assembly-di-generics",
+    src = "assembly/di_generics.rs",
+    crate_type = "cdylib",
+    emit = "llvm-ir",
+    rustc_flags = [
+        "-Cdebuginfo=2",
+        "-Clink-arg=--btf",
+    ],
+)
+
+bpf_assembly_test(
+    name = "assembly-elf-sections",
+    src = "assembly/elf-sections.rs",
+    crate_type = "cdylib",
+    deps = [":assembly-dep-section"],
+)
+
+bpf_assembly_test(
+    name = "assembly-exported-symbols-cdylib",
+    src = "assembly/exported-symbols.rs",
+    check_prefixes = "CHECK,cdylib",
+    crate_type = "cdylib",
+    deps = [":assembly-dep-exports"],
+)
+
+bpf_assembly_test(
+    name = "assembly-exported-symbols-bin",
+    src = "assembly/exported-symbols.rs",
+    check_prefixes = "CHECK,bin",
+    deps = [":assembly-dep-exports"],
+)
+
+bpf_assembly_test(
+    name = "assembly-ignore-inline-never",
+    src = "assembly/ignore-inline-never.rs",
+    crate_type = "cdylib",
+    rustc_flags = ["-Clink-arg=--ignore-inline-never"],
+)
+
+bpf_btf_test(
+    name = "btf-basic",
+    src = "btf/assembly/basic.rs",
+)
+
+bpf_btf_test(
+    name = "btf-data-carrying-enum",
+    src = "btf/assembly/data-carrying-enum.rs",
+    crate_type = "cdylib",
+)
+
+bpf_btf_test(
+    name = "btf-exported-symbols",
+    src = "btf/assembly/exported-symbols.rs",
+    deps = [":btf-dep-exports"],
+)
+
+bpf_btf_test(
+    name = "btf-maybe-uninit-union-name",
+    src = "btf/assembly/maybe-uninit-union-name.rs",
+    crate_type = "cdylib",
+)
+
+bpf_btf_test(
+    name = "btf-anon-struct-c",
+    src = "nightly/btf/assembly/anon_struct_c.rs",
+    check_file = "nightly/btf/assembly/anon_struct_c.check",
+    compile_data = [":anon-bc"],
+    panic_handler = None,
+    rustc_flags = ["-Clink-arg=$(execpath :anon-bc)"],
+)

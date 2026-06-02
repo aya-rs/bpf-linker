@@ -33,7 +33,7 @@ cargo binstall bpf-linker
 
 Download the tarball from the [releases page][releases] that matches your Rust
 target triple. The published binaries currently use `*-apple-darwin` for macOS
-and `*-unknown-linux-musl` for Linux.
+and `*-unknown-linux-musl` for Linux, and `*-pc-windows-gnullvm` for Windows.
 
 After downloading, unpack the archive into a directory that is included in your
 `PATH`.
@@ -42,16 +42,20 @@ Example:
 
 ```sh
 # Linux ARM64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-unknown-linux-musl.tar.zst
 # Linux x86_64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-unknown-linux-musl.tar.zst
 # macOS ARM64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-apple-darwin.tar.zst
 # macOS x86_64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-apple-darwin.tar.zst
+# Windows ARM64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-pc-windows-gnullvm.tar.zst
+# Windows x86_64
+curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-pc-windows-gnullvm.tar.zst
 
 mkdir -p "$HOME/.local/bin"
-tar -xpf bpf-linker-*.tar.gz -C "$HOME/.local/bin"
+tar -xpf bpf-linker-*.tar.zst -C "$HOME/.local/bin"
 # Add this line to your shell startup file. If you use a different shell,
 # refer to its documentation for adding directories to PATH.
 export PATH="$HOME/.local/bin:$PATH"
@@ -77,6 +81,13 @@ Building from source, including even a plain `cargo install bpf-linker`
 invocation, is **not** recommended for regular users due to dependency on
 specific LLVM version, system libraries and overall complexity of getting
 the setup right.
+
+When building with a compatible rustup toolchain, enable the `rust-llvm-22`
+feature to reuse the LLVM shared library bundled with Rust:
+
+```sh
+cargo build --features rust-llvm-22
+```
 
 If you're interested in packaging or contributing to bpf-linker, you're
 welcome to check the build instructions in [BUILDING.md](./BUILDING.md).

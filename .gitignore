@@ -1,2 +1,4 @@
 /target
+/bazel-*
 .vscode/settings.json
+*.swp

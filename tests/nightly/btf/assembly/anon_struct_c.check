@@ -1,0 +1,2 @@
+CHECK: #[[TYPEDEF_ID:[0-9]+]]: <TYPEDEF> 'incognito' --> {{\[}}[[STRUCT_ID:[0-9]+]]{{\]}}
+CHECK: #[[STRUCT_ID]]: <STRUCT> '<anon>' sz:4 n:1

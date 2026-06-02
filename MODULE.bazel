@@ -1,0 +1,93 @@
+module(
+    name = "bpf_linker",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "llvm", version = "0.8.6")
+bazel_dep(name = "bazel_lib", version = "3.2.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.19")
+bazel_dep(name = "rules_rs", version = "0.0.86")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "tar.bzl", version = "0.10.4")
+
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//bazel/patches:rules_rs_bpf_linker_from_source.patch"],
+    version = "0.0.86",
+)
+
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//bazel/patches:llvm_assertions.patch"],
+    version = "0.8.6",
+)
+
+llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
+use_repo(llvm, "llvm-project")
+
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+rules_rust.patch(
+    patches = ["//bazel/patches:rules_rust_distributed_thin_lto.patch"],
+    strip = 1,
+)
+use_repo(rules_rust, "rules_rust")
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2024",
+    version = "nightly/2026-04-20",
+)
+use_repo(
+    toolchains,
+    "default_rust_toolchains",
+)
+
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-gnullvm",
+        "aarch64-unknown-linux-musl",
+        "bpfeb-unknown-none",
+        "bpfel-unknown-none",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-gnullvm",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+    ],
+)
+crate.from_cargo(
+    name = "btfdump_crates",
+    cargo_lock = "//bazel/btfdump:Cargo.lock",
+    cargo_toml = "//bazel/btfdump:Cargo.toml",
+    platform_triples = ["x86_64-unknown-linux-gnu"],
+)
+
+# bpf-linker links LLVM through Bazel's @llvm-project graph. The llvm-sys
+# crates provide Rust bindings only, so their Cargo build scripts must not try
+# to discover or link a host LLVM installation.
+crate.annotation(
+    crate = "llvm-sys",
+    gen_build_script = "off",
+)
+crate.annotation(
+    crate = "btfdump",
+    gen_binaries = ["btf"],
+    repositories = ["btfdump_crates"],
+)
+use_repo(
+    crate,
+    "btfdump_crates",
+    "crates",
+)
+
+register_toolchains(
+    "@default_rust_toolchains//:all",
+    "@llvm//toolchain:all",
+)

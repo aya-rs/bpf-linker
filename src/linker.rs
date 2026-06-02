@@ -1,3 +1,7 @@
+#[cfg(not(unix))]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt as _;
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -5,7 +9,6 @@ use std::{
     fs,
     io::{self, Read as _},
     ops::Deref,
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     str::{self, FromStr},
 };
@@ -16,6 +19,16 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine, MemoryBuffer};
+
+#[cfg(unix)]
+fn os_str_from_bytes(bytes: &[u8]) -> Cow<'_, OsStr> {
+    Cow::Borrowed(OsStr::from_bytes(bytes))
+}
+
+#[cfg(not(unix))]
+fn os_str_from_bytes(bytes: &[u8]) -> Cow<'_, OsStr> {
+    Cow::Owned(OsString::from(String::from_utf8_lossy(bytes).into_owned()))
+}
 
 /// Linker error
 #[derive(Debug, Error)]
@@ -489,7 +502,7 @@ where
                 let mut archive = Archive::new(input.as_ref());
                 while let Some(item) = archive.next_entry() {
                     let mut item = item.map_err(|e| LinkerError::IoError(path.clone(), e))?;
-                    let name = PathBuf::from(OsStr::from_bytes(item.header().identifier()));
+                    let name = PathBuf::from(&*os_str_from_bytes(item.header().identifier()));
                     info!("linking archive item {}", name.display());
 
                     buf.clear();
@@ -645,7 +658,7 @@ fn create_target_machine(
                 // case 3.
                 info!(
                     "detected non-bpf input target {} and no explicit output --target specified, selecting `bpf'",
-                    OsStr::from_bytes(c_triple.to_bytes()).display()
+                    os_str_from_bytes(c_triple.to_bytes()).display()
                 );
                 let c_triple = c"bpf";
                 (c_triple, llvm::target_from_triple(c_triple))

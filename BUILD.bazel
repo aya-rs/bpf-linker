@@ -1,0 +1,149 @@
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("//bazel:release.bzl", "bpf_linker_release")
+
+CRATE_ALIASES = aliases()
+
+CRATE_FEATURES = [
+    "llvm-22",
+    "no-llvm-linking",
+]
+
+CRATE_DEPS = all_crate_deps() + [":llvm"]
+
+TEST_DEPS = all_crate_deps(
+    normal = True,
+    normal_dev = True,
+) + [":llvm"]
+
+RELEASE_TARGETS = [
+    "aarch64-apple-darwin",
+    "aarch64-pc-windows-gnullvm",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-gnullvm",
+    "x86_64-unknown-linux-musl",
+]
+
+cc_library(
+    name = "llvm",
+    linkopts = select({
+        "@platforms//os:macos": ["-lc++"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "@llvm-project//llvm:Analysis",
+        "@llvm-project//llvm:AsmParser",
+        "@llvm-project//llvm:BPFAsmParser",
+        "@llvm-project//llvm:BPFCodeGen",
+        "@llvm-project//llvm:BPFDisassembler",
+        "@llvm-project//llvm:BPFInfo",
+        "@llvm-project//llvm:BPFUtilsAndDesc",
+        "@llvm-project//llvm:BitReader",
+        "@llvm-project//llvm:BitWriter",
+        "@llvm-project//llvm:CodeGen",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:DebugInfoBTF",
+        "@llvm-project//llvm:DebugInfoDWARF",
+        "@llvm-project//llvm:Demangle",
+        "@llvm-project//llvm:IPO",
+        "@llvm-project//llvm:IRReader",
+        "@llvm-project//llvm:InstCombine",
+        "@llvm-project//llvm:Linker",
+        "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:MCParser",
+        "@llvm-project//llvm:Object",
+        "@llvm-project//llvm:Passes",
+        "@llvm-project//llvm:Scalar",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:TargetParser",
+        "@llvm-project//llvm:TransformUtils",
+        "@llvm-project//llvm:Vectorize",
+    ],
+)
+
+rust_library(
+    name = "bpf-linker-lib",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin/bpf-linker.rs"],
+    ),
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    edition = "2024",
+    visibility = ["//visibility:public"],
+    deps = CRATE_DEPS,
+)
+
+rust_binary(
+    name = "bpf-linker",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    crate_root = "src/bin/bpf-linker.rs",
+    edition = "2024",
+    visibility = ["//visibility:public"],
+    deps = CRATE_DEPS + [":bpf-linker-lib"],
+)
+
+rust_test(
+    name = "bpf-linker-unit-test",
+    aliases = CRATE_ALIASES,
+    crate = ":bpf-linker-lib",
+    crate_features = CRATE_FEATURES,
+    edition = "2024",
+    deps = TEST_DEPS,
+)
+
+rust_test(
+    name = "bpf-linker-bin-unit-test",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    crate_root = "src/bin/bpf-linker.rs",
+    edition = "2024",
+    deps = TEST_DEPS + [":bpf-linker-lib"],
+)
+
+rust_test(
+    name = "bpf-linker-link-ir-test",
+    srcs = ["//tests:link_ir.rs"],
+    crate_features = CRATE_FEATURES,
+    crate_name = "link_ir",
+    crate_root = "//tests:link_ir.rs",
+    edition = "2024",
+    deps = [
+        ":bpf-linker-lib",
+        ":llvm",
+        "@crates//:assert_matches",
+    ],
+)
+
+bpf_linker_release(
+    name = "bpf-linker-release",
+    binary = ":bpf-linker",
+)
+
+[
+    platform_transition_filegroup(
+        name = "release-" + target,
+        srcs = [":bpf-linker-release"],
+        tags = ["manual"],
+        target_platform = "@rules_rs//rs/platforms:" + target,
+    )
+    for target in RELEASE_TARGETS
+]
+
+filegroup(
+    name = "release-archives",
+    srcs = [":release-" + target for target in RELEASE_TARGETS],
+    tags = ["manual"],
+)

@@ -1,0 +1,9 @@
+[package]
+name = "bazel-btfdump"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+btfdump = { version = "0.0.4", default-features = false }
+
+[workspace]
