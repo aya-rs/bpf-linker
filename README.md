@@ -57,6 +57,10 @@ tar -xpf bpf-linker-*.tar.gz -C "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+Matching debug archives are published separately. For source-level
+symbolication, download the matching `.debug.tar.gz` archive on Linux or
+`.dSYM.tar.gz` archive on macOS and extract it beside the executable.
+
 [releases]: https://github.com/aya-rs/bpf-linker/releases
 
 ### Packages
