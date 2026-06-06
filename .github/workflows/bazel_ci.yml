@@ -39,6 +39,8 @@ jobs:
       - name: Test
         run: |
           set -euxo pipefail
-          bazel test //... \
-            --config=remote \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          bazel_args=(--config=remote)
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+          fi
+          bazel test //... "${bazel_args[@]}"
