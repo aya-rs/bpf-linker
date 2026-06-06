@@ -7,7 +7,6 @@ on:
 permissions: {}
 
 env:
-  BAZELISK_GITHUB_TOKEN: ${{ github.token }}
   BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
 
 jobs:
