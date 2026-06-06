@@ -4,7 +4,12 @@ load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 def rust_test_with_junit(name, **kwargs):
-    """Declares a Rust test that always writes Bazel's JUnit output."""
+    """Wraps a Rust test so it writes Bazel's JUnit output itself.
+
+    Bazel otherwise runs generate-xml.sh after the test. That fallback is not
+    cross-host safe when a Windows client executes the test remotely on Linux:
+    https://github.com/bazelbuild/bazel/issues/19587
+    """
     binary_name = name + "-binary"
     rust_test(
         name = binary_name,

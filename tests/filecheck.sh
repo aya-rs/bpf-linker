@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# Avoid Bazel's host-derived generate-xml.sh fallback after remote Linux tests.
+# The process exit code remains authoritative for the test result.
 printf '<testsuites tests="0" failures="0" errors="0"></testsuites>\n' >"$XML_OUTPUT_FILE"
 
 artifact="$1"
