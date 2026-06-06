@@ -41,21 +41,20 @@ After downloading, unpack the archive into a directory that is included in your
 Example:
 
 ```sh
-# Linux ARM64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-unknown-linux-musl.tar.gz
-# Linux x86_64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-unknown-linux-musl.tar.gz
-# macOS ARM64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-aarch64-apple-darwin.tar.gz
-# macOS x86_64
-curl -LO https://github.com/aya-rs/bpf-linker/releases/latest/download/bpf-linker-x86_64-apple-darwin.tar.gz
+target=x86_64-unknown-linux-musl
+archive="bpf-linker-$target.tar.gz"
+curl -LO "https://github.com/aya-rs/bpf-linker/releases/latest/download/$archive"
 
 mkdir -p "$HOME/.local/bin"
-tar -xpf bpf-linker-*.tar.gz -C "$HOME/.local/bin"
+tar -xpf "$archive" -C "$HOME/.local/bin"
 # Add this line to your shell startup file. If you use a different shell,
 # refer to its documentation for adding directories to PATH.
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Matching debug archives are published separately. For source-level
+symbolication, download the matching `.debug.tar.gz` archive on Linux or
+`.dSYM.tar.gz` archive on macOS and extract it beside the executable.
 
 [releases]: https://github.com/aya-rs/bpf-linker/releases
 

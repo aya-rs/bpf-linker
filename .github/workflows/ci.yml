@@ -586,9 +586,11 @@ jobs:
           mkdir -p "$LLVM_INSTALL_DIR"
           tar --zstd -xf llvm-install.tar.zst -C "$LLVM_INSTALL_DIR"
           rm -f llvm-install.tar.zst
-          echo "${LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
+          echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
 
-      - uses: taiki-e/upload-rust-binary-action@v1
+      # TODO: Switch back to taiki-e/upload-rust-binary-action after split
+      # debug archive support is released upstream.
+      - uses: tamird/upload-rust-binary-action@618a41c892d3c9e19ba21ae06899385f71f4233e
         with:
           bin: bpf-linker
           target: ${{ matrix.platform.target }}
@@ -598,9 +600,10 @@ jobs:
           # defined. We want to use vanilla cargo, because we manage our own
           # clang wrappers and sysroots.
           build-tool: cargo
+          debug-archive: true
+          objcopy: objcopy
           dry-run: ${{ github.event_name != 'release' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUSTFLAGS: ${{ matrix.platform.linker && format('-C linker={0}', matrix.platform.linker) || '' }} -C target-feature=+crt-static
 
       - name: Report disk usage

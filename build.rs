@@ -263,6 +263,15 @@ fn emit_search_path_if_defined(
 /// which additional libraries are required, we have to determine that set
 /// ourselves using the undefined symbols, and instruct Cargo to link them.
 fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+    // Keep LLVM archives separate so dsymutil can distinguish identically
+    // named object files.
+    let llvm_link_kind =
+        if env::var_os("CARGO_CFG_TARGET_OS").is_some_and(|target_os| target_os == "macos") {
+            "static:-bundle="
+        } else {
+            "static="
+        };
+
     // Link the library files found inside the directory.
     let dir_entries = fs::read_dir(llvm_lib_dir)
         .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
@@ -282,7 +291,13 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
             continue;
         };
 
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
+        write_bytes!(
+            stdout,
+            "cargo:rustc-link-lib=",
+            llvm_link_kind,
+            b"LLVM",
+            trimmed
+        )?;
     }
 
     let cxxstdlibs = Cxxstdlibs::new(stdout)?;
