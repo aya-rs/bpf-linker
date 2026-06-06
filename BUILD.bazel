@@ -3,8 +3,14 @@ load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
-load("@rules_rs//rs:rust_test.bzl", "rust_test")
-load("//bazel:release.bzl", "bpf_linker_release")
+load(
+    "//bazel:defs.bzl",
+    "rust_test_with_junit",
+)
+load(
+    "//bazel:release.bzl",
+    "bpf_linker_release",
+)
 
 CRATE_ALIASES = aliases()
 
@@ -93,7 +99,7 @@ rust_binary(
     deps = CRATE_DEPS + [":bpf-linker-lib"],
 )
 
-rust_test(
+rust_test_with_junit(
     name = "bpf-linker-unit-test",
     aliases = CRATE_ALIASES,
     crate = ":bpf-linker-lib",
@@ -102,7 +108,7 @@ rust_test(
     deps = TEST_DEPS,
 )
 
-rust_test(
+rust_test_with_junit(
     name = "bpf-linker-bin-unit-test",
     srcs = glob(["src/**/*.rs"]),
     aliases = CRATE_ALIASES,
@@ -113,7 +119,7 @@ rust_test(
     deps = TEST_DEPS + [":bpf-linker-lib"],
 )
 
-rust_test(
+rust_test_with_junit(
     name = "bpf-linker-link-ir-test",
     srcs = ["//tests:link_ir.rs"],
     crate_features = CRATE_FEATURES,

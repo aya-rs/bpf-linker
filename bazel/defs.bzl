@@ -1,5 +1,23 @@
 """Shared Bazel definitions for bpf-linker."""
 
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+def rust_test_with_junit(name, **kwargs):
+    """Declares a Rust test that always writes Bazel's JUnit output."""
+    binary_name = name + "-binary"
+    rust_test(
+        name = binary_name,
+        tags = ["manual"],
+        **kwargs
+    )
+    sh_test(
+        name = name,
+        srcs = ["//tests:rust_test_wrapper.sh"],
+        args = ["$(rootpath :{})".format(binary_name)],
+        data = [binary_name],
+    )
+
 def _bpf_transition_impl(_, attr):
     return {
         "//command_line_option:platforms": str(attr.target_platform),

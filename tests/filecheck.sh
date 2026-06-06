@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+printf '<testsuites tests="0" failures="0" errors="0"></testsuites>\n' >"$XML_OUTPUT_FILE"
+
 artifact="$1"
 checks="$2"
 filecheck="$3"

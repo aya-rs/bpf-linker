@@ -6,7 +6,10 @@ load(
     "bpf_btf_test",
 )
 
-exports_files(["link_ir.rs"])
+exports_files([
+    "link_ir.rs",
+    "rust_test_wrapper.sh",
+])
 
 bpf_aux_library(
     name = "assembly-loop-panic-handler",
