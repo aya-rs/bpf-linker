@@ -1,0 +1,7 @@
+platform(
+    name = "local_windows_msvc",
+    constraint_values = [
+        "@llvm//constraints/windows/abi:msvc",
+    ],
+    parents = ["@platforms//host"],
+)
