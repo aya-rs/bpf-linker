@@ -54,6 +54,7 @@ common:remote --remote_executor=grpcs://remote.buildbuddy.io
 # Minimize network traffic
 common:remote --remote_cache_compression
 common:remote --remote_download_toplevel
+common:remote --remote_download_regex=.*/test[.]xml
 
 # Keep remote backends fed
 common:remote --noexperimental_throttle_remote_action_building
