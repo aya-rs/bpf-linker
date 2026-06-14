@@ -1,3 +1,6 @@
+# rules_rs currently requires choosing an explicit ABI for Windows, so we use MSVC to match the prebuilt rustc.
+# This should go away once https://github.com/hermeticbuild/hermetic-llvm/pull/187 lands - the MSVC target will become
+# fully hermetic and cross-buildable, and then rules_rs can default to it and treat gnullvm/mingw as a less-preferred fallback.
 platform(
     name = "local_windows_msvc",
     constraint_values = [

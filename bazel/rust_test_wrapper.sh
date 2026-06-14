@@ -7,18 +7,10 @@ set -euo pipefail
 # This can be removed once https://github.com/dzbarsky/bazel/pull/1 and its prerequisite changes land.
 printf '<testsuites tests="0" failures="0" errors="0"></testsuites>\n' >"$XML_OUTPUT_FILE"
 
-input="$ARTIFACT"
-if [[ "$MODE" == "btf" ]]; then
-  input="$TEST_TMPDIR/btf.txt"
-  "$BTFDUMP" dump "$ARTIFACT" >"$input"
+binary="$1"
+shift
+if [[ "$binary" != /* ]]; then
+  binary="$PWD/$binary"
 fi
 
-args=(
-  --allow-unused-prefixes
-  --input-file "$input"
-)
-if [[ "$CHECK_PREFIXES" != "-" ]]; then
-  args+=(--check-prefixes "$CHECK_PREFIXES")
-fi
-
-"$FILECHECK" "${args[@]}" "$CHECKS"
+exec "$binary" "$@"

@@ -82,13 +82,6 @@ invocation, is **not** recommended for regular users due to dependency on
 specific LLVM version, system libraries and overall complexity of getting
 the setup right.
 
-When building with a compatible rustup toolchain, enable the `rust-llvm-22`
-feature to reuse the LLVM shared library bundled with Rust:
-
-```sh
-cargo build --features rust-llvm-22
-```
-
 If you're interested in packaging or contributing to bpf-linker, you're
 welcome to check the build instructions in [BUILDING.md](./BUILDING.md).
 

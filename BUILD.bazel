@@ -12,35 +12,50 @@ load(
     "bpf_linker_release",
 )
 
+# If Cargo.toml remaps any crate names, this tells Bazel how to pass the right `--extern` flags.
+# (For example `my_serde = { package = "serde", version = "1.0" }`)
 CRATE_ALIASES = aliases()
 
+# Bazel supplies LLVM through :llvm, so llvm-sys provides bindings without
+# linking LLVM itself.
 CRATE_FEATURES = [
     "llvm-22",
     "no-llvm-linking",
 ]
 
-CRATE_DEPS = all_crate_deps() + [":llvm"]
+# Cargo defaults to aya-rustc-llvm-proxy, but Bazel links :llvm directly.
+CRATE_DEPS = [
+    dep
+    for dep in all_crate_deps()
+    if "aya-rustc-llvm-proxy" not in str(dep)
+] + [":llvm"]
 
-TEST_DEPS = all_crate_deps(
-    normal = True,
-    normal_dev = True,
-) + [":llvm"]
+# Unit tests compile both [dependencies] and [dev-dependencies] from Cargo.toml.
+TEST_DEPS = [
+    dep
+    for dep in all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    )
+    if "aya-rustc-llvm-proxy" not in str(dep)
+] + [":llvm"]
 
-RELEASE_TARGETS = [
-    "aarch64-apple-darwin",
-    "aarch64-pc-windows-gnullvm",
-    "aarch64-unknown-linux-musl",
-    "x86_64-apple-darwin",
-    "x86_64-pc-windows-gnullvm",
-    "x86_64-unknown-linux-musl",
-]
+LIB_SRCS = glob(
+    ["src/**/*.rs"],
+    exclude = ["src/bin/**/*.rs"],
+)
+
+BIN_SRCS = glob(["src/bin/**/*.rs"])
 
 cc_library(
     name = "llvm",
+    # @llvm builds libc++ for Linux and Windows targets and provides it via the cc_toolchain's `static_runtime_library`.
+    # For macOS targets @llvm uses the hermetic macOS SDK libc++. The toolchain doesn't know to inject the link flag so we do it explicitly.
     linkopts = select({
         "@platforms//os:macos": ["-lc++"],
         "//conditions:default": [],
     }),
+    visibility = ["//tests:__pkg__"],
     deps = [
         "@llvm-project//llvm:Analysis",
         "@llvm-project//llvm:AsmParser",
@@ -75,68 +90,62 @@ cc_library(
 
 rust_library(
     name = "bpf-linker-lib",
-    srcs = glob(
-        ["src/**/*.rs"],
-        exclude = ["src/bin/bpf-linker.rs"],
-    ),
+    srcs = LIB_SRCS,
     aliases = CRATE_ALIASES,
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
-    edition = "2024",
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS,
 )
 
 rust_binary(
     name = "bpf-linker",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = BIN_SRCS,
     aliases = CRATE_ALIASES,
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
     crate_root = "src/bin/bpf-linker.rs",
-    edition = "2024",
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS + [":bpf-linker-lib"],
 )
 
+# Run unit tests declared in the library crate.
 rust_test_with_junit(
     name = "bpf-linker-unit-test",
     aliases = CRATE_ALIASES,
     crate = ":bpf-linker-lib",
     crate_features = CRATE_FEATURES,
-    edition = "2024",
     deps = TEST_DEPS,
 )
 
+# Run unit tests declared in the binary crate.
 rust_test_with_junit(
     name = "bpf-linker-bin-unit-test",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = BIN_SRCS,
     aliases = CRATE_ALIASES,
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
     crate_root = "src/bin/bpf-linker.rs",
-    edition = "2024",
     deps = TEST_DEPS + [":bpf-linker-lib"],
-)
-
-rust_test_with_junit(
-    name = "bpf-linker-link-ir-test",
-    srcs = ["//tests:link_ir.rs"],
-    crate_features = CRATE_FEATURES,
-    crate_name = "link_ir",
-    crate_root = "//tests:link_ir.rs",
-    edition = "2024",
-    deps = [
-        ":bpf-linker-lib",
-        ":llvm",
-        "@crates//:assert_matches",
-    ],
 )
 
 bpf_linker_release(
     name = "bpf-linker-release",
     binary = ":bpf-linker",
 )
+
+RELEASE_TARGETS = [
+    "%s-%s" % (arch, target_suffix)
+    for arch in [
+        "aarch64",
+        "x86_64",
+    ]
+    for target_suffix in [
+        "apple-darwin",
+        "pc-windows-gnullvm",
+        "unknown-linux-musl",
+    ]
+]
 
 [
     platform_transition_filegroup(

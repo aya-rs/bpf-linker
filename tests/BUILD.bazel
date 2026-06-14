@@ -1,15 +1,23 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
 load(
-    ":defs.bzl",
+    "//bazel:defs.bzl",
     "bpf_assembly_test",
     "bpf_aux_library",
     "bpf_btf_test",
+    "rust_test_with_junit",
 )
 
-exports_files([
-    "link_ir.rs",
-    "rust_test_wrapper.sh",
-])
+rust_test_with_junit(
+    name = "bpf-linker-link-ir-test",
+    srcs = ["link_ir.rs"],
+    crate_name = "link_ir",
+    crate_root = "link_ir.rs",
+    deps = [
+        "//:bpf-linker-lib",
+        "//:llvm",
+        "@crates//:assert_matches",
+    ],
+)
 
 bpf_aux_library(
     name = "assembly-loop-panic-handler",
@@ -126,7 +134,6 @@ bpf_btf_test(
 bpf_btf_test(
     name = "btf-anon-struct-c",
     src = "nightly/btf/assembly/anon_struct_c.rs",
-    check_file = "nightly/btf/assembly/anon_struct_c.check",
     compile_data = [":anon-bc"],
     panic_handler = None,
     rustc_flags = ["-Clink-arg=$(execpath :anon-bc)"],

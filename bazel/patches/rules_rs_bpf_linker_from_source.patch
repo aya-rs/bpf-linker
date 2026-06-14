@@ -8,7 +8,7 @@ index fdf131c..617bfc8 100644
  load("//rs/platforms:triples.bzl", "ALL_TARGET_TRIPLES", "SUPPORTED_EXEC_TRIPLES", "SUPPORTED_TIER_3_TRIPLES", "triple_to_rust_constraint_set")
 -load("//rs/private:bpf_linker_repository.bzl", "bpf_linker_repository_name")
  load("//rs/toolchains:toolchain_utils.bzl", "sanitize_triple", "sanitize_version")
-@@ -179,18 +178,15 @@ def declare_rustc_toolchains(
+@@ -179,18 +178,16 @@ def declare_rustc_toolchains(
 -        # FIXME: bpf_linker_repository_name returns None for Windows until
 -        # bpf-linker publishes Windows prebuilts.
 -        bpf_linker_repo = bpf_linker_repository_name(triple)
@@ -27,6 +27,7 @@ index fdf131c..617bfc8 100644
 -                rust_std = toolchain_rust_std,
 -                **bpf_rust_toolchain_kwargs
 -            )
++        # TODO(next-release): Remove this patch after bpf-linker publishes Windows prebuilts.
 +        bpf_rust_toolchain_kwargs = rust_toolchain_kwargs | {
 +            "linker": select({
 +                "@platforms//cpu:bpfeb": "@@//:bpf-linker",

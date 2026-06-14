@@ -2,3 +2,4 @@
 /bazel-*
 .vscode/settings.json
 *.swp
+.bazelrc.user
