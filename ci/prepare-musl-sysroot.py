@@ -158,6 +158,12 @@ def main() -> int:
         raise RuntimeError(f"Runner script not found: {runner}")
 
     base_packages = [
+        # Installing btfdump builds native host artifacts inside the sysroot.
+        # GCC provides /usr/bin/cc, startup objects, and runtime libraries for
+        # those links.
+        "gcc",
+        # Compile tests invoke Clang to produce LLVM bitcode, while the musl
+        # compiler wrappers pair Clang with LLD.
         "clang",
         "lld",
         "llvm-test-utils",
