@@ -171,6 +171,12 @@ def main() -> int:
         "set -eu",
         "apk update",
         "apk add \\\n  " + " \\\n  ".join(base_packages),
+        # Alpine's clang package no longer pulls in GCC, which provided
+        # /usr/bin/cc and ld. Keep using clang and select the already-installed
+        # LLD explicitly.
+        "printf '%s\\n' '#!/bin/sh' "
+        "'exec clang -fuse-ld=lld \"$@\"' > /usr/bin/cc",
+        "chmod +x /usr/bin/cc",
     ]
     if rust_version:
         script_lines.extend(
