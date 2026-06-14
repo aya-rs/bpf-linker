@@ -1,3 +1,6 @@
+# Bazel selects this platform for BuildBuddy remote execution. The container
+# provides a recent glibc; the Rust, C++, LLVM, and archive tools are supplied
+# by registered hermetic toolchains.
 platform(
     name = "rbe_x86_64_linux",
     constraint_values = [

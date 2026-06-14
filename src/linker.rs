@@ -1,5 +1,3 @@
-#[cfg(not(unix))]
-use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt as _;
 use std::{
@@ -21,13 +19,13 @@ use tracing::{debug, error, info, warn};
 use crate::llvm::{self, LLVMContext, LLVMModule, LLVMTargetMachine, MemoryBuffer};
 
 #[cfg(unix)]
-fn os_str_from_bytes(bytes: &[u8]) -> Cow<'_, OsStr> {
-    Cow::Borrowed(OsStr::from_bytes(bytes))
+fn os_str_from_bytes(bytes: &[u8]) -> &OsStr {
+    OsStr::from_bytes(bytes)
 }
 
 #[cfg(not(unix))]
-fn os_str_from_bytes(bytes: &[u8]) -> Cow<'_, OsStr> {
-    Cow::Owned(OsString::from(String::from_utf8_lossy(bytes).into_owned()))
+fn os_str_from_bytes(bytes: &[u8]) -> &OsStr {
+    OsStr::new(str::from_utf8(bytes).expect("LLVM target triple is not valid UTF-8"))
 }
 
 /// Linker error
@@ -502,7 +500,7 @@ where
                 let mut archive = Archive::new(input.as_ref());
                 while let Some(item) = archive.next_entry() {
                     let mut item = item.map_err(|e| LinkerError::IoError(path.clone(), e))?;
-                    let name = PathBuf::from(&*os_str_from_bytes(item.header().identifier()));
+                    let name = PathBuf::from(os_str_from_bytes(item.header().identifier()));
                     info!("linking archive item {}", name.display());
 
                     buf.clear();

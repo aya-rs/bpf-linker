@@ -5,6 +5,9 @@ on:
 
   pull_request:
 
+  release:
+    types: [published]
+
   schedule:
     - cron: 00 4 * * *
 
@@ -20,6 +23,7 @@ permissions: {}
 
 jobs:
   llvm:
+    if: github.event_name != 'release'
     permissions:
       # Needed to upload LLVM binaries as OCI artifacts to GHCR.
       packages: write
@@ -179,6 +183,7 @@ jobs:
           oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
 
   lint-stable:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
 
     steps:
@@ -193,6 +198,7 @@ jobs:
         run: cargo clippy --features llvm-22,no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
 
     steps:
@@ -206,7 +212,37 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  bazel:
+    if: github.event_name != 'release'
+    name: bazel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-11-arm
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: |
+          set -euxo pipefail
+          bazel_args=(--config=remote)
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+          fi
+          bazel test //... "${bazel_args[@]}"
+
   build:
+    if: github.event_name != 'release'
     permissions:
       # Needed to pull LLVM binaries as OCI artifacts from GHCR.
       packages: read
@@ -326,11 +362,11 @@ jobs:
       - name: Enforce dynamic linking
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
 
-      - name: Check (rustc LLVM proxy, no system LLVM)
-        run: cargo check --target ${{ matrix.platform.target }} --features rust-llvm-22
+      - name: Check (default features, no system LLVM)
+        run: cargo check --target ${{ matrix.platform.target }}
 
-      - name: Build (rustc LLVM proxy, no system LLVM)
-        run: cargo build --target ${{ matrix.platform.target }} --features rust-llvm-22
+      - name: Build (default features, no system LLVM)
+        run: cargo build --target ${{ matrix.platform.target }}
 
       - name: Install btfdump
         if: ${{ !endsWith(matrix.platform.target, 'musl') }}
@@ -509,3 +545,46 @@ jobs:
       - name: Report disk usage
         if: ${{ always() }}
         uses: ./bpf-linker/.github/actions/report-disk-usage
+
+  release:
+    if: github.event_name == 'release'
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build release
+        run: |
+          set -euxo pipefail
+
+          bazel_args=(
+            --config=release
+            --config=remote
+          )
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+          fi
+
+          bazel build //:release-archives "${bazel_args[@]}"
+
+          mkdir -p dist
+          while IFS= read -r src; do
+            relative="${src#bazel-out/}"
+            target="${relative%%-opt/*}"
+            install -m 0644 "$src" "dist/bpf-linker-${target}.tar.zst"
+          done < <(bazel cquery //:release-archives --output=files "${bazel_args[@]}")
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: bpf-linker-release
+          path: dist/*
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*

@@ -1,3 +1,5 @@
+# Override the detected Windows host ABI with MSVC to match the prebuilt rustc
+# toolchain ABI. Target binaries continue to use their requested target platform.
 platform(
     name = "local_windows_msvc",
     constraint_values = [

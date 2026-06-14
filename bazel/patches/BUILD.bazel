@@ -1,5 +1,3 @@
 exports_files([
-    "llvm_assertions.patch",
-    "rules_rust_distributed_thin_lto.patch",
     "rules_rs_bpf_linker_from_source.patch",
 ])
