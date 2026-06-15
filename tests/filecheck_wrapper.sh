@@ -5,7 +5,7 @@ set -euo pipefail
 input="$ARTIFACT"
 if [[ "$MODE" == "btf" ]]; then
   input="$TEST_TMPDIR/btf.txt"
-  "$BTFDUMP" dump "$ARTIFACT" >"$input"
+  "$BTFDUMP" dump "$ARTIFACT" >$input
 fi
 
 args=(
