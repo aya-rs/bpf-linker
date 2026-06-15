@@ -13,7 +13,8 @@ def bpf_linker_release(name, binary):
     native.filegroup(
         name = dsym,
         srcs = [binary],
-        # The dsym is not part of the default output group.
+        # The dsym is not part of the default output group, see
+        # https://github.com/hermeticbuild/rules_rust/blob/23d5138a095ac094f5c928fa73e5a767d92dce78/rust/private/rustc.bzl#L2183
         output_group = "dsym_folder",
         tags = ["manual"],
     )

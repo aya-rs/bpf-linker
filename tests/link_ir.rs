@@ -3,8 +3,6 @@
     reason = "Cargo exposes package-wide dependencies"
 )]
 
-use std::ffi::OsStr;
-
 fn create_test_ir_content(name: &str) -> String {
     format!(
         r#"; ModuleID = '{name}'
@@ -76,9 +74,7 @@ fn test_link_ir_files() {
                 bpf_linker::OutputType::Object,
                 Vec::<&str>::new(),
             ),
-            // TODO(MSRV 1.91.0): peel away the `AsRef::<OsStr>::as_ref`.
-            // `PathBuf` implements `PartialEq<str>` starting in Rust 1.91.0.
-            Err(bpf_linker::LinkerError::InvalidInputType(path)) if AsRef::<OsStr>::as_ref(&path) == "in_memory::corrupted.ll"
+            Err(bpf_linker::LinkerError::InvalidInputType(path)) if path == *"in_memory::corrupted.ll"
         );
     }
 }
