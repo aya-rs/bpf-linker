@@ -1,0 +1,14 @@
+[package]
+name = "bazel-btfdump"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+# Keep btfdump in this Cargo workspace so adding btfdump does not change the
+# root Cargo.toml dependency resolution. Bazel pins btfdump 0.0.4 for BTF tests;
+# non-Bazel CI runs `cargo install btfdump`, which installs the latest release.
+# TODO: Merge btfdump into the root Cargo.toml dependency closure in a
+# follow-up.
+btfdump = { version = "0.0.4", default-features = false }
+
+[workspace]

@@ -2,8 +2,8 @@
 // compile-flags: --crate-type rlib
 #![no_std]
 
-#[no_mangle]
-#[link_section = "uprobe/dep"]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = "uprobe/dep")]
 pub fn dep() -> u64 {
     42
 }
