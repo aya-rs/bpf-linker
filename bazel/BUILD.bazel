@@ -1,5 +1,4 @@
 exports_files([
     "defs.bzl",
     "release.bzl",
-    "rust_test_wrapper.sh",
 ])

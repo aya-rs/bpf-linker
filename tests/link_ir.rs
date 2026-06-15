@@ -77,7 +77,7 @@ fn test_link_ir_files() {
                 Vec::<&str>::new(),
             ),
             // TODO(MSRV 1.91.0): peel away the `AsRef::<OsStr>::as_ref`.
-            // See https://doc.rust-lang.org/stable/std/path/struct.PathBuf.html#impl-PartialEq%3Cstr%3E-for-PathBuf.
+            // `PathBuf` implements `PartialEq<str>` starting in Rust 1.91.0.
             Err(bpf_linker::LinkerError::InvalidInputType(path)) if AsRef::<OsStr>::as_ref(&path) == "in_memory::corrupted.ll"
         );
     }

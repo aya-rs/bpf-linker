@@ -1,13 +1,13 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load(
     "//bazel:defs.bzl",
     "bpf_assembly_test",
     "bpf_aux_library",
     "bpf_btf_test",
-    "rust_test_with_junit",
 )
 
-rust_test_with_junit(
+rust_test(
     name = "bpf-linker-link-ir-test",
     srcs = ["link_ir.rs"],
     crate_name = "link_ir",

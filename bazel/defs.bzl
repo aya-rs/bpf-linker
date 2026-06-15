@@ -4,66 +4,26 @@ load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
-load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@with_cfg.bzl", "with_cfg")
 
-# TODO: Remove rust_test_with_junit after
-# https://github.com/dzbarsky/bazel/pull/1 and its prerequisite changes land.
-def rust_test_with_junit(name, **kwargs):
-    """Wraps a Rust test so the test writes Bazel's JUnit output itself.
+def _bpify(rule):
+    # with_cfg applies these settings to the fixture and its transitive
+    # dependencies:
+    # https://bazel.build/extending/config#user-defined-transitions
+    return with_cfg(rule).set(
+        "platforms",
+        [Label("@rules_rs//rs/platforms:bpfel-unknown-none")],
+    ).set(
+        # rules_rust supports "alloc" as its only no_std mode; these fixtures
+        # use core only. Use core after rules_rust supports core-only no_std:
+        # https://github.com/hermeticbuild/rules_rust/issues/28
+        Label("@rules_rust//rust/settings:no_std"),
+        "alloc",
+    ).build()
 
-    Bazel otherwise generates an extra action to run generate-xml.sh after the test.
-    That fallback does not work properly when a Windows host uses Linux remote exec.
-    This can be removed once https://github.com/dzbarsky/bazel/pull/1 and its prerequisite changes land.
-    """
-    binary_name = name + "-binary"
-    rust_test(
-        name = binary_name,
-        tags = ["manual"],
-        **kwargs
-    )
-    sh_test(
-        name = name,
-        srcs = ["//bazel:rust_test_wrapper.sh"],
-        args = ["$(rootpath :%s)" % binary_name],
-        data = [binary_name],
-    )
-
-_BPF_TRANSITION_SETTINGS = {
-    "//command_line_option:platforms": "@rules_rs//rs/platforms:bpfel-unknown-none",
-    # rules_rust supports "alloc" as its only no_std mode; these fixtures use core only.
-    "@rules_rust//rust/settings:no_std": "alloc",
-}
-
-def _bpf_transition_impl(_settings, _attr):
-    return _BPF_TRANSITION_SETTINGS
-
-_bpf_transition = transition(
-    implementation = _bpf_transition_impl,
-    inputs = [],
-    outputs = _BPF_TRANSITION_SETTINGS.keys(),
-)
-
-def _transition_filegroup_impl(ctx):
-    # We just want to forward the DefaultInfo, but we must drop the executable (that we don't care about anyway)
-    # because Bazel doesn't allow forwarding that, so we reconstruct the other fields.
-    default_info = ctx.attr.src[0][DefaultInfo]
-    return [DefaultInfo(
-        files = default_info.files,
-        runfiles = default_info.default_runfiles,
-    )]
-
-# This rule forces the `src` to be built with a different set of flags (for the BPF target).
-# See https://bazel.build/extending/config#user-defined-transitions for more info on transitioning flags in the build graph.
-bpf_transition_filegroup = rule(
-    implementation = _transition_filegroup_impl,
-    attrs = {
-        "src": attr.label(
-            cfg = _bpf_transition,
-            mandatory = True,
-        ),
-    },
-)
+rust_bpf_shared_library, _ = _bpify(rust_shared_library)
+rust_bpf_binary, __ = _bpify(rust_binary)
 
 def _crate_name(src):
     return src.split("/")[-1].replace(".rs", "").replace("-", "_")
@@ -134,7 +94,7 @@ def _bpf_filecheck_test(
     fixture_name = name + "-fixture"
     bpf_name = fixture_name + "-bpfel"
     rust_kwargs = {
-        "name": fixture_name,
+        "name": bpf_name,
         "crate_name": _crate_name(src),
         "crate_root": src,
         "compile_data": compile_data,
@@ -142,7 +102,8 @@ def _bpf_filecheck_test(
         "edition": "2021",
         # Exercise the native bpf-linker on each CI host. Its dependencies may
         # still build remotely, but this rustc invocation must execute locally.
-        # We must both mark it compatible with host and tag it no-remote-exec due to Bazel quirks.
+        # We must both mark it compatible with host and tag it no-remote-exec
+        # due to Bazel quirks.
         "exec_compatible_with": HOST_CONSTRAINTS,
         "rustc_flags": rustc_flags,
         "srcs": [src],
@@ -152,18 +113,12 @@ def _bpf_filecheck_test(
         ],
     }
     if crate_type == "cdylib":
-        rust_shared_library(**rust_kwargs)
+        rust_bpf_shared_library(**rust_kwargs)
     else:
-        rust_binary(
+        rust_bpf_binary(
             crate_type = crate_type,
             **rust_kwargs
         )
-
-    bpf_transition_filegroup(
-        name = bpf_name,
-        src = fixture_name,
-        tags = ["manual"],
-    )
 
     data = [
         bpf_name,
@@ -181,11 +136,10 @@ def _bpf_filecheck_test(
         data.append("@btfdump_crates//:btfdump__btf")
         env["BTFDUMP"] = "$(location @btfdump_crates//:btfdump__btf)"
 
-    # filecheck.sh writes test.xml to avoid Bazel's cross-host generate-xml.sh
-    # fallback and runs btfdump before FileCheck for BTF tests.
+    # filecheck_wrapper.sh runs btfdump before FileCheck for BTF tests.
     sh_test(
         name = name + "-test",
-        srcs = ["filecheck.sh"],
+        srcs = ["filecheck_wrapper.sh"],
         data = data,
         env = env,
     )

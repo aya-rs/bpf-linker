@@ -27,7 +27,8 @@ index fdf131c..617bfc8 100644
 -                rust_std = toolchain_rust_std,
 -                **bpf_rust_toolchain_kwargs
 -            )
-+        # TODO(next-release): Remove this patch after bpf-linker publishes Windows prebuilts.
++        # TODO(next-release): Remove this patch after bpf-linker publishes
++        # Windows prebuilts.
 +        bpf_rust_toolchain_kwargs = rust_toolchain_kwargs | {
 +            "linker": select({
 +                "@platforms//cpu:bpfeb": "@@//:bpf-linker",
@@ -42,7 +43,7 @@ index fdf131c..617bfc8 100644
 +            rust_std = toolchain_rust_std,
 +            **bpf_rust_toolchain_kwargs
 +        )
-@@ -198,5 +194,2 @@ def declare_rustc_toolchains(
+@@ -198,5 +195,2 @@ def declare_rustc_toolchains(
          for target_triple in targets:
 -            if target_triple in _BPF_TARGET_TRIPLES and not bpf_linker_repo:
 -                continue

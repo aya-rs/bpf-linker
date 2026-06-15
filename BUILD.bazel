@@ -3,16 +3,14 @@ load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
-load(
-    "//bazel:defs.bzl",
-    "rust_test_with_junit",
-)
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load(
     "//bazel:release.bzl",
     "bpf_linker_release",
 )
 
-# If Cargo.toml remaps any crate names, this tells Bazel how to pass the right `--extern` flags.
+# If Cargo.toml remaps any crate names, this tells Bazel how to pass the right
+# `--extern` flags.
 # (For example `my_serde = { package = "serde", version = "1.0" }`)
 CRATE_ALIASES = aliases()
 
@@ -26,7 +24,7 @@ CRATE_FEATURES = [
 # Cargo defaults to aya-rustc-llvm-proxy, but Bazel links :llvm directly.
 CRATE_DEPS = [
     dep
-    for dep in all_crate_deps()
+    for dep in all_crate_deps(normal = True)
     if "aya-rustc-llvm-proxy" not in str(dep)
 ] + [":llvm"]
 
@@ -49,8 +47,10 @@ BIN_SRCS = glob(["src/bin/**/*.rs"])
 
 cc_library(
     name = "llvm",
-    # @llvm builds libc++ for Linux and Windows targets and provides it via the cc_toolchain's `static_runtime_library`.
-    # For macOS targets @llvm uses the hermetic macOS SDK libc++. The toolchain doesn't know to inject the link flag so we do it explicitly.
+    # @llvm builds libc++ for Linux and Windows targets and provides it via the
+    # cc_toolchain's `static_runtime_library`.
+    # For macOS targets @llvm uses the hermetic macOS SDK libc++. The toolchain
+    # doesn't know to inject the link flag so we do it explicitly.
     linkopts = select({
         "@platforms//os:macos": ["-lc++"],
         "//conditions:default": [],
@@ -110,7 +110,7 @@ rust_binary(
 )
 
 # Run unit tests declared in the library crate.
-rust_test_with_junit(
+rust_test(
     name = "bpf-linker-unit-test",
     aliases = CRATE_ALIASES,
     crate = ":bpf-linker-lib",
@@ -119,7 +119,7 @@ rust_test_with_junit(
 )
 
 # Run unit tests declared in the binary crate.
-rust_test_with_junit(
+rust_test(
     name = "bpf-linker-bin-unit-test",
     srcs = BIN_SRCS,
     aliases = CRATE_ALIASES,

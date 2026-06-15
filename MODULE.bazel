@@ -10,6 +10,7 @@ bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "rules_rs", version = "0.0.89")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
+bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
 # rules_rs normally selects a published bpf-linker binary for BPF toolchains.
 # This repository must select //:bpf-linker so the tests exercise the binary
@@ -44,8 +45,10 @@ crate.from_cargo(
     name = "crates",
     cargo_lock = "//:Cargo.lock",
     cargo_toml = "//:Cargo.toml",
-    # Any platform that is a potential target or exec platform for Rust compilations must be included here,
-    # so we can properly evalaute `cfg(target)` features and dependencies for them in the third party crates.
+    # Any platform that is a potential target or exec platform for Rust
+    # compilations must be included here, so we can properly evalaute
+    # `cfg(target)` features and dependencies for them in the third party
+    # crates.
     platform_triples = [
         "aarch64-apple-darwin",
         "aarch64-pc-windows-gnullvm",
@@ -65,9 +68,12 @@ crate.from_cargo(
     name = "btfdump_crates",
     cargo_lock = "//bazel/btfdump:Cargo.lock",
     cargo_toml = "//bazel/btfdump:Cargo.toml",
-    # Any platform that is a potential target or exec platform for Rust compilations must be included here,
-    # so we can properly evalaute `cfg(target)` features and dependencies for them in the third party crates.
-    # btfdump runs during tests, so we just include rules_rs supported exec platforms for the sake of contributors.
+    # Any platform that is a potential target or exec platform for Rust
+    # compilations must be included here, so we can properly evalaute
+    # `cfg(target)` features and dependencies for them in the third party
+    # crates.
+    # btfdump runs during tests, so we just include rules_rs supported exec
+    # platforms for the sake of contributors.
     # Our own CI only runs btfdump on linux since actions execute remotely.
     platform_triples = [
         "%s-%s" % (arch, target_suffix)
