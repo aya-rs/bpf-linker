@@ -218,7 +218,6 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
-          - windows-11-arm
     defaults:
       run:
         shell: bash
