@@ -159,7 +159,6 @@ def main() -> int:
 
     base_packages = [
         "clang",
-        "gcc",
         "lld",
         "llvm-test-utils",
         "musl-dev",
