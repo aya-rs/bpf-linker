@@ -1,0 +1,115 @@
+module(
+    name = "bpf_linker",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "llvm", version = "0.8.8")
+bazel_dep(name = "bazel_lib", version = "3.2.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.19")
+bazel_dep(name = "rules_rs", version = "0.0.89")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "tar.bzl", version = "0.10.4")
+bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
+
+# rules_rs normally selects a published bpf-linker binary for BPF toolchains.
+# This repository must select //:bpf-linker so the tests exercise the binary
+# built from the current checkout.
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//bazel/patches:rules_rs_bpf_linker_from_source.patch"],
+)
+
+llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
+use_repo(llvm, "llvm-project")
+
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+use_repo(rules_rust, "rules_rust")
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+
+# Pin rustc so local and remote Bazel actions use the same toolchain. This is
+# independent of the Cargo MSRV and stable-toolchain jobs in ci.yml.
+toolchains.toolchain(
+    edition = "2024",
+    version = "1.96.0",
+)
+use_repo(
+    toolchains,
+    "default_rust_toolchains",
+)
+
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    # Any platform that is a potential target or exec platform for Rust
+    # compilations must be included here, so we can properly evaluate
+    # `cfg(target)` features and dependencies for them in the third party
+    # crates.
+    platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-gnullvm",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "bpfeb-unknown-none",
+        "bpfel-unknown-none",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-gnullvm",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+    ],
+)
+crate.from_cargo(
+    name = "btfdump_crates",
+    cargo_lock = "//bazel/btfdump:Cargo.lock",
+    cargo_toml = "//bazel/btfdump:Cargo.toml",
+    # Any platform that is a potential target or exec platform for Rust
+    # compilations must be included here, so we can properly evalaute
+    # `cfg(target)` features and dependencies for them in the third party
+    # crates.
+    # btfdump runs during tests, so we just include rules_rs supported exec
+    # platforms for the sake of contributors.
+    # Our own CI only runs btfdump on linux since actions execute remotely.
+    platform_triples = [
+        "%s-%s" % (arch, target_suffix)
+        for arch in [
+            "aarch64",
+            "x86_64",
+        ]
+        for target_suffix in [
+            "apple-darwin",
+            "pc-windows-msvc",
+            "unknown-linux-gnu",
+        ]
+    ],
+)
+
+# bpf-linker links LLVM through Bazel's @llvm-project graph. The llvm-sys
+# crates provide Rust bindings only, so their Cargo build scripts must not try
+# to discover or link a host LLVM installation.
+crate.annotation(
+    crate = "llvm-sys",
+    gen_build_script = "off",
+)
+
+# Request rules_rs to generate the target for the `btf` binary.
+crate.annotation(
+    crate = "btfdump",
+    gen_binaries = ["btf"],
+    repositories = ["btfdump_crates"],
+)
+use_repo(
+    crate,
+    "btfdump_crates",
+    "crates",
+)
+
+register_toolchains(
+    "@default_rust_toolchains//:all",
+    "@llvm//toolchain:all",
+)

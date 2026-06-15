@@ -1,0 +1,164 @@
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load(
+    "//bazel:release.bzl",
+    "bpf_linker_release",
+)
+
+# If Cargo.toml remaps any crate names, this tells Bazel how to pass the right
+# `--extern` flags.
+# (For example `my_serde = { package = "serde", version = "1.0" }`)
+CRATE_ALIASES = aliases()
+
+# Bazel supplies LLVM through :llvm, so llvm-sys provides bindings without
+# linking LLVM itself.
+CRATE_FEATURES = [
+    "llvm-22",
+    "no-llvm-linking",
+]
+
+# Cargo defaults to aya-rustc-llvm-proxy, but Bazel links :llvm directly.
+CRATE_DEPS = [
+    dep
+    for dep in all_crate_deps(normal = True)
+    if "aya-rustc-llvm-proxy" not in str(dep)
+] + [":llvm"]
+
+# Unit tests compile both [dependencies] and [dev-dependencies] from Cargo.toml.
+TEST_DEPS = [
+    dep
+    for dep in all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    )
+    if "aya-rustc-llvm-proxy" not in str(dep)
+] + [":llvm"]
+
+LIB_SRCS = glob(
+    ["src/**/*.rs"],
+    exclude = ["src/bin/**/*.rs"],
+)
+
+BIN_SRCS = glob(["src/bin/**/*.rs"])
+
+cc_library(
+    name = "llvm",
+    # @llvm builds libc++ for Linux and Windows targets and provides it via the
+    # cc_toolchain's `static_runtime_library`.
+    # For macOS targets @llvm uses the hermetic macOS SDK libc++. The toolchain
+    # doesn't know to inject the link flag so we do it explicitly.
+    linkopts = select({
+        "@platforms//os:macos": ["-lc++"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//tests:__pkg__"],
+    deps = [
+        "@llvm-project//llvm:Analysis",
+        "@llvm-project//llvm:AsmParser",
+        "@llvm-project//llvm:BPFAsmParser",
+        "@llvm-project//llvm:BPFCodeGen",
+        "@llvm-project//llvm:BPFDisassembler",
+        "@llvm-project//llvm:BPFInfo",
+        "@llvm-project//llvm:BPFUtilsAndDesc",
+        "@llvm-project//llvm:BitReader",
+        "@llvm-project//llvm:BitWriter",
+        "@llvm-project//llvm:CodeGen",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:DebugInfoBTF",
+        "@llvm-project//llvm:DebugInfoDWARF",
+        "@llvm-project//llvm:Demangle",
+        "@llvm-project//llvm:IPO",
+        "@llvm-project//llvm:IRReader",
+        "@llvm-project//llvm:InstCombine",
+        "@llvm-project//llvm:Linker",
+        "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:MCParser",
+        "@llvm-project//llvm:Object",
+        "@llvm-project//llvm:Passes",
+        "@llvm-project//llvm:Scalar",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:TargetParser",
+        "@llvm-project//llvm:TransformUtils",
+        "@llvm-project//llvm:Vectorize",
+    ],
+)
+
+rust_library(
+    name = "bpf-linker-lib",
+    srcs = LIB_SRCS,
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    visibility = ["//visibility:public"],
+    deps = CRATE_DEPS,
+)
+
+rust_binary(
+    name = "bpf-linker",
+    srcs = BIN_SRCS,
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    crate_root = "src/bin/bpf-linker.rs",
+    visibility = ["//visibility:public"],
+    deps = CRATE_DEPS + [":bpf-linker-lib"],
+)
+
+# Run unit tests declared in the library crate.
+rust_test(
+    name = "bpf-linker-unit-test",
+    aliases = CRATE_ALIASES,
+    crate = ":bpf-linker-lib",
+    crate_features = CRATE_FEATURES,
+    deps = TEST_DEPS,
+)
+
+# Run unit tests declared in the binary crate.
+rust_test(
+    name = "bpf-linker-bin-unit-test",
+    srcs = BIN_SRCS,
+    aliases = CRATE_ALIASES,
+    crate_features = CRATE_FEATURES,
+    crate_name = "bpf_linker",
+    crate_root = "src/bin/bpf-linker.rs",
+    deps = TEST_DEPS + [":bpf-linker-lib"],
+)
+
+bpf_linker_release(
+    name = "bpf-linker-release",
+    binary = ":bpf-linker",
+)
+
+RELEASE_TARGETS = [
+    "%s-%s" % (arch, target_suffix)
+    for arch in [
+        "aarch64",
+        "x86_64",
+    ]
+    for target_suffix in [
+        "apple-darwin",
+        "pc-windows-gnullvm",
+        "unknown-linux-musl",
+    ]
+]
+
+[
+    platform_transition_filegroup(
+        name = "release-" + target,
+        srcs = [":bpf-linker-release"],
+        tags = ["manual"],
+        target_platform = "@rules_rs//rs/platforms:" + target,
+    )
+    for target in RELEASE_TARGETS
+]
+
+filegroup(
+    name = "release-archives",
+    srcs = [":release-" + target for target in RELEASE_TARGETS],
+    tags = ["manual"],
+)

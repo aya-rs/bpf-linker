@@ -1,0 +1,3 @@
+exports_files([
+    "rules_rs_bpf_linker_from_source.patch",
+])
