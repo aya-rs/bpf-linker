@@ -1,9 +1,11 @@
-# See https://bazel.build/reference/command-line-reference for explanation of flags, or ask zbarsky :)
+# See https://bazel.build/reference/command-line-reference for an explanation
+# of flags, or ask zbarsky :)
 
 common --test_output=errors
 
-# Tell @apple_support and @rules_cc modules that we are not interested in their automatic
-# non-hermetic toolchains. We use a fully hermetic @llvm toolchain.
+# Tell @apple_support and @rules_cc modules that we are not interested in
+# their automatic non-hermetic toolchains. We use a fully hermetic @llvm
+# toolchain.
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
 
@@ -17,7 +19,8 @@ common --enable_platform_specific_config
 # Rustc ships with msvc ABI and we must match it when compiling proc macros.
 common:windows --host_platform=//platforms:local_windows_msvc
 
-# Standard rust configuration to avoid passing libtool to build scripts that use cc-rs and expect ar.
+# Standard rust configuration to avoid passing libtool to build scripts that
+# use cc-rs and expect ar.
 # Can be removed once https://github.com/hermeticbuild/rules_rust/pull/24 lands.
 common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
 
@@ -36,7 +39,8 @@ common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebuginfo=2
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
 
 # Bit of rules_rust magic that is required when the C linker drives the link.
-# This should be smoothed over, see https://github.com/hermeticbuild/rules_rust/issues/27
+# This should be smoothed over, see
+# https://github.com/hermeticbuild/rules_rust/issues/27
 common:release --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
 
 # Keep remote connections healthy.
@@ -51,17 +55,20 @@ common:remote --experimental_remote_downloader=grpcs://remote.buildbuddy.io
 common:remote --remote_cache=grpcs://remote.buildbuddy.io
 common:remote --remote_executor=grpcs://remote.buildbuddy.io
 
+# Remote tests execute on Linux even when the Bazel client runs on Windows.
+common:remote --action_env=PATH=/bin:/usr/bin
+
 # Minimize network traffic
 common:remote --remote_cache_compression
 common:remote --remote_download_toplevel
-common:remote --remote_download_regex=.*/test[.]xml
 
 # Keep remote backends fed
 common:remote --noexperimental_throttle_remote_action_building
 common:remote --jobs=800
 
-# Tell Bazel how to build for our remote platform. Note that `--platforms` defaults to the host platform,
-# so the 2nd line is needed to make sure that `bazel test` builds the right test binaries when host != exec.
+# Tell Bazel how to build for our remote platform. Note that `--platforms`
+# defaults to the host platform, so the 2nd line is needed to make sure that
+# `bazel test` builds the right test binaries when host != exec.
 common:remote --extra_execution_platforms=//bazel/toolchains:rbe_x86_64_linux
 common:remote --platforms=@rules_rs//rs/platforms:x86_64-unknown-linux-gnu
 
