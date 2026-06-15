@@ -3,12 +3,28 @@
 
 version: 2
 updates:
+  - package-ecosystem: "bazel"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      bazel-modules:
+        patterns:
+          - "*"
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "monthly"
     groups:
       cargo-crates:
+        patterns:
+          - "*"
+  - package-ecosystem: "cargo"
+    directory: "/bazel/btfdump"
+    schedule:
+      interval: "monthly"
+    groups:
+      btfdump-crates:
         patterns:
           - "*"
   - package-ecosystem: "github-actions"

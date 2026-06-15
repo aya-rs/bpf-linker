@@ -209,6 +209,34 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  bazel:
+    name: bazel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          bazel_args=(--config=remote)
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+          fi
+
+          bazel test //... "${bazel_args[@]}"
+
   build:
     permissions:
       # Needed to pull LLVM binaries as OCI artifacts from GHCR.
@@ -515,94 +543,38 @@ jobs:
 
   release:
     name: release
-    needs: llvm
-    runs-on: ${{ matrix.platform.os }}
+    runs-on: ubuntu-latest
     permissions:
-      # This is used by the upload-rust-binary-action to upload the binary to the release.
       contents: write
-    strategy:
-      matrix:
-        platform:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
-            linker: x86_64-linux-musl-clang
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
-            linker: aarch64-linux-musl-clang
     env:
-      LLVM_VERSION: 22
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
     steps:
       - uses: actions/checkout@v6
-      - uses: Swatinem/rust-cache@v2
 
-      - name: Install prerequisites
-        if: runner.os == 'macOS'
-        # macOS does not provide any static libraries. Homebrew does provide
-        # them, but in custom paths that the system-wide clang is not aware of.
-        # Point build.rs to them by setting environment variables.
-        #
-        # We install llvm package only for libc++.
+      - name: Build release
         run: |
-          set -euxo pipefail
-          brew bundle
-          echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
-          echo "LIBZSTD_PATH=$(brew --prefix zstd)/lib" >> $GITHUB_ENV
-          echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
+          set -euo pipefail
 
-      - name: Prepare sysroot
-        if: endsWith(matrix.platform.target, 'musl')
-        run: |
-          set -euxo pipefail
-          sudo apt update
-          sudo apt -y install bubblewrap
-          target="${{ matrix.platform.target }}"
-          arch="${target%%-*}"
-          ./ci/prepare-musl-sysroot.py \
-            "$arch" \
-            sysroot \
-            stable >> $GITHUB_ENV
-          echo "$(pwd)/ci" >> $GITHUB_PATH
+          bazel_args=(
+            --config=release
+            --config=remote
+          )
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+          fi
 
-      - uses: oras-project/setup-oras@v2
+          bazel build //:release-archives "${bazel_args[@]}"
 
-      - name: Login to ghcr.io
+          mkdir -p dist
+          while IFS= read -r src; do
+            relative="${src#bazel-out/}"
+            target="${relative%%-opt/*}"
+            install -m 0644 "$src" "dist/bpf-linker-${target}.tar.zst"
+          done < <(bazel cquery //:release-archives --output=files "${bazel_args[@]}")
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euxo pipefail
-          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
-
-      - name: Restore LLVM from ghcr.io
-        run: |
-          set -euxo pipefail
-          oras pull "${{ env.TAG_PREFIX }}:${{ env.LLVM_VERSION }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
-          # Make sure LLVM is available from the current directory, so
-          # bubblewrap is able to access it. See the `ci/*-run` scripts.
-          LLVM_INSTALL_DIR="$(pwd)/llvm-install"
-          mkdir -p "$LLVM_INSTALL_DIR"
-          tar --zstd -xf llvm-install.tar.zst -C "$LLVM_INSTALL_DIR"
-          rm -f llvm-install.tar.zst
-          echo "${LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
-
-      - uses: taiki-e/upload-rust-binary-action@v1
-        with:
-          bin: bpf-linker
-          target: ${{ matrix.platform.target }}
-          features: llvm-22,llvm-link-static
-          no-default-features: true
-          # By default, the action tries to use cross-rs when `target` is
-          # defined. We want to use vanilla cargo, because we manage our own
-          # clang wrappers and sysroots.
-          build-tool: cargo
-          dry-run: ${{ github.event_name != 'release' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUSTFLAGS: ${{ matrix.platform.linker && format('-C linker={0}', matrix.platform.linker) || '' }} -C target-feature=+crt-static
-
-      - name: Report disk usage
-        if: ${{ always() }}
-        uses: ./.github/actions/report-disk-usage
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*
