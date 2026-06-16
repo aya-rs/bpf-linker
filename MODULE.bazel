@@ -12,6 +12,12 @@ bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//bazel/patches:llvm_release_debug_info.patch"],
+)
+
 # rules_rs normally selects a published bpf-linker binary for BPF toolchains.
 # This repository must select //:bpf-linker so the tests exercise the binary
 # built from the current checkout.
@@ -25,6 +31,10 @@ llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 use_repo(llvm, "llvm-project")
 
 rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+rules_rust.patch(
+    patches = ["//bazel/patches:rules_rust_release_debug_info.patch"],
+    strip = 1,
+)
 use_repo(rules_rust, "rules_rust")
 
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")

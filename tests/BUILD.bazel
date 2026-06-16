@@ -76,6 +76,7 @@ bpf_assembly_test(
     rustc_flags = [
         "-Cdebuginfo=2",
         "-Clink-arg=--btf",
+        "-Copt-level=0",
     ],
 )
 

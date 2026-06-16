@@ -1,3 +1,5 @@
 exports_files([
+    "llvm_release_debug_info.patch",
     "rules_rs_bpf_linker_from_source.patch",
+    "rules_rust_release_debug_info.patch",
 ])

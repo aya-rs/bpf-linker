@@ -31,11 +31,11 @@ common --copt=-DNDEBUG
 
 common:release --compilation_mode=opt
 common:release --copt=-g
-common:release --copt=-flto=thin
 common:release --features=thin_lto
 common:release --strip=never
 common:release --@rules_rust//rust/settings:codegen_units=1
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebuginfo=2
+common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdwarf-version=5
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
 
 # Bit of rules_rust magic that is required when the C linker drives the link.

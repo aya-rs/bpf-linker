@@ -1,0 +1,82 @@
+diff --git a/toolchain/cc_toolchain.bzl b/toolchain/cc_toolchain.bzl
+index 8ec40cc..3ab7187 100644
+--- a/toolchain/cc_toolchain.bzl
++++ b/toolchain/cc_toolchain.bzl
+@@ -11,6 +11,7 @@ def cc_toolchain(name, tool_map, module_map = None, extra_args = []):
+             "@llvm//toolchain/features/runtime_library_search_directories:feature",
+             "@llvm//toolchain/features:parse_headers",
+             "@llvm//toolchain/features:external_include_paths",
++            "@llvm//toolchain/features:generate_pdb_file",
+             # TODO: Restore this after a rules_cc release includes the macOS
+             # and Windows distributed ThinLTO arguments and uses NUL for
+             # Windows ThinLTO backends without an index.
+diff --git a/toolchain/features/BUILD.bazel b/toolchain/features/BUILD.bazel
+index 4d7806f..8ac00ba 100644
+--- a/toolchain/features/BUILD.bazel
++++ b/toolchain/features/BUILD.bazel
+@@ -4,11 +4,18 @@ load("@rules_cc//cc/toolchains:feature_set.bzl", "cc_feature_set")
+ 
+ package(default_visibility = ["//visibility:public"])
+ 
+-_DSYM_COMPILE_ACTIONS = [
++_DEBUG_INFO_COMPILE_ACTIONS = [
+     "@rules_cc//cc/toolchains/actions:c_compile",
+     "@rules_cc//cc/toolchains/actions:cpp_compile",
++    "@rules_cc//cc/toolchains/actions:lto_backend",
+     "@rules_cc//cc/toolchains/actions:objc_compile",
+     "@rules_cc//cc/toolchains/actions:objcpp_compile",
++]
++
++_FINAL_LINK_ACTIONS = [
++    "@rules_cc//cc/toolchains/actions:cpp_link_dynamic_library",
++    "@rules_cc//cc/toolchains/actions:cpp_link_executable",
++    "@rules_cc//cc/toolchains/actions:cpp_link_nodeps_dynamic_library",
+     "@rules_cc//cc/toolchains/actions:objc_executable",
+ ]
+ 
+@@ -213,15 +220,13 @@ cc_feature(
+ 
+ cc_args(
+     name = "generate_dsym_file_compile_args",
+-    actions = _DSYM_COMPILE_ACTIONS,
++    actions = _DEBUG_INFO_COMPILE_ACTIONS,
+     args = ["-g"],
+ )
+ 
+ cc_args(
+     name = "generate_dsym_file_link_args",
+-    actions = [
+-        "@rules_cc//cc/toolchains/actions:link_actions",
+-    ],
++    actions = _FINAL_LINK_ACTIONS,
+     env = {
+         "LLVM_DSYM_PATH": "{dsym_path}",
+         "LLVM_LINK_OUTPUT": "{output_execpath}",
+@@ -242,6 +247,27 @@ cc_feature(
+     overrides = "@rules_cc//cc/toolchains/features/legacy:generate_dsym_file",
+ )
+ 
++cc_args(
++    name = "generate_pdb_file_compile_args",
++    actions = _DEBUG_INFO_COMPILE_ACTIONS,
++    args = ["-gcodeview"],
++)
++
++cc_args(
++    name = "generate_pdb_file_link_args",
++    actions = _FINAL_LINK_ACTIONS,
++    args = ["-Wl,--pdb="],
++)
++
++cc_feature(
++    name = "generate_pdb_file",
++    args = [
++        ":generate_pdb_file_compile_args",
++        ":generate_pdb_file_link_args",
++    ],
++    feature_name = "generate_pdb_file",
++)
++
+ # TODO: Remove after https://github.com/bazelbuild/rules_cc/pull/385
+ cc_feature(
+     name = "coverage_stub",

@@ -20,6 +20,12 @@ def _bpify(rule):
         # https://github.com/hermeticbuild/rules_rust/issues/28
         Label("@rules_rust//rust/settings:no_std"),
         "alloc",
+    ).set(
+        # Distributed ThinLTO requires mangled allocator libraries for the
+        # native bpf-linker binary. BPF fixtures do not link an allocator, and
+        # bpfel-unknown-none does not support the allocator staticlib targets.
+        Label("@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols"),
+        False,
     ).build()
 
 rust_bpf_shared_library, _ = _bpify(rust_shared_library)
