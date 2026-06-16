@@ -1,37 +1,63 @@
 """Bazel release archive definition for bpf-linker."""
 
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@tar.bzl", "tar")
+load("@with_cfg.bzl", "with_cfg")
+
+# https://bazel.build/reference/command-line-reference#flag--fission
+release_linux_filegroup, _release_linux_filegroup_internal = with_cfg(platform_transition_filegroup).set(
+    "fission",
+    ["opt"],
+).build()
+
+# https://bazel.build/reference/command-line-reference#flag--apple_generate_dsym
+release_macos_filegroup, _release_macos_filegroup_internal = with_cfg(platform_transition_filegroup).set(
+    "apple_generate_dsym",
+    True,
+).build()
+
+# https://bazel.build/reference/command-line-reference#flag--features
+# rules_cc checks generate_pdb_file before declaring the PDB output:
+# https://github.com/bazelbuild/rules_cc/blob/0.2.19/cc/private/rules_impl/cc_binary_impl.bzl#L611-L616
+release_windows_filegroup, _release_windows_filegroup_internal = with_cfg(platform_transition_filegroup).extend(
+    "features",
+    ["generate_pdb_file"],
+).build()
 
 def bpf_linker_release(name, binary):
-    """Archives binary and its macOS dSYM directory as a zstd tar archive.
-
-    rules_rust and rules_cc emit <binary>.dSYM; the archive preserves that
-    basename.
-    """
-    dsym = name + "_dsym"
+    """Archives the binary and debug information as separate zstd archives."""
+    debug_info = name + "_debug_info"
 
     native.filegroup(
-        name = dsym,
+        name = debug_info,
         srcs = [binary],
-        # The dsym is not part of the default output group, see
-        # https://github.com/hermeticbuild/rules_rust/blob/23d5138a095ac094f5c928fa73e5a767d92dce78/rust/private/rustc.bzl#L2183
-        output_group = "dsym_folder",
+        # rules_rust creates these output groups:
+        # dwp_file: https://github.com/hermeticbuild/rules_rust/blob/8a2219c1fcf2070120c26dc67eb8aeacfc5a3819/rust/private/rustc.bzl#L2083-L2104
+        # dsym_folder: https://github.com/hermeticbuild/rules_rust/blob/8a2219c1fcf2070120c26dc67eb8aeacfc5a3819/rust/private/rustc.bzl#L1901-L1909
+        # pdb_file: https://github.com/hermeticbuild/rules_rust/blob/8a2219c1fcf2070120c26dc67eb8aeacfc5a3819/rust/private/rustc.bzl#L2059-L2062
+        output_group = select({
+            "@platforms//os:linux": "dwp_file",
+            "@platforms//os:macos": "dsym_folder",
+            "@platforms//os:windows": "pdb_file",
+        }),
         tags = ["manual"],
     )
 
-    # Release archives contain the binary at the archive root. macOS archives
-    # also contain the dSYM directory produced by the binary target.
-    # TODO(zbarsky): Confirm the dSYM archive layout, package PDB files for
-    # Windows, and package split debug information for Linux. Debug information
-    # should probably use a separate archive.
-    srcs = [binary] + select({
-        "@platforms//os:macos": [dsym],
-        "//conditions:default": [],
-    })
-
     tar(
         name = name,
-        srcs = srcs,
+        srcs = [binary],
+        args = [
+            "--options",
+            "zstd:compression-level=22",  # Max compression.
+        ],
+        compress = "zstd",
+        include_runfiles = False,
+        tags = ["manual"],
+    )
+
+    tar(
+        name = name + "-debuginfo",
+        srcs = [debug_info],
         args = [
             "--options",
             "zstd:compression-level=22",  # Max compression.

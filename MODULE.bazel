@@ -3,11 +3,11 @@ module(
     version = "0.0.0",
 )
 
-bazel_dep(name = "llvm", version = "0.8.8")
+bazel_dep(name = "llvm", version = "0.8.9")
 bazel_dep(name = "bazel_lib", version = "3.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.19")
-bazel_dep(name = "rules_rs", version = "0.0.89")
+bazel_dep(name = "rules_rs", version = "0.0.92")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")

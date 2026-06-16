@@ -567,10 +567,14 @@ jobs:
           bazel build //:release-archives "${bazel_args[@]}"
 
           mkdir -p dist
+          # Rename bazel-out/<target>-opt-.../bin/bpf-linker-release[-debuginfo].tar.zst
+          # to dist/bpf-linker-<target>[-debuginfo].tar.zst.
           while IFS= read -r src; do
             relative="${src#bazel-out/}"
-            target="${relative%%-opt/*}"
-            install -m 0644 "$src" "dist/bpf-linker-${target}.tar.zst"
+            target="${relative%%-opt*}"
+            archive_name="${src##*/}"
+            archive_suffix="${archive_name#bpf-linker-release}"
+            install -m 0644 "$src" "dist/bpf-linker-${target}${archive_suffix}"
           done < <(bazel cquery //:release-archives --output=files "${bazel_args[@]}")
 
       - name: Upload release assets
