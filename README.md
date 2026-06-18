@@ -82,8 +82,8 @@ invocation, is **not** recommended for regular users due to dependency on
 specific LLVM version, system libraries and overall complexity of getting
 the setup right.
 
-If you're interested in packaging or contributing to bpf-linker, you're
-welcome to check the build instructions in [BUILDING.md](./BUILDING.md).
+If a source build is needed, instructions are available in
+[BUILDING.md](./BUILDING.md).
 
 ## Usage
 
