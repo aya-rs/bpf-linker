@@ -566,8 +566,7 @@ jobs:
           done < <(bazel cquery //:release-archives \
             --output=files \
             --config=release \
-            --config=remote \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
+            --config=remote)
 
       - name: Upload release assets
         if: github.event_name == 'release'
