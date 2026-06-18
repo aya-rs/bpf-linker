@@ -564,6 +564,15 @@ fn main() -> anyhow::Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
+    writeln!(
+        stdout,
+        "cargo:warning=Installing bpf-linker through `cargo install` is NOT \
+         recommended for regular users due to dependency on specific LLVM version, \
+         system libraries and overall complexity of getting the setup right. \
+         See https://github.com/aya-rs/bpf-linker#installation for easier \
+         installation methods."
+    )?;
+
     // If `LLVM_PREFIX` variable is not provided, find the directory with LLVM
     // libraries by assuming it's `lib/` inside a prefix where `llvm-config`
     // lives.
