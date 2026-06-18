@@ -28,7 +28,6 @@ tracing-tree = { version = "0.4.1", default-features = false }
 
 # lib deps
 ar = { version = "0.9.0" }
-aya-rustc-llvm-proxy = { version = "0.10.0", optional = true }
 gimli = { version = "0.32.0" }
 libc = { version = "0.2.174" }
 llvm-sys-20 = { package = "llvm-sys", features = [
@@ -70,19 +69,13 @@ llvm-20 = ["dep:llvm-sys-20"]
 llvm-21 = ["dep:llvm-sys-21"]
 llvm-22 = ["dep:llvm-sys-22"]
 
-# Use libLLVM shared library provided by Rust. Works only on
-# x86_64-unknown-linux-gnu.
-rust-llvm-20 = ["dep:aya-rustc-llvm-proxy", "llvm-20", "no-llvm-linking"]
-rust-llvm-21 = ["dep:aya-rustc-llvm-proxy", "llvm-21", "no-llvm-linking"]
-rust-llvm-22 = ["dep:aya-rustc-llvm-proxy", "llvm-22", "no-llvm-linking"]
-
 # Link LLVM and its dependencies statically. When not enabled, they're linked
 # dynamically.
 llvm-link-static = []
 # Skip LLVM linking.
 no-llvm-linking = []
 
-default = ["llvm-22", "rust-llvm-22"]
+default = ["llvm-22"]
 
 [workspace]
 members = ["xtask"]
