@@ -573,3 +573,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" dist/*
+
+  check:
+    if: always()
+    needs:
+      - llvm
+      - lint-stable
+      - lint-nightly
+      - bazel
+      - build
+      - release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
