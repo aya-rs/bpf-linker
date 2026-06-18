@@ -23,22 +23,10 @@ CRATE_FEATURES = [
     "no-llvm-linking",
 ]
 
-# Cargo defaults to aya-rustc-llvm-proxy, but Bazel links :llvm directly.
-CRATE_DEPS = [
-    dep
-    for dep in all_crate_deps(normal = True)
-    if "aya-rustc-llvm-proxy" not in str(dep)
-] + [":llvm"]
+CRATE_DEPS = all_crate_deps(normal = True) + [":llvm"]
 
 # Unit tests compile both [dependencies] and [dev-dependencies] from Cargo.toml.
-TEST_DEPS = [
-    dep
-    for dep in all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    )
-    if "aya-rustc-llvm-proxy" not in str(dep)
-] + [":llvm"]
+TEST_DEPS = all_crate_deps(normal = True, normal_dev = True) + [":llvm"]
 
 LIB_SRCS = glob(
     ["src/**/*.rs"],
