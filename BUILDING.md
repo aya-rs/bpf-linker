@@ -73,9 +73,13 @@ dynamically. Static linking can be enabled with the `llvm-link-static` feature.
 Examples:
 
 ```
-# Dynamic linking, Rust nightly
-cargo +nightly --no-default-features --features llvm-22
+# Dynamic linking
+cargo build --no-default-features --features llvm-22
+cargo install bpf-linker --no-default-features --features llvm-22
+cargo install --path . --no-default-features --features llvm-22
 
 # Static linking
-cargo +nightly --no-default-features --features llvm-22,llvm-link-static
+cargo build --no-default-features --features llvm-22,llvm-link-static
+cargo install bpf-linker --no-default-features --features llvm-22,llvm-link-static
+cargo install --path . --no-default-features --features llvm-22,llvm-link-static
 ```
