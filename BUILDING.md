@@ -83,3 +83,54 @@ cargo build --no-default-features --features llvm-22,llvm-link-static
 cargo install bpf-linker --no-default-features --features llvm-22,llvm-link-static
 cargo install --path . --no-default-features --features llvm-22,llvm-link-static
 ```
+
+## Running tests
+
+bpf-linker comes with compiletests, similar to the ones in Rust and LLVM, that
+compile the code to LLVM IR (or BTF) and assert the output matches the
+expected IR.
+
+### With Rust nightly
+
+Use `cargo test` with same arguments as used for build, e.g.:
+
+```
+cargo +nightly test --no-default-features --features llvm-22
+```
+
+### With Rust stable
+
+BPF targets are [Tier 3 in Rust][rustc-tiers] and therefore rustup does not
+provide BPF targets in stable editions of Rust. There are two ways to overcome
+that.
+
+[rustc-tiers]: https://doc.rust-lang.org/rustc/target-tier-policy.html
+
+#### Prebuilding the BPF sysroot
+
+Build the BPF sysroot with:
+
+```
+RUSTC_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
+BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot"
+RUSTC_BOOTSTRAP=1 cargo xtask build-std \
+  --rustc-src "$RUSTC_SRC" \
+  --sysroot-dir "$BPFEL_SYSROOT_DIR" \
+  --target bpfel-unknown-none
+```
+
+Then point the tests to the sysroot using the `BPFEL_SYSROOT_DIR` variable:
+
+```
+BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
+    cargo test --no-default-features --features llvm-22
+```
+
+#### Building the sysroot on demand
+
+It's done by the tests automatically when `BPFEL_SYSROOT_DIR` is not defined,
+but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
+
+```
+RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-22
+```
