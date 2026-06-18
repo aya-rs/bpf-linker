@@ -6,7 +6,37 @@ bpf-linker is a bitcode linker that uses libLLVM to link bitcode inputs. That
 means the LLVM version used by bpf-linker must match the LLVM version used by
 the Rust toolchain you intend to use.
 
-There are two recommended ways of obtaining an appropriate LLVM.
+There are three recommended ways of obtaining an appropriate LLVM.
+
+### Our prebuilt LLVM on ghcr.io
+
+We regularly build LLVM in CI and publish the binary artifacts on ghcr.io.
+They can be retrieved using [oras][oras].
+
+First, pick an appropriate image from our [LLVM container page][containers-llvm].
+The tags mention the LLVM version, the platform, and our custom revision, e.g.
+
+* `22-x86_64-unknown-linux-gnu-3` - LLVM 22, x86_64 Linux, glibc, revision 3
+* `21-aarch64-unknown-linux-musl-3` - LLVM 21, aarch64 Linux, musl, revision 3
+* `22-aarch64-apple-darwin-3` - LLVM 22, aarch64 macOS, revision 3
+
+Always pick the latest revision available, if there are multiple.
+
+After picking an appropriate image, it can be downloaded with oras, e.g.
+
+```sh
+oras pull ghcr.io/aya-rs/llvm:22-x86_64-unknown-linux-gnu-3
+```
+
+And the resulting tarball unpacked to a directory:
+
+```sh
+mkdir llvm-install
+tar --zstd -xpf llvm-install.tar.zst -C llvm-install/
+```
+
+[oras]: https://oras.land/
+[containers-llvm]: https://github.com/aya-rs/bpf-linker/pkgs/container/llvm/versions
 
 ### Building LLVM from source
 
@@ -38,20 +68,6 @@ cargo xtask llvm build \
     --install-prefix ./llvm-install
 ```
 
-After that, bpf-linker can be built with the `LLVM_PREFIX` environment
-variable pointing to that directory:
-
-```sh
-export LLVM_PREFIX=./llvm-install
-```
-
-Alternatively, the `bin` directory from the install prefix can be added to
-`PATH`:
-
-```sh
-export PATH="$(pwd)/llvm-install/bin:$PATH"
-```
-
 [llvm-fork]: https://github.com/aya-rs/llvm-project
 
 ### System packages
@@ -69,6 +85,19 @@ to ensure that the correct LLVM version is packaged for that environment.
 bpf-linker uses Cargo features to select the LLVM version, via `llvm-*`
 features such as `llvm-22`. By default, LLVM and its dependencies are linked
 dynamically. Static linking can be enabled with the `llvm-link-static` feature.
+
+If you used any of the first two methods of obtaining LLVM (ghcr.io or building
+from source), either set the `LLVM_PREFIX` variable to point to the prefix:
+
+```sh
+export LLVM_PREFIX=./llvm-install
+```
+
+Or add the `bin` directory from the prefix to `PATH`:
+
+```sh
+export PATH="$(pwd)/llvm-install/bin:$PATH"
+```
 
 Examples:
 
