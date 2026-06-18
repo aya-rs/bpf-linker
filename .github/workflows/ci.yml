@@ -12,6 +12,8 @@ on:
     - cron: 00 4 * * *
 
 env:
+  # This key is intentionally public so fork pull requests can use BuildBuddy.
+  BUILDBUDDY_API_KEY: 5CeVmFS0jDnutd00x9Xl
   CARGO_TERM_COLOR: always
   TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
   # Suffix used to distinguish incompatible LLVM build variants.
@@ -221,21 +223,15 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-
     steps:
       - uses: actions/checkout@v6
 
       - name: Test
         run: |
           set -euo pipefail
-          bazel_args=(--config=remote)
-          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
-            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
-          fi
-
-          bazel test //... "${bazel_args[@]}"
+          bazel test //... \
+            --config=remote \
+            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
   build:
     permissions:
@@ -546,9 +542,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-
     steps:
       - uses: actions/checkout@v6
 
@@ -556,15 +549,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          bazel_args=(
-            --config=release
-            --config=remote
-          )
-          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
-            bazel_args+=(--remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY")
-          fi
-
-          bazel build //:release-archives "${bazel_args[@]}"
+          bazel build //:release-archives \
+            --config=release \
+            --config=remote \
+            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
           mkdir -p dist
           # Rename bazel-out/<target>-opt-.../bin/bpf-linker-release[-debuginfo].tar.zst
@@ -575,7 +563,10 @@ jobs:
             archive_name="${src##*/}"
             archive_suffix="${archive_name#bpf-linker-release}"
             install -m 0644 "$src" "dist/bpf-linker-${target}${archive_suffix}"
-          done < <(bazel cquery //:release-archives --output=files "${bazel_args[@]}")
+          done < <(bazel cquery //:release-archives \
+            --output=files \
+            --config=release \
+            --config=remote)
 
       - name: Upload release assets
         if: github.event_name == 'release'
