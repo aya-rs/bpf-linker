@@ -12,6 +12,8 @@ on:
     - cron: 00 4 * * *
 
 env:
+  # This key is intentionally public so fork pull requests can use BuildBuddy.
+  BUILDBUDDY_API_KEY: 5CeVmFS0jDnutd00x9Xl
   CARGO_TERM_COLOR: always
   TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
   # Suffix used to distinguish incompatible LLVM build variants.
@@ -221,9 +223,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-
     steps:
       - uses: actions/checkout@v6
 
@@ -546,9 +545,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-
     steps:
       - uses: actions/checkout@v6
 
