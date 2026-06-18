@@ -65,6 +65,7 @@ jobs:
             git-ref: rustc/21.1-2025-08-01
           - version: 22
             git-ref: rustc/22.1-2026-01-27
+            latest: true
     steps:
       - id: ls-remote
         run: |
@@ -259,19 +260,19 @@ jobs:
         toolchain:
           - rust: 1.90.0
             llvm: 20
-            exclude-features: default,llvm-21,llvm-22,rust-llvm-21,rust-llvm-22
+            exclude-features: default,llvm-21,llvm-22
           - rust: 1.94.0
             llvm: 21
-            exclude-features: default,llvm-20,llvm-22,rust-llvm-20,rust-llvm-22
+            exclude-features: default,llvm-20,llvm-22
           - rust: stable
             llvm: 22
-            exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
+            exclude-features: llvm-20,llvm-21
           - rust: beta
             llvm: 22
-            exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
+            exclude-features: llvm-20,llvm-21
           - rust: nightly
             llvm: 22
-            exclude-features: llvm-20,llvm-21,rust-llvm-20,rust-llvm-21
+            exclude-features: llvm-20,llvm-21
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -284,23 +285,20 @@ jobs:
             # [1] https://github.com/rust-lang/rust/pull/151063
             # [2] https://github.com/rust-lang/rust/pull/153079
             # [3] https://github.com/rust-lang/rust/pull/154485
-            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
+            exclude-features: default
           - os: macos-15-intel
             target: x86_64-apple-darwin
-            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
+            exclude-features: default
           # We don't use ubuntu-latest because we care about the apt packages available.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
-            # `rustc-llvm-proxy` does not work on musl targets because Rust
-            # toolchains for musl link libLLVM statically.
-            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-musl
-            exclude-features: default,rust-llvm-20,rust-llvm-21,rust-llvm-22
+            exclude-features: default
     name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain.rust }} llvm=${{ matrix.toolchain.llvm }}
     needs: llvm
 
@@ -353,12 +351,6 @@ jobs:
       - name: Enforce dynamic linking
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
 
-      - name: Check (default features, no system LLVM)
-        run: cargo check --target ${{ matrix.platform.target }}
-
-      - name: Build (default features, no system LLVM)
-        run: cargo build --target ${{ matrix.platform.target }}
-
       - name: Install btfdump
         if: ${{ !endsWith(matrix.platform.target, 'musl') }}
         run: cargo install btfdump
@@ -391,6 +383,13 @@ jobs:
           set -euxo pipefail
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
+
+      - name: Check (default features)
+        run: cargo check --target ${{ matrix.platform.target }}
+
+      - name: Build (default features)
+        if: matrix.llvm.latest
+        run: cargo build --target ${{ matrix.platform.target }}
 
       - uses: taiki-e/install-action@cargo-hack
 
