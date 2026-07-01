@@ -97,7 +97,7 @@ jobs:
         run: |
           oras pull "${{ steps.image-tag.outputs.sha }}"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: steps.artifact-restore.outcome != 'success'
 
       - uses: dtolnay/rust-toolchain@stable
@@ -137,7 +137,7 @@ jobs:
 
       - name: Checkout LLVM Source
         if: steps.artifact-restore.outcome != 'success'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: aya-rs/llvm-project
           ref: ${{ steps.ls-remote.outputs.sha }}
@@ -187,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -201,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -224,7 +224,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Test
         run: |
@@ -301,7 +301,7 @@ jobs:
       LATEST_LLVM: 22
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: bpf-linker
 
@@ -439,7 +439,7 @@ jobs:
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
         with:
           repository: aya-rs/aya
@@ -531,7 +531,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build release
         run: |
