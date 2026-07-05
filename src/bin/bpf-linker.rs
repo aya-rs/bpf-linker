@@ -84,7 +84,7 @@ struct CommandLine {
     #[clap(long)]
     target: Option<CString>,
 
-    /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`
+    /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`, `v4`
     #[clap(long, default_value = "generic")]
     cpu: Cpu,
 
