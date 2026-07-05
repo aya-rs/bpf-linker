@@ -175,7 +175,7 @@ FLAGS:
     -V, --version                           Prints version information
 
 OPTIONS:
-        --cpu <cpu>                  Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3` [default:
+        --cpu <cpu>                  Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`, `v4` [default:
                                      generic]
         --cpu-features <features>    Enable or disable CPU features. The available features are: alu32, dummy, dwarfris.
                                      LLVM 22 builds also support allows-misaligned-mem-access. Use +feature to

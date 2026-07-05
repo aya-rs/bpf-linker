@@ -96,6 +96,7 @@ pub enum Cpu {
     V1,
     V2,
     V3,
+    V4,
 }
 
 impl Cpu {
@@ -106,6 +107,7 @@ impl Cpu {
             Self::V1 => c"v1",
             Self::V2 => c"v2",
             Self::V3 => c"v3",
+            Self::V4 => c"v4",
         }
     }
 }
@@ -118,6 +120,7 @@ impl std::fmt::Display for Cpu {
             Self::V1 => "v1",
             Self::V2 => "v2",
             Self::V3 => "v3",
+            Self::V4 => "v4",
         })
     }
 }
@@ -132,6 +135,7 @@ impl FromStr for Cpu {
             "v1" => Self::V1,
             "v2" => Self::V2,
             "v3" => Self::V3,
+            "v4" => Self::V4,
             _ => return Err(LinkerError::InvalidCpu(s.to_string())),
         })
     }
