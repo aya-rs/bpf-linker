@@ -64,7 +64,7 @@ jobs:
           - version: 21
             git-ref: rustc/21.1-2025-08-01
           - version: 22
-            git-ref: rustc/22.1-2026-01-27
+            git-ref: rustc/22.1-2026-05-19
     steps:
       - id: ls-remote
         run: |
