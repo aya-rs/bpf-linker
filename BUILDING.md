@@ -47,7 +47,7 @@ First, clone the LLVM sources from [our fork][llvm-fork], using the branch
 that matches the Rust toolchain you want to use. For example:
 
 ```sh
-git clone -b rustc/22.1-2026-01-27 https://github.com/aya-rs/llvm-project ./llvm-project
+git clone -b rustc/22.1-2026-05-19 https://github.com/aya-rs/llvm-project ./llvm-project
 ```
 
 If in doubt about which branch to use, check the LLVM version used by your Rust
