@@ -3,10 +3,10 @@ module(
     version = "0.0.0",
 )
 
-bazel_dep(name = "llvm", version = "0.8.9")
+bazel_dep(name = "llvm", version = "0.8.11")
 bazel_dep(name = "bazel_lib", version = "3.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "rules_cc", version = "0.2.19")
+bazel_dep(name = "rules_cc", version = "0.2.20")
 bazel_dep(name = "rules_rs", version = "0.0.92")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
@@ -20,6 +20,28 @@ single_version_override(
     patch_strip = 1,
     patches = ["//bazel/patches:rules_rs_bpf_linker_from_source.patch"],
 )
+
+# @llvm-project uses the rust-lang/llvm-project commit referenced by
+# nightly-2026-07-12.
+llvm_source = use_extension("@llvm//extensions:llvm_source.bzl", "llvm_source")
+
+# llvm_source.version only sets generated LLVM version constants; from_archive
+# below selects the LLVM source archive.
+llvm_source.version(llvm_version = "22.1.8")
+llvm_source.from_archive(
+    build_file_content = "# EMPTY",
+    integrity = "sha256-J/MaZjkCPZDNdUwd5C2PnXfMDD3v83iW+IwTRsbD85Y=",
+    patch_args = ["-p1"],
+    patches = [
+        "@llvm//3rd_party/llvm-project/22.x/patches:windows_link_and_genrule.patch",
+        "@llvm//3rd_party/llvm-project/22.x/patches:llvm-bazel-blake3-windows-gnu.patch",
+        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
+        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
+    ],
+    strip_prefix = "llvm-project-52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04",
+    urls = ["https://github.com/rust-lang/llvm-project/archive/52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04.tar.gz"],
+)
+use_repo(llvm_source, "llvm-raw", "llvm_config", "llvm_zlib", "llvm_zstd")
 
 llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 use_repo(llvm, "llvm-project")
