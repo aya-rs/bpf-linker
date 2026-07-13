@@ -1,0 +1,80 @@
+name: Update rustc LLVM
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency: update-rustc-llvm
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Update rustc LLVM
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          has_open_pr=$(gh pr list --state open --limit 1000 \
+            --json headRefName,isCrossRepository \
+            --jq 'any(.[]; (.isCrossRepository == false) and (.headRefName | startswith("automation/rustc-llvm-")))')
+          [[ $has_open_pr == false ]] || exit 0
+
+          rustc_commit=$(
+            curl -fsSL --retry 5 https://static.rust-lang.org/dist/channel-rust-nightly.toml |
+              python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["pkg"]["rustc"]["git_commit_hash"])'
+          )
+          [[ $rustc_commit =~ ^[0-9a-f]{40}$ ]]
+
+          llvm_commit=$(gh api \
+            "repos/rust-lang/rust/contents/src/llvm-project?ref=$rustc_commit" \
+            --jq 'select(.type == "submodule" and .submodule_git_url == "https://github.com/rust-lang/llvm-project.git") | .sha')
+          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
+
+          GOBIN="$RUNNER_TEMP" go install github.com/bazelbuild/buildtools/{buildifier,buildozer}@v8.5.1
+          llvm_archive_url="https://github.com/rust-lang/llvm-project/archive/$llvm_commit.tar.gz"
+          current_urls=$("$RUNNER_TEMP/buildozer" 'print urls' '//MODULE.bazel:%llvm_source.from_archive')
+          [[ $current_urls =~ ^\[https://github\.com/rust-lang/llvm-project/archive/([0-9a-f]{40})\.tar\.gz\]$ ]]
+          [[ $current_urls != "[$llvm_archive_url]" ]] || exit 0
+
+          branch="automation/rustc-llvm-$llvm_commit"
+          has_prior_pr=$(gh api \
+            "repos/$GITHUB_REPOSITORY/pulls?state=all&head=$GITHUB_REPOSITORY_OWNER:$branch&per_page=1" \
+            --jq 'length > 0')
+          [[ $has_prior_pr == false ]] || exit 0
+
+          archive="$RUNNER_TEMP/llvm-project.tar.gz"
+          curl -fsSL --retry 5 -o "$archive" "$llvm_archive_url"
+          llvm_version=$(tar -xOzf "$archive" \
+            "llvm-project-$llvm_commit/cmake/Modules/LLVMVersion.cmake" | \
+            sed -nE 's/^[[:space:]]*set\(LLVM_VERSION_(MAJOR|MINOR|PATCH)[[:space:]]+([0-9]+)\)[[:space:]]*$/\2/p' | \
+            paste -sd .)
+          [[ $llvm_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          integrity="sha256-$(openssl dgst -sha256 -binary "$archive" | base64 -w0)"
+
+          printf '%s\n' \
+            "set llvm_version \"$llvm_version\"|//MODULE.bazel:%llvm_source.version" \
+            "set integrity \"$integrity\"|set strip_prefix \"llvm-project-$llvm_commit\"|set urls [\"$llvm_archive_url\"]|//MODULE.bazel:%llvm_source.from_archive" | \
+            "$RUNNER_TEMP/buildozer" -buildifier "$RUNNER_TEMP/buildifier" -f -
+
+          env -u GH_TOKEN -u BUILDBUDDY_API_KEY bazel test //... \
+            --config=remote \
+            --remote_header=x-buildbuddy-api-key="${BUILDBUDDY_API_KEY:?BUILDBUDDY_API_KEY is not configured}"
+          git diff --check
+
+          gh auth setup-git
+          git add MODULE.bazel MODULE.bazel.lock
+          git -c 'user.name=github-actions[bot]' -c 'user.email=41898282+github-actions[bot]@users.noreply.github.com' commit \
+            -m "Update rustc LLVM" \
+            -m "Use the rust-lang/llvm-project commit from the latest Rust nightly." \
+            -m "Validated with bazel test //... --config=remote."
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create --head "$branch" --draft --fill

@@ -21,8 +21,7 @@ single_version_override(
     patches = ["//bazel/patches:rules_rs_bpf_linker_from_source.patch"],
 )
 
-# @llvm-project uses the rust-lang/llvm-project commit referenced by
-# nightly-2026-07-12.
+# @llvm-project uses rustc nightly's rust-lang/llvm-project commit.
 llvm_source = use_extension("@llvm//extensions:llvm_source.bzl", "llvm_source")
 
 # llvm_source.version only sets generated LLVM version constants; from_archive
