@@ -57,11 +57,11 @@ use_repo(rules_rust, "rules_rust")
 
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
 
-# Pin rustc so local and remote Bazel actions use the same toolchain. This is
-# independent of the Cargo MSRV and stable-toolchain jobs in ci.yml.
+# Pin rustc so Bazel and Cargo nightly CI use the same toolchain; Cargo MSRV
+# and stable-toolchain jobs remain independent.
 toolchains.toolchain(
     edition = "2024",
-    version = "1.96.0",
+    version = "nightly/2026-07-23",
 )
 use_repo(
     toolchains,
