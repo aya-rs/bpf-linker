@@ -24,6 +24,10 @@ common:windows --host_platform=//platforms:local_windows_msvc
 # Can be removed once https://github.com/hermeticbuild/rules_rust/pull/24 lands.
 common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
 
+# rules_rust defaults to stable, so Bazel cannot resolve the dated nightly
+# toolchain registered by MODULE.bazel unless its channel is selected.
+common --@rules_rust//rust/toolchain/channel=nightly
+
 common --@llvm-project//llvm:enable_abi_breaking_checks
 
 # Default opt flags undef NDEBUG, force it on so release builds have assertions.
