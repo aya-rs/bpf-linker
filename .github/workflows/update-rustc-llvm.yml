@@ -64,7 +64,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          GOBIN="$RUNNER_TEMP" go install github.com/bazelbuild/buildtools/{buildifier,buildozer}@v8.5.1
+          for tool in buildifier buildozer; do
+            curl -fsSL --retry 5 \
+              -o "$RUNNER_TEMP/$tool" \
+              "https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/$tool-linux-amd64"
+            chmod +x "$RUNNER_TEMP/$tool"
+          done
 
       - name: Check whether the nightly rustc LLVM needs an update
         id: update
