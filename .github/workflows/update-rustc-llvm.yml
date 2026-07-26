@@ -119,19 +119,17 @@ jobs:
 
           printf '%s\n' \
             "set llvm_version \"$llvm_version\"|//MODULE.bazel:%llvm_source.version" \
-            "set integrity \"$integrity\"|set strip_prefix \"llvm-project-$LLVM_COMMIT\"|set urls [\"$llvm_archive_url\"]|//MODULE.bazel:%llvm_source.from_archive" | \
+            "set integrity \"$integrity\"|//MODULE.bazel:%llvm_source.from_archive" \
+            "set strip_prefix \"llvm-project-$LLVM_COMMIT\"|//MODULE.bazel:%llvm_source.from_archive" \
+            "set urls [\"$llvm_archive_url\"]|//MODULE.bazel:%llvm_source.from_archive" | \
             "$RUNNER_TEMP/buildozer" -buildifier "$RUNNER_TEMP/buildifier" -f -
 
-      - name: Test the rustc LLVM update
+      - name: Update the Bazel module lockfile
         if: steps.update.outputs.required == 'true'
-        env:
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: |
           set -euo pipefail
 
-          env -u GH_TOKEN -u BUILDBUDDY_API_KEY bazel test //... \
-            --config=remote \
-            --remote_header=x-buildbuddy-api-key="${BUILDBUDDY_API_KEY:?BUILDBUDDY_API_KEY is not configured}"
+          bazel mod tidy
           git diff --check
 
       - name: Create a rustc LLVM update pull request
@@ -148,10 +146,10 @@ jobs:
 
             Use the rust-lang/llvm-project commit from the latest Rust nightly.
 
-            Validated with bazel test //... --config=remote.
+            Update the Bazel module lockfile with bazel mod tidy.
           title: Update rustc LLVM
           body: |
             Use the rust-lang/llvm-project commit from the latest Rust nightly.
 
-            Validated with bazel test //... --config=remote.
+            Update the Bazel module lockfile with bazel mod tidy.
           draft: true
