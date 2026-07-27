@@ -21,6 +21,7 @@ env:
   # This lets us roll out changes to the LLVM build in a pull request
   # without conflicting with artifacts produced on the main branch.
   LLVM_BUILD_REV: 3
+  LATEST_LLVM: 22
 
 permissions: {}
 
@@ -105,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ $LLVM_VERSION == 22 ]]; then
+          if [[ $LLVM_VERSION == "$LATEST_LLVM" ]]; then
             repository=rust-lang/llvm-project
             llvm_commit=$PINNED_LLVM_COMMIT
           else
@@ -231,13 +232,13 @@ jobs:
             llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
 
           # Candidate LLVM must not replace a version tag used by other runs.
-          if [[ ${{ matrix.llvm.version }} != 22 ]]; then
+          if [[ ${{ matrix.llvm.version }} != "$LATEST_LLVM" ]]; then
             oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
           fi
 
       - name: Publish validated LLVM version
         if: >-
-          matrix.llvm.version == 22 &&
+          matrix.llvm.version == fromJSON(env.LATEST_LLVM) &&
           github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
           needs.prepare.outputs.module == ''
         run: |
@@ -366,7 +367,6 @@ jobs:
       # Features that have to be excluded when running `cargo hack --feature-powerset`
       # and intending to link dynamically.
       LLVM_EXCLUDE_FEATURES_DYNAMIC: llvm-link-static,no-llvm-linking
-      LATEST_LLVM: 22
 
     steps:
       - uses: actions/checkout@v7
@@ -426,7 +426,7 @@ jobs:
           LLVM_VERSION: ${{ matrix.toolchain.llvm }}
         run: |
           set -euxo pipefail
-          if [[ $LLVM_VERSION == 22 ]]; then
+          if [[ $LLVM_VERSION == "$LATEST_LLVM" ]]; then
             ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
           else
             ref="${{ env.TAG_PREFIX }}:${LLVM_VERSION}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
@@ -448,11 +448,11 @@ jobs:
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
 
       - name: Check (default features)
-        if: matrix.toolchain.llvm == env.LATEST_LLVM
+        if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         run: cargo check --target ${{ matrix.platform.target }}
 
       - name: Build (default features)
-        if: matrix.toolchain.llvm == env.LATEST_LLVM
+        if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         run: cargo build --target ${{ matrix.platform.target }}
 
       - uses: taiki-e/install-action@cargo-hack
