@@ -9,6 +9,7 @@ on:
     types: [published]
 
   schedule:
+    # Run the full CI matrix and advance the tested nightly at 04:00 UTC.
     - cron: 00 4 * * *
 
 env:
@@ -24,7 +25,121 @@ env:
 permissions: {}
 
 jobs:
+  prepare:
+    name: prepare rustc LLVM
+    runs-on: ubuntu-latest
+    permissions:
+      # Read the checkout and rustc's LLVM submodule.
+      contents: read
+    outputs:
+      module: ${{ steps.llvm-update.outputs.module }}
+      llvm-commit: ${{ steps.llvm-update.outputs.llvm-commit || steps.llvm-pin.outputs.llvm-commit }}
+      rust-nightly: ${{ steps.llvm-update.outputs.rust-nightly || steps.llvm-pin.outputs.rust-nightly }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the pinned rustc LLVM
+        id: llvm-pin
+        run: |
+          set -euo pipefail
+
+          nightly_date=$(sed -nE 's/^# nightly-([0-9]{4}-[0-9]{2}-[0-9]{2})\.$/\1/p' MODULE.bazel)
+          llvm_commit=$(
+            sed -nE '/^llvm_source\.from_archive\(/,/^\)/s@^[[:space:]]*urls[[:space:]]*=[[:space:]]*\["https://github\.com/rust-lang/llvm-project/archive/([0-9a-f]{40})\.tar\.gz"\],[[:space:]]*$@\1@p' \
+              MODULE.bazel
+          )
+          [[ $nightly_date =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
+          echo "rust-nightly=nightly-$nightly_date" >> "$GITHUB_OUTPUT"
+          echo "llvm-commit=$llvm_commit" >> "$GITHUB_OUTPUT"
+
+      # Only the upstream default branch proposes a new LLVM revision.
+      - name: Update the pinned rustc LLVM
+        id: llvm-update
+        if: github.repository == 'aya-rs/bpf-linker' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED_LLVM_COMMIT: ${{ steps.llvm-pin.outputs.llvm-commit }}
+          PINNED_RUST_NIGHTLY: ${{ steps.llvm-pin.outputs.rust-nightly }}
+        run: |
+          set -euo pipefail
+
+          nightly=$(
+            curl -fsSL --retry 5 https://static.rust-lang.org/dist/channel-rust-nightly.toml |
+              yq --exit-status --input-format toml \
+                'select(.date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) |
+                 select(.pkg.rustc.git_commit_hash | test("^[0-9a-f]{40}$")) |
+                 "\(.date) \(.pkg.rustc.git_commit_hash)"'
+          )
+          read -r nightly_date rustc_commit <<< "$nightly"
+          [[ $nightly_date =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ $rustc_commit =~ ^[0-9a-f]{40}$ ]]
+
+          llvm_commit=$(gh api \
+            "repos/rust-lang/rust/contents/src/llvm-project?ref=$rustc_commit" \
+            --jq 'select(.submodule_git_url == "https://github.com/rust-lang/llvm-project.git") | .sha')
+          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
+
+          if [[ $PINNED_RUST_NIGHTLY == "nightly-$nightly_date" &&
+                $PINNED_LLVM_COMMIT == "$llvm_commit" ]]; then
+            exit 0
+          fi
+
+          if [[ $PINNED_LLVM_COMMIT != "$llvm_commit" ]]; then
+            llvm_archive_url="https://github.com/rust-lang/llvm-project/archive/$llvm_commit.tar.gz"
+            llvm_version_url="https://raw.githubusercontent.com/rust-lang/llvm-project/$llvm_commit/cmake/Modules/LLVMVersion.cmake"
+            llvm_version=$(
+              curl -fsSL --retry 5 "$llvm_version_url" |
+                sed -nE 's/^[[:space:]]*set\(LLVM_VERSION_(MAJOR|MINOR|PATCH)[[:space:]]+([0-9]+)\)[[:space:]]*$/\2/p' |
+                paste -sd . -
+            )
+            supported_llvm_version=$(
+              sed -nE 's/^llvm_source\.version\(llvm_version = "([0-9]+\.[0-9]+\.[0-9]+)"\)$/\1/p' MODULE.bazel
+            )
+            [[ $llvm_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ $supported_llvm_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            if [[ ${llvm_version%%.*} != "${supported_llvm_version%%.*}" ]]; then
+              echo "::notice::Rust nightly uses unsupported LLVM $llvm_version; keeping LLVM $supported_llvm_version."
+              exit 0
+            fi
+
+            archive="$RUNNER_TEMP/llvm-project.tar.gz"
+            curl -fsSL --retry 5 -o "$archive" "$llvm_archive_url"
+            LLVM_INTEGRITY="sha256-$(openssl dgst -sha256 -binary "$archive" | base64 -w0)"
+            export LLVM_INTEGRITY
+            export LLVM_VERSION="$llvm_version"
+          fi
+
+          export LLVM_COMMIT="$llvm_commit"
+          export NIGHTLY_DATE="$nightly_date"
+          perl -0pi -e '
+            s{^# nightly-\d{4}-\d{2}-\d{2}\.$}
+             {# nightly-$ENV{NIGHTLY_DATE}.}m == 1 or die "missing nightly pin\n";
+            if ($ENV{PINNED_LLVM_COMMIT} ne $ENV{LLVM_COMMIT}) {
+              s{^llvm_source\.version\(llvm_version = "[^"]+"\)$}
+               {llvm_source.version(llvm_version = "$ENV{LLVM_VERSION}")}m == 1
+                or die "missing LLVM version\n";
+              s{^    integrity = "[^"]+",$}
+               {    integrity = "$ENV{LLVM_INTEGRITY}",}m == 1
+                or die "missing LLVM integrity\n";
+              s{^    strip_prefix = "llvm-project-[0-9a-f]{40}",$}
+               {    strip_prefix = "llvm-project-$ENV{LLVM_COMMIT}",}m == 1
+                or die "missing LLVM strip prefix\n";
+              s{^    urls = \["https://github\.com/rust-lang/llvm-project/archive/[0-9a-f]{40}\.tar\.gz"\],$}
+               {    urls = ["https://github.com/rust-lang/llvm-project/archive/$ENV{LLVM_COMMIT}.tar.gz"],}m == 1
+                or die "missing LLVM archive\n";
+            }
+          ' MODULE.bazel
+          git diff --check
+          module=$(openssl base64 -A -in MODULE.bazel)
+          {
+            printf 'module=%s\n' "$module"
+            printf 'rust-nightly=nightly-%s\n' "$nightly_date"
+            printf 'llvm-commit=%s\n' "$llvm_commit"
+          } >> "$GITHUB_OUTPUT"
+
   llvm:
+    needs: prepare
     permissions:
       # Needed to upload LLVM binaries as OCI artifacts to GHCR.
       packages: write
@@ -66,11 +181,29 @@ jobs:
           - version: 22
             git-ref: rustc/22.1-2026-05-19
     steps:
-      - id: ls-remote
+      - name: Resolve the LLVM source
+        id: ls-remote
+        env:
+          LLVM_VERSION: ${{ matrix.llvm.version }}
+          LLVM_REF: ${{ matrix.llvm.git-ref }}
+          PINNED_LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
         run: |
-          set -euxo pipefail
-          value=$(git ls-remote https://github.com/aya-rs/llvm-project.git refs/heads/${{ matrix.llvm.git-ref }} | cut -f1)
-          echo "sha=$value" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          if [[ $LLVM_VERSION == 22 ]]; then
+            repository=rust-lang/llvm-project
+            llvm_commit=$PINNED_LLVM_COMMIT
+          else
+            repository=aya-rs/llvm-project
+            llvm_commit=$(
+              git ls-remote "https://github.com/$repository.git" \
+                "refs/heads/$LLVM_REF" | cut -f1
+            )
+          fi
+
+          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "sha=$llvm_commit" >> "$GITHUB_OUTPUT"
 
       - id: image-tag
         run: |
@@ -139,7 +272,7 @@ jobs:
         if: steps.artifact-restore.outcome != 'success'
         uses: actions/checkout@v7
         with:
-          repository: aya-rs/llvm-project
+          repository: ${{ steps.ls-remote.outputs.repository }}
           ref: ${{ steps.ls-remote.outputs.sha }}
           path: llvm-project
 
@@ -181,6 +314,20 @@ jobs:
           oras push "${{ steps.image-tag.outputs.sha }}" \
             --artifact-type application/vnd.aya.llvm.install \
             llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
+
+          # Candidate LLVM must not replace a version tag used by other runs.
+          if [[ ${{ matrix.llvm.version }} != 22 ]]; then
+            oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
+          fi
+
+      - name: Publish validated LLVM version
+        if: >-
+          matrix.llvm.version == 22 &&
+          github.repository == 'aya-rs/bpf-linker' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+          needs.prepare.outputs.module == ''
+        run: |
+          set -euxo pipefail
           oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
 
   lint-stable:
@@ -212,6 +359,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   bazel:
+    needs: prepare
     name: bazel (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -225,6 +373,13 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # Each job has its own checkout; test the exact proposed module.
+      - name: Apply the rustc LLVM candidate
+        if: needs.prepare.outputs.module != ''
+        env:
+          MODULE: ${{ needs.prepare.outputs.module }}
+        run: printf '%s' "$MODULE" | openssl base64 -d -A > MODULE.bazel
 
       - name: Test
         run: |
@@ -269,9 +424,6 @@ jobs:
           - rust: beta
             llvm: 22
             exclude-features: llvm-20,llvm-21
-          - rust: nightly
-            llvm: 22
-            exclude-features: llvm-20,llvm-21
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -287,7 +439,9 @@ jobs:
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-musl
     name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain.rust }} llvm=${{ matrix.toolchain.llvm }}
-    needs: llvm
+    needs:
+      - prepare
+      - llvm
 
     env:
       RUST_BACKTRACE: full
@@ -353,9 +507,17 @@ jobs:
           oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
 
       - name: Restore LLVM from ghcr.io
+        env:
+          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
+          LLVM_VERSION: ${{ matrix.toolchain.llvm }}
+          LLVM_CANDIDATE: ${{ needs.prepare.outputs.module }}
         run: |
           set -euxo pipefail
-          ref="${{ env.TAG_PREFIX }}:${{ matrix.toolchain.llvm }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
+          if [[ $LLVM_VERSION == 22 && -n "$LLVM_CANDIDATE" ]]; then
+            ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
+          else
+            ref="${{ env.TAG_PREFIX }}:${LLVM_VERSION}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
+          fi
           digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
           # Make sure LLVM is available from the current directory, so
           # bubblewrap is able to access it. See the `ci/*-run` scripts.
@@ -440,14 +602,14 @@ jobs:
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v7
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
         with:
           repository: aya-rs/aya
           path: aya
           submodules: recursive
 
       - name: Install (dynamic)
-        if: endsWith(matrix.platform.target, 'gnu') && matrix.toolchain.rust == 'nightly'
+        if: endsWith(matrix.platform.target, 'gnu') && matrix.toolchain.rust == 'stable'
         run: |
           cargo install --path . --no-default-features --features \
             ${{ env.LLVM_FEATURES_DYNAMIC }}
@@ -456,7 +618,7 @@ jobs:
       # targets, installing a static bpf-linker for Aya integration tests is
       # just easier.
       - name: Install (static)
-        if: endsWith(matrix.platform.target, 'musl') && matrix.toolchain.rust == 'nightly'
+        if: endsWith(matrix.platform.target, 'musl') && matrix.toolchain.rust == 'stable'
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
@@ -464,13 +626,23 @@ jobs:
             --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Install autopoint for aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
         run: sudo apt -y install autopoint
 
       - name: Run aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'nightly'
+        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
         working-directory: aya
-        run: cargo xtask integration-test local
+        env:
+          RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
+        run: |
+          set -euo pipefail
+
+          rustup toolchain install "$RUST_NIGHTLY" \
+            --component rust-src --profile minimal --no-self-update
+          # Aya invokes `nightly` internally; keep stable as the default.
+          ln -s "$(rustup run "$RUST_NIGHTLY" rustc --print sysroot)" \
+            "$(rustup show home)/toolchains/nightly-$(rustup run "$RUST_NIGHTLY" rustc --print host-tuple)"
+          cargo xtask integration-test local
 
       - name: Install static libraries (macOS)
         if: runner.os == 'macOS'
@@ -527,11 +699,19 @@ jobs:
 
   release:
     name: release
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
+      # Upload published GitHub release assets.
       contents: write
     steps:
       - uses: actions/checkout@v7
+
+      - name: Apply the rustc LLVM candidate
+        if: needs.prepare.outputs.module != ''
+        env:
+          MODULE: ${{ needs.prepare.outputs.module }}
+        run: printf '%s' "$MODULE" | openssl base64 -d -A > MODULE.bazel
 
       - name: Build release
         run: |
@@ -565,6 +745,7 @@ jobs:
   check:
     if: always()
     needs:
+      - prepare
       - lint-stable
       - lint-nightly
       - bazel
@@ -575,3 +756,55 @@ jobs:
       - uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
+
+      # Publish only after alls-green verifies the complete CI matrix.
+      - name: Promote the validated rustc LLVM
+        if: >-
+          github.repository == 'aya-rs/bpf-linker' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+          needs.prepare.outputs.module != ''
+        env:
+          BASE_COMMIT: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # Scope the protected-branch bypass to the validated promotion.
+          GH_TOKEN: ${{ secrets.CRABBY_GITHUB_TOKEN }}
+          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
+          MODULE: ${{ needs.prepare.outputs.module }}
+          RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
+        run: |
+          set -euo pipefail
+
+          : "${GH_TOKEN:?Expose CRABBY_GITHUB_TOKEN to this repository before enabling LLVM promotion.}"
+
+          # Compare-and-swap the tested commit, not just the LLVM: a merge
+          # starts a new main-branch run that must validate the candidate.
+          jq -n \
+            --arg module "$MODULE" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg branch "$DEFAULT_BRANCH" \
+            --arg expected "$BASE_COMMIT" \
+            --arg headline "Update rustc LLVM to ${RUST_NIGHTLY#nightly-}" \
+            --arg llvm "$LLVM_COMMIT" \
+            '{
+              query: "mutation AdvanceRustcLlvm($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+              variables: {
+                input: {
+                  branch: {
+                    repositoryNameWithOwner: $repository,
+                    branchName: $branch
+                  },
+                  expectedHeadOid: $expected,
+                  message: {
+                    headline: $headline,
+                    body: "Match the validated Aya integration nightly to rustc LLVM commit\n\($llvm)."
+                  },
+                  fileChanges: {
+                    additions: [
+                      {path: "MODULE.bazel", contents: $module}
+                    ]
+                  }
+                }
+              }
+            }' |
+            gh api graphql --input - \
+              --jq '.data.createCommitOnBranch.commit | "\(.oid) \(.url)"'
