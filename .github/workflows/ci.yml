@@ -40,18 +40,7 @@ jobs:
 
       - name: Resolve the pinned rustc LLVM
         id: llvm-pin
-        run: |
-          set -euo pipefail
-
-          nightly_date=$(sed -nE 's/^# nightly-([0-9]{4}-[0-9]{2}-[0-9]{2})\.$/\1/p' MODULE.bazel)
-          llvm_commit=$(
-            sed -nE '/^llvm_source\.from_archive\(/,/^\)/s@^[[:space:]]*urls[[:space:]]*=[[:space:]]*\["https://github\.com/rust-lang/llvm-project/archive/([0-9a-f]{40})\.tar\.gz"\],[[:space:]]*$@\1@p' \
-              MODULE.bazel
-          )
-          [[ $nightly_date =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
-          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
-          echo "rust-nightly=nightly-$nightly_date" >> "$GITHUB_OUTPUT"
-          echo "llvm-commit=$llvm_commit" >> "$GITHUB_OUTPUT"
+        run: python3 scripts/update-rustc-llvm.py
 
       # Keep pull requests on the last validated rustc LLVM revision.
       - name: Update the pinned rustc LLVM
@@ -59,84 +48,10 @@ jobs:
         if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         env:
           GH_TOKEN: ${{ github.token }}
-          PINNED_LLVM_COMMIT: ${{ steps.llvm-pin.outputs.llvm-commit }}
-          PINNED_RUST_NIGHTLY: ${{ steps.llvm-pin.outputs.rust-nightly }}
         run: |
           set -euo pipefail
-
-          nightly=$(
-            curl -fsSL --retry 5 https://static.rust-lang.org/dist/channel-rust-nightly.toml |
-              yq --exit-status --input-format toml \
-                'select(.date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) |
-                 select(.pkg.rustc.git_commit_hash | test("^[0-9a-f]{40}$")) |
-                 "\(.date) \(.pkg.rustc.git_commit_hash)"'
-          )
-          read -r nightly_date rustc_commit <<< "$nightly"
-          [[ $nightly_date =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
-          [[ $rustc_commit =~ ^[0-9a-f]{40}$ ]]
-
-          llvm_commit=$(gh api \
-            "repos/rust-lang/rust/contents/src/llvm-project?ref=$rustc_commit" \
-            --jq 'select(.submodule_git_url == "https://github.com/rust-lang/llvm-project.git") | .sha')
-          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
-
-          if [[ $PINNED_RUST_NIGHTLY == "nightly-$nightly_date" &&
-                $PINNED_LLVM_COMMIT == "$llvm_commit" ]]; then
-            exit 0
-          fi
-
-          if [[ $PINNED_LLVM_COMMIT != "$llvm_commit" ]]; then
-            llvm_archive_url="https://github.com/rust-lang/llvm-project/archive/$llvm_commit.tar.gz"
-            llvm_version_url="https://raw.githubusercontent.com/rust-lang/llvm-project/$llvm_commit/cmake/Modules/LLVMVersion.cmake"
-            llvm_version=$(
-              curl -fsSL --retry 5 "$llvm_version_url" |
-                sed -nE 's/^[[:space:]]*set\(LLVM_VERSION_(MAJOR|MINOR|PATCH)[[:space:]]+([0-9]+)\)[[:space:]]*$/\2/p' |
-                paste -sd . -
-            )
-            supported_llvm_version=$(
-              sed -nE 's/^llvm_source\.version\(llvm_version = "([0-9]+\.[0-9]+\.[0-9]+)"\)$/\1/p' MODULE.bazel
-            )
-            [[ $llvm_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-            [[ $supported_llvm_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-            if [[ ${llvm_version%%.*} != "${supported_llvm_version%%.*}" ]]; then
-              echo "::notice::Rust nightly uses unsupported LLVM $llvm_version; keeping LLVM $supported_llvm_version."
-              exit 0
-            fi
-
-            archive="$RUNNER_TEMP/llvm-project.tar.gz"
-            curl -fsSL --retry 5 -o "$archive" "$llvm_archive_url"
-            LLVM_INTEGRITY="sha256-$(openssl dgst -sha256 -binary "$archive" | base64 -w0)"
-            export LLVM_INTEGRITY
-            export LLVM_VERSION="$llvm_version"
-          fi
-
-          export LLVM_COMMIT="$llvm_commit"
-          export NIGHTLY_DATE="$nightly_date"
-          perl -0pi -e '
-            s{^# nightly-\d{4}-\d{2}-\d{2}\.$}
-             {# nightly-$ENV{NIGHTLY_DATE}.}m == 1 or die "missing nightly pin\n";
-            if ($ENV{PINNED_LLVM_COMMIT} ne $ENV{LLVM_COMMIT}) {
-              s{^llvm_source\.version\(llvm_version = "[^"]+"\)$}
-               {llvm_source.version(llvm_version = "$ENV{LLVM_VERSION}")}m == 1
-                or die "missing LLVM version\n";
-              s{^    integrity = "[^"]+",$}
-               {    integrity = "$ENV{LLVM_INTEGRITY}",}m == 1
-                or die "missing LLVM integrity\n";
-              s{^    strip_prefix = "llvm-project-[0-9a-f]{40}",$}
-               {    strip_prefix = "llvm-project-$ENV{LLVM_COMMIT}",}m == 1
-                or die "missing LLVM strip prefix\n";
-              s{^    urls = \["https://github\.com/rust-lang/llvm-project/archive/[0-9a-f]{40}\.tar\.gz"\],$}
-               {    urls = ["https://github.com/rust-lang/llvm-project/archive/$ENV{LLVM_COMMIT}.tar.gz"],}m == 1
-                or die "missing LLVM archive\n";
-            }
-          ' MODULE.bazel
+          python3 scripts/update-rustc-llvm.py --update
           git diff --check
-          module=$(openssl base64 -A -in MODULE.bazel)
-          {
-            printf 'module=%s\n' "$module"
-            printf 'rust-nightly=nightly-%s\n' "$nightly_date"
-            printf 'llvm-commit=%s\n' "$llvm_commit"
-          } >> "$GITHUB_OUTPUT"
 
   llvm:
     needs: prepare
