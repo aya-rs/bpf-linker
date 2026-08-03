@@ -1,0 +1,19 @@
+name: Update Rust nightly
+
+on:
+  schedule:
+    - cron: 00 3 * * *
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  update:
+    if: >-
+      github.repository == 'aya-rs/bpf-linker' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    uses: aya-rs/aya/.github/workflows/nightly-update.yml@db80a267c112d4a9b7f73f54df770de4c43fe9aa
+    permissions:
+      contents: read
+    with:
+      updater-script: scripts/update-rustc-llvm.py
