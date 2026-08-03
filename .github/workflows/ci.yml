@@ -299,7 +299,8 @@ jobs:
       - name: Test
         run: |
           set -euo pipefail
-          bazel test //... \
+          # The default JVM heap is under 2 GB on 7 GB macOS runners.
+          bazel --host_jvm_args=-Xmx4g test //... \
             --config=remote \
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
