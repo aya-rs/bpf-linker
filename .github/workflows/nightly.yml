@@ -1,0 +1,53 @@
+name: Update Rust nightly
+
+on:
+  schedule:
+    - cron: 00 3 * * *
+  workflow_dispatch:
+
+jobs:
+  update:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    environment: nightly-promotion
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Checkout the pinned Aya nightly updater
+        uses: actions/checkout@v7
+        with:
+          repository: aya-rs/aya
+          ref: 144b7487de0f38c7b02fff5043d8ae7278d453fb
+          path: aya-nightly-updater
+
+      - name: Update the Rust nightly
+        run: python3 aya-nightly-updater/scripts/update-rust-nightly.py update
+
+      - name: Update the rustc LLVM
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/update-rustc-llvm.py update
+
+      - name: Create or update the Rust nightly pull request
+        id: pull-request
+        if: steps.update.outputs.rust-nightly != ''
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.CRABBY_GITHUB_TOKEN || github.token }}
+          branch: create-pull-request/rust-nightly
+          add-paths: MODULE.bazel
+          commit-message: 'build: update Rust to ${{ steps.update.outputs.rust-nightly }}'
+          title: 'build: update Rust to ${{ steps.update.outputs.rust-nightly }}'
+          body: |-
+            Match the Aya integration nightly to rustc LLVM commit
+            ${{ steps.update.outputs.llvm-commit }}.
+
+      - name: Enable auto-merge
+        if: >-
+          !github.event.repository.fork &&
+          steps.pull-request.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.CRABBY_GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ steps.pull-request.outputs.pull-request-number }}
+        run: gh pr merge "$PULL_REQUEST" --auto --squash
