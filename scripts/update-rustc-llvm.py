@@ -4,16 +4,15 @@
 
 from __future__ import annotations
 
-import argparse
 import base64
 import datetime
 import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
-import tomllib
 from collections.abc import Callable
 from http.client import HTTPResponse, IncompleteRead
 from pathlib import Path
@@ -95,13 +94,27 @@ def download(url: str) -> bytes:
 
 
 def resolve_latest() -> tuple[str, str]:
-    manifest = tomllib.loads(
-        download("https://static.rust-lang.org/dist/channel-rust-nightly.toml").decode()
+    result = subprocess.run(
+        [sys.executable, os.environ["RUST_NIGHTLY_UPDATER"], "latest"],
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    date = datetime.date.fromisoformat(str(manifest["date"])).isoformat()
-    rust_commit = manifest["pkg"]["rustc"]["git_commit_hash"]
+    latest = json.loads(result.stdout)
+    if not isinstance(latest, dict):
+        raise ValueError("nightly updater returned an invalid result")
+    nightly = latest.get("nightly")
+    if not isinstance(nightly, str):
+        raise ValueError("nightly updater returned an invalid nightly")
+    match = re.fullmatch(r"nightly-(\d{4}-\d{2}-\d{2})", nightly)
+    if (
+        match is None
+        or datetime.date.fromisoformat(match.group(1)).isoformat() != match.group(1)
+    ):
+        raise ValueError("nightly updater returned an invalid nightly")
+    rust_commit = latest.get("rust_commit")
     if not isinstance(rust_commit, str) or not re.fullmatch(SHA, rust_commit):
-        raise ValueError("nightly manifest contains an invalid rustc commit")
+        raise ValueError("nightly updater returned an invalid rustc commit")
     source = json.loads(
         download(
             "https://api.github.com/repos/rust-lang/rust/contents/"
@@ -116,7 +129,7 @@ def resolve_latest() -> tuple[str, str]:
     commit = source["sha"]
     if not isinstance(commit, str) or not re.fullmatch(SHA, commit):
         raise ValueError("rustc references an invalid LLVM commit")
-    return f"nightly-{date}", commit
+    return nightly, commit
 
 
 def resolve_version(commit: str) -> str:
@@ -202,14 +215,12 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
     return updated
 
 
-def write_outputs(pin: Pin, module: str | None = None) -> None:
+def write_outputs(pin: Pin) -> None:
     outputs = {
         "rust-nightly": pin.nightly,
         "llvm-commit": pin.commit,
         "llvm-version": pin.version,
     }
-    if module is not None:
-        outputs["module"] = base64.b64encode(module.encode()).decode()
     rendered = "".join(f"{key}={value}\n" for key, value in outputs.items())
     print(rendered, end="")
     if output := os.getenv("GITHUB_OUTPUT"):
@@ -217,28 +228,29 @@ def write_outputs(pin: Pin, module: str | None = None) -> None:
             destination.write(rendered)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--update",
-        action="store_true",
-        help="update MODULE.bazel to the latest supported Rust nightly",
-    )
-    args = parser.parse_args()
-    try:
-        text = MODULE.read_text(encoding="utf-8")
-        pin = read_pin(text)
-        if not args.update:
-            write_outputs(pin)
-        elif updated := update_module(text, pin, *resolve_latest()):
-            candidate = read_pin(updated)
-            MODULE.write_text(updated, encoding="utf-8")
-            write_outputs(candidate, updated)
-        return 0
-    except (IncompleteRead, KeyError, OSError, ValueError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+def main() -> None:
+    arguments = sys.argv[1:]
+    if arguments not in ([], ["update"]):
+        raise SystemExit(f"usage: {sys.argv[0]} [update]")
+
+    text = MODULE.read_text(encoding="utf-8")
+    pin = read_pin(text)
+    if not arguments:
+        write_outputs(pin)
+        return
+
+    nightly, commit = resolve_latest()
+    if nightly < pin.nightly:
+        raise ValueError(
+            "nightly manifest regressed from "
+            f"{pin.nightly.removeprefix('nightly-')} to "
+            f"{nightly.removeprefix('nightly-')}"
+        )
+    if updated := update_module(text, pin, nightly, commit):
+        candidate = read_pin(updated)
+        MODULE.write_text(updated, encoding="utf-8")
+        write_outputs(candidate)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
