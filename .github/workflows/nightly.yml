@@ -1,0 +1,54 @@
+name: Update Rust nightly
+
+on:
+  schedule:
+    - cron: 00 3 * * *
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    permissions:
+      contents: read
+    uses: aya-rs/aya/.github/workflows/nightly-update.yml@f2ce1614007defce8b5d85281067e910f4ff6ab1
+
+  update:
+    needs: nightly
+    runs-on: ubuntu-latest
+    environment: nightly-promotion
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Update the rustc LLVM
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/update-rustc-llvm.py update
+          '${{ needs.nightly.outputs.rust-nightly }}'
+
+      - name: Create or update the Rust nightly pull request
+        id: pull-request
+        if: steps.update.outputs.rust-nightly != ''
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # GITHUB_TOKEN-created PRs require manual approval before CI runs.
+          # Crabby starts CI automatically; forks use their own GITHUB_TOKEN.
+          token: ${{ secrets.CRABBY_GITHUB_TOKEN || github.token }}
+          branch: create-pull-request/rust-nightly
+          add-paths: MODULE.bazel
+          commit-message: 'Update rustc LLVM to ${{ steps.update.outputs.rust-nightly }}'
+          title: 'Update rustc LLVM to ${{ steps.update.outputs.rust-nightly }}'
+          body: |-
+            Match the Aya integration nightly to rustc LLVM commit
+            ${{ steps.update.outputs.llvm-commit }}.
+
+      - name: Enable auto-merge
+        # Forks can test updates but must merge their pull requests manually.
+        if: >-
+          !github.event.repository.fork &&
+          steps.pull-request.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.CRABBY_GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ steps.pull-request.outputs.pull-request-number }}
+        run: gh pr merge "$PULL_REQUEST" --auto --squash
