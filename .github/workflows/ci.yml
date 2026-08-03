@@ -23,36 +23,24 @@ env:
   LLVM_BUILD_REV: 3
   LATEST_LLVM: 22
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Promoting a nightly pushes to main and starts another CI run.
+  # Do not let that new run cancel the promotion that started it.
+  cancel-in-progress: >-
+    ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+
 permissions: {}
 
 jobs:
   prepare:
     name: prepare rustc LLVM
-    runs-on: ubuntu-latest
+    uses: aya-rs/aya/.github/workflows/nightly-prepare.yml@8e70cde875d8c77a44c1c6736e5aab8937eb3ae3
     permissions:
       # Read the checkout and rustc's LLVM submodule.
       contents: read
-    outputs:
-      module: ${{ steps.llvm-update.outputs.module }}
-      llvm-commit: ${{ steps.llvm-update.outputs.llvm-commit || steps.llvm-pin.outputs.llvm-commit }}
-      rust-nightly: ${{ steps.llvm-update.outputs.rust-nightly || steps.llvm-pin.outputs.rust-nightly }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Resolve the pinned rustc LLVM
-        id: llvm-pin
-        run: python3 scripts/update-rustc-llvm.py
-
-      # Keep pull requests on the last validated rustc LLVM revision.
-      - name: Update the pinned rustc LLVM
-        id: llvm-update
-        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 scripts/update-rustc-llvm.py --update
-          git diff --check
+    with:
+      updater-script: scripts/update-rustc-llvm.py
 
   llvm:
     needs: prepare
@@ -102,7 +90,8 @@ jobs:
         env:
           LLVM_VERSION: ${{ matrix.llvm.version }}
           LLVM_REF: ${{ matrix.llvm.git-ref }}
-          PINNED_LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
+          # The shared provider treats LLVM state as caller-owned metadata.
+          PINNED_LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.metadata).commit }}
         run: |
           set -euo pipefail
 
@@ -423,7 +412,7 @@ jobs:
 
       - name: Restore LLVM from ghcr.io
         env:
-          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
+          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.metadata).commit }}
           LLVM_VERSION: ${{ matrix.toolchain.llvm }}
         run: |
           set -euxo pipefail
@@ -676,54 +665,22 @@ jobs:
     steps:
       - name: Verify all required jobs succeeded
         env:
-          JOBS: ${{ toJSON(needs) }}
-        run: jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<< "$JOBS"
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: jq --exit-status 'length > 0 and all(.[]; . == "success")' <<< "$RESULTS"
 
       # Publish only after the complete CI matrix succeeds.
       - name: Promote the validated rustc LLVM
         if: >-
           github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
           needs.prepare.outputs.module != ''
+        uses: aya-rs/aya/.github/actions/promote-nightly@8e70cde875d8c77a44c1c6736e5aab8937eb3ae3
         env:
-          BASE_COMMIT: ${{ github.sha }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           # Prefer Crabby for protected branches; forks use their own token.
           GH_TOKEN: ${{ secrets.CRABBY_GITHUB_TOKEN || github.token }}
-          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
-          MODULE: ${{ needs.prepare.outputs.module }}
-          RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
-        run: |
-          set -euo pipefail
-
-          # Compare-and-swap the tested commit, not just the LLVM: a merge
-          # starts a new default-branch run that must validate the candidate.
-          jq -n \
-            --arg module "$MODULE" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg branch "$DEFAULT_BRANCH" \
-            --arg expected "$BASE_COMMIT" \
-            --arg headline "Update rustc LLVM to ${RUST_NIGHTLY#nightly-}" \
-            --arg llvm "$LLVM_COMMIT" \
-            '{
-              query: "mutation AdvanceRustcLlvm($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
-              variables: {
-                input: {
-                  branch: {
-                    repositoryNameWithOwner: $repository,
-                    branchName: $branch
-                  },
-                  expectedHeadOid: $expected,
-                  message: {
-                    headline: $headline,
-                    body: "Match the validated Aya integration nightly to rustc LLVM commit\n\($llvm)."
-                  },
-                  fileChanges: {
-                    additions: [
-                      {path: "MODULE.bazel", contents: $module}
-                    ]
-                  }
-                }
-              }
-            }' |
-            gh api graphql --input - \
-              --jq '.data.createCommitOnBranch.commit | "\(.oid) \(.url)"'
+        with:
+          module: ${{ needs.prepare.outputs.module }}
+          rust-nightly: ${{ needs.prepare.outputs.rust-nightly }}
+          headline-prefix: Update rustc LLVM to
+          body: |-
+            Match the validated Aya integration nightly to rustc LLVM commit
+            ${{ fromJSON(needs.prepare.outputs.metadata).commit }}.
