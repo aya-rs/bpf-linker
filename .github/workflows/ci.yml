@@ -9,7 +9,7 @@ on:
     types: [published]
 
   schedule:
-    # Run the full CI matrix and advance the tested nightly at 04:00 UTC.
+    # Validate the committed nightly and external dependencies every day.
     - cron: 00 4 * * *
 
 env:
@@ -27,32 +27,25 @@ permissions: {}
 
 jobs:
   prepare:
-    name: prepare rustc LLVM
+    name: resolve rustc LLVM
     runs-on: ubuntu-latest
     permissions:
-      # Read the checkout and rustc's LLVM submodule.
       contents: read
     outputs:
-      module: ${{ steps.llvm-update.outputs.module }}
-      llvm-commit: ${{ steps.llvm-update.outputs.llvm-commit || steps.llvm-pin.outputs.llvm-commit }}
-      rust-nightly: ${{ steps.llvm-update.outputs.rust-nightly || steps.llvm-pin.outputs.rust-nightly }}
+      rust-nightly: ${{ steps.pin.outputs.rust-nightly }}
+      llvm-commit: ${{ steps.pin.outputs.llvm-commit }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Resolve the pinned rustc LLVM
-        id: llvm-pin
-        run: python3 scripts/update-rustc-llvm.py
-
-      # Keep pull requests on the last validated rustc LLVM revision.
-      - name: Update the pinned rustc LLVM
-        id: llvm-update
-        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Resolve the committed Rust nightly and LLVM
+        id: pin
         run: |
           set -euo pipefail
-          python3 scripts/update-rustc-llvm.py --update
-          git diff --check
+
+          pin=$(python3 scripts/rustc-llvm.py current < MODULE.bazel)
+          read -r nightly commit <<< "$pin"
+          printf 'rust-nightly=%s\nllvm-commit=%s\n' \
+            "$nightly" "$commit" >> "$GITHUB_OUTPUT"
 
   llvm:
     needs: prepare
@@ -239,8 +232,7 @@ jobs:
       - name: Publish validated LLVM version
         if: >-
           matrix.llvm.version == fromJSON(env.LATEST_LLVM) &&
-          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-          needs.prepare.outputs.module == ''
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         run: |
           set -euxo pipefail
           oras tag "${{ steps.image-tag.outputs.sha }}" "${{ steps.image-tag.outputs.version }}"
@@ -288,13 +280,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
-
-      # Each job has its own checkout; test the exact proposed module.
-      - name: Apply the rustc LLVM candidate
-        if: needs.prepare.outputs.module != ''
-        env:
-          MODULE: ${{ needs.prepare.outputs.module }}
-        run: printf '%s' "$MODULE" | openssl base64 -d -A > MODULE.bazel
 
       - name: Test
         run: |
@@ -621,12 +606,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Apply the rustc LLVM candidate
-        if: needs.prepare.outputs.module != ''
-        env:
-          MODULE: ${{ needs.prepare.outputs.module }}
-        run: printf '%s' "$MODULE" | openssl base64 -d -A > MODULE.bazel
-
       - name: Build release
         run: |
           set -euo pipefail
@@ -666,64 +645,8 @@ jobs:
       - build
       - release
     runs-on: ubuntu-latest
-    # Keep Crabby's token scoped to a default-branch promotion candidate.
-    environment: >-
-      ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-          needs.prepare.outputs.module != '' && 'nightly-promotion' || 'ci' }}
-    permissions:
-      # Let forks update an unprotected default branch with their own token.
-      contents: write
     steps:
       - name: Verify all required jobs succeeded
         env:
-          JOBS: ${{ toJSON(needs) }}
-        run: jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<< "$JOBS"
-
-      # Publish only after the complete CI matrix succeeds.
-      - name: Promote the validated rustc LLVM
-        if: >-
-          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-          needs.prepare.outputs.module != ''
-        env:
-          BASE_COMMIT: ${{ github.sha }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          # Prefer Crabby for protected branches; forks use their own token.
-          GH_TOKEN: ${{ secrets.CRABBY_GITHUB_TOKEN || github.token }}
-          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
-          MODULE: ${{ needs.prepare.outputs.module }}
-          RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
-        run: |
-          set -euo pipefail
-
-          # Compare-and-swap the tested commit, not just the LLVM: a merge
-          # starts a new default-branch run that must validate the candidate.
-          jq -n \
-            --arg module "$MODULE" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg branch "$DEFAULT_BRANCH" \
-            --arg expected "$BASE_COMMIT" \
-            --arg headline "Update rustc LLVM to ${RUST_NIGHTLY#nightly-}" \
-            --arg llvm "$LLVM_COMMIT" \
-            '{
-              query: "mutation AdvanceRustcLlvm($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
-              variables: {
-                input: {
-                  branch: {
-                    repositoryNameWithOwner: $repository,
-                    branchName: $branch
-                  },
-                  expectedHeadOid: $expected,
-                  message: {
-                    headline: $headline,
-                    body: "Match the validated Aya integration nightly to rustc LLVM commit\n\($llvm)."
-                  },
-                  fileChanges: {
-                    additions: [
-                      {path: "MODULE.bazel", contents: $module}
-                    ]
-                  }
-                }
-              }
-            }' |
-            gh api graphql --input - \
-              --jq '.data.createCommitOnBranch.commit | "\(.oid) \(.url)"'
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: jq --exit-status 'length > 0 and all(.[]; . == "success")' <<< "$RESULTS"

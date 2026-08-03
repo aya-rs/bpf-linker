@@ -8,6 +8,7 @@ import argparse
 import base64
 import datetime
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -16,13 +17,11 @@ import time
 import tomllib
 from collections.abc import Callable
 from http.client import HTTPResponse, IncompleteRead
-from pathlib import Path
 from typing import NamedTuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-MODULE = Path(__file__).resolve().parent.parent / "MODULE.bazel"
 SHA = r"[0-9a-f]{40}"
 
 
@@ -63,7 +62,7 @@ def read_pin(text: str) -> Pin:
     return Pin(f"nightly-{date}", commit, version)
 
 
-def open_url(url: str):
+def open_url(url: str) -> HTTPResponse:
     headers = {"User-Agent": "aya-rs/bpf-linker rustc LLVM updater"}
     if url.startswith("https://api.github.com/") and (token := os.getenv("GH_TOKEN")):
         headers |= {
@@ -74,7 +73,7 @@ def open_url(url: str):
 
 
 def fetch(url: str, consume: Callable[[HTTPResponse], bytes]) -> bytes:
-    for attempt in range(6):
+    for attempt in itertools.count():
         try:
             with open_url(url) as response:
                 return consume(response)
@@ -87,18 +86,21 @@ def fetch(url: str, consume: Callable[[HTTPResponse], bytes]) -> bytes:
             if attempt == 5:
                 raise
         time.sleep(2**attempt)
-    raise AssertionError("unreachable")
 
 
 def download(url: str) -> bytes:
     return fetch(url, lambda response: response.read())
 
 
-def resolve_latest() -> tuple[str, str]:
+def resolve_commit(nightly: str) -> str:
+    date = nightly.removeprefix("nightly-")
     manifest = tomllib.loads(
-        download("https://static.rust-lang.org/dist/channel-rust-nightly.toml").decode()
+        download(
+            f"https://static.rust-lang.org/dist/{date}/channel-rust-nightly.toml"
+        ).decode()
     )
-    date = datetime.date.fromisoformat(str(manifest["date"])).isoformat()
+    if manifest.get("date") != date:
+        raise ValueError("nightly manifest does not match the pinned date")
     rust_commit = manifest["pkg"]["rustc"]["git_commit_hash"]
     if not isinstance(rust_commit, str) or not re.fullmatch(SHA, rust_commit):
         raise ValueError("nightly manifest contains an invalid rustc commit")
@@ -116,7 +118,7 @@ def resolve_latest() -> tuple[str, str]:
     commit = source["sha"]
     if not isinstance(commit, str) or not re.fullmatch(SHA, commit):
         raise ValueError("rustc references an invalid LLVM commit")
-    return f"nightly-{date}", commit
+    return commit
 
 
 def resolve_version(commit: str) -> str:
@@ -160,6 +162,7 @@ def replace_one(text: str, pattern: str, value: str, name: str) -> str:
 def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | None:
     if (nightly, commit) == (current.nightly, current.commit):
         return None
+
     updated = replace_one(
         text, r"^# nightly-\d{4}-\d{2}-\d{2}\.$", f"# {nightly}.", "nightly pin"
     )
@@ -167,13 +170,12 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
         return updated
 
     version = resolve_version(commit)
-    if version.partition(".")[0] != current.version.partition(".")[0]:
-        print(
-            f"::notice::Rust nightly uses unsupported LLVM {version}; "
-            f"keeping LLVM {current.version}.",
-            file=sys.stderr,
+    major = current.version.partition(".")[0]
+    if version.partition(".")[0] != major:
+        raise ValueError(
+            f"Rust nightly {nightly} uses unsupported LLVM {version}; "
+            f"expected LLVM major {major}"
         )
-        return None
     replacements = (
         (
             r'^llvm_source\.version\(llvm_version = "[^"]+"\)$',
@@ -202,43 +204,32 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
     return updated
 
 
-def write_outputs(pin: Pin, module: str | None = None) -> None:
-    outputs = {
-        "rust-nightly": pin.nightly,
-        "llvm-commit": pin.commit,
-        "llvm-version": pin.version,
-    }
-    if module is not None:
-        outputs["module"] = base64.b64encode(module.encode()).decode()
-    rendered = "".join(f"{key}={value}\n" for key, value in outputs.items())
-    print(rendered, end="")
-    if output := os.getenv("GITHUB_OUTPUT"):
-        with open(output, "a", encoding="utf-8") as destination:
-            destination.write(rendered)
-
-
-def main() -> int:
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--update",
-        action="store_true",
-        help="update MODULE.bazel to the latest supported Rust nightly",
-    )
-    args = parser.parse_args()
-    try:
-        text = MODULE.read_text(encoding="utf-8")
-        pin = read_pin(text)
-        if not args.update:
-            write_outputs(pin)
-        elif updated := update_module(text, pin, *resolve_latest()):
-            candidate = read_pin(updated)
-            MODULE.write_text(updated, encoding="utf-8")
-            write_outputs(candidate, updated)
-        return 0
-    except (IncompleteRead, KeyError, OSError, ValueError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("current")
+    update = commands.add_parser("update")
+    update.add_argument("nightly")
+    arguments = parser.parse_args()
+
+    text = sys.stdin.read()
+    pin = read_pin(text)
+    if arguments.command == "current":
+        print(pin.nightly, pin.commit)
+        return
+
+    nightly = arguments.nightly
+    match = re.fullmatch(r"nightly-(\d{4}-\d{2}-\d{2})", nightly)
+    if match is None:
+        raise ValueError("expected a dated Rust nightly")
+    datetime.date.fromisoformat(match.group(1))
+    if nightly < pin.nightly:
+        raise ValueError(f"Rust nightly regressed from {pin.nightly} to {nightly}")
+
+    if updated := update_module(text, pin, nightly, resolve_commit(nightly)):
+        read_pin(updated)
+        sys.stdout.write(updated)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
