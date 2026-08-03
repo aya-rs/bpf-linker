@@ -63,8 +63,7 @@ common:remote --remote_cache_compression
 common:remote --remote_download_toplevel
 
 # Keep remote backends fed
-common:remote --noexperimental_throttle_remote_action_building
-common:remote --jobs=800
+common:remote --jobs=400
 
 # Tell Bazel how to build for our remote platform. Note that `--platforms`
 # defaults to the host platform, so the 2nd line is needed to make sure that
