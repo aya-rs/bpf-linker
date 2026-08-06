@@ -38,6 +38,10 @@ llvm-sys-22 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
   "no-llvm-linking",
 ], version = "221.0.1", optional = true }
+llvm-sys-23 = { package = "aya-llvm-sys", features = [
+  "disable-alltargets-init",
+  "no-llvm-linking",
+], version = "231.0.0-rc2", optional = true }
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
 tracing = { version = "0.1.44" }
@@ -63,6 +67,7 @@ workspace = true
 [features]
 llvm-21 = ["dep:llvm-sys-21"]
 llvm-22 = ["dep:llvm-sys-22"]
+llvm-23 = ["dep:llvm-sys-23"]
 
 # Link LLVM and its dependencies statically. When not enabled, they're linked
 # dynamically.
@@ -70,7 +75,7 @@ llvm-link-static = []
 # Skip LLVM linking.
 no-llvm-linking = []
 
-default = ["llvm-22"]
+default = ["llvm-23"]
 
 [workspace]
 
