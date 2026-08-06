@@ -248,12 +248,8 @@ jobs:
           # We don't use ubuntu-latest because we care about the apt packages available.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
     name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain.rust }} llvm=${{ matrix.toolchain.llvm }}
     needs:
       - prepare
@@ -299,25 +295,10 @@ jobs:
           brew bundle
           echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
 
-      - name: Prepare sysroot
-        if: endsWith(matrix.platform.target, 'musl')
-        run: |
-          set -euxo pipefail
-          sudo apt update
-          sudo apt -y install bubblewrap
-          target="${{ matrix.platform.target }}"
-          arch="${target%%-*}"
-          ./ci/prepare-musl-sysroot.py \
-            "$arch" \
-            sysroot \
-            ${{ matrix.toolchain.rust }} >> $GITHUB_ENV
-          echo "$(pwd)/ci" >> $GITHUB_PATH
-
       - name: Enforce dynamic linking
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
 
       - name: Install btfdump
-        if: ${{ !endsWith(matrix.platform.target, 'musl') }}
         run: cargo install btfdump
 
       - uses: oras-project/setup-oras@v2
@@ -336,8 +317,6 @@ jobs:
           set -euxo pipefail
           ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
           digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
-          # Make sure LLVM is available from the current directory, so
-          # bubblewrap is able to access it. See the `ci/*-run` scripts.
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
@@ -436,17 +415,6 @@ jobs:
         run: |
           cargo install --path . --no-default-features --features \
             ${{ env.LLVM_FEATURES_DYNAMIC }}
-
-      # Even though we test both types of linking (dynamic, static) for musl
-      # targets, installing a static bpf-linker for Aya integration tests is
-      # just easier.
-      - name: Install (static)
-        if: endsWith(matrix.platform.target, 'musl') && matrix.toolchain.rust == 'stable'
-        env:
-          RUSTFLAGS: -C target-feature=+crt-static
-        run: |
-          cargo install --target ${{ matrix.platform.target }} --path . \
-            --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Install autopoint for aya integration tests
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
