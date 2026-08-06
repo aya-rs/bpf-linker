@@ -382,34 +382,6 @@ jobs:
             ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
-      # To make things easier for package maintainers, the step of building a
-      # custom sysroot can be skipped by setting the `BPFEL_SYSROOT_DIR`
-      # environment variable to the path of the prebuilt BPF sysroot.
-      #
-      # Test this configuration by prebuilding the BPF standard library
-      # manually.
-      #
-      # `RUSTC_BOOTSTRAP` is needed to make `xtask build-std` work on stable
-      # Rust.
-      - name: Build BPF standard library
-        run: |
-          set -euxo pipefail
-
-          RUSTC_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
-          BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot"
-          RUSTC_BOOTSTRAP=1 cargo xtask build-std \
-            --rustc-src "$RUSTC_SRC" \
-            --sysroot-dir "$BPFEL_SYSROOT_DIR" \
-            --target bpfel-unknown-none
-
-      - name: Test (prebuilt BPF standard libary, dynamic linking)
-        run: |
-          BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
-            cargo hack --target ${{ matrix.platform.target }} test \
-            --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
-            --features ${{ env.LLVM_FEATURES_DYNAMIC }}
-
       - uses: actions/checkout@v7
         if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
         with:
@@ -466,13 +438,6 @@ jobs:
         if: ${{ !endsWith(matrix.platform.target, 'gnu') }}
         run: |
           RUSTC_BOOTSTRAP=1 cargo test --target ${{ matrix.platform.target }} \
-            --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
-
-      - name: Test (prebuilt BPF standard library, static linking)
-        if: ${{ !endsWith(matrix.platform.target, 'gnu') }}
-        run: |
-          BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
-            cargo test --target ${{ matrix.platform.target }} \
             --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Report disk usage
