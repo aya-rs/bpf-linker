@@ -68,7 +68,6 @@ impl<'ctx> DISanitizer<'ctx> {
     fn visit_mdnode(&mut self, mdnode: MDNode<'_>) {
         match mdnode.try_into().expect("MDNode is not Metadata") {
             Metadata::DICompositeType(mut di_composite_type) => {
-                #[expect(clippy::single_match)]
                 #[expect(non_upper_case_globals)]
                 match di_composite_type.tag() {
                     DW_TAG_structure_type | DW_TAG_union_type => {
