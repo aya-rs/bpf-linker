@@ -152,7 +152,7 @@ Then point the tests to the sysroot using the `BPFEL_SYSROOT_DIR` variable:
 
 ```
 BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
-    cargo test --no-default-features --features llvm-22
+    cargo test --no-default-features --features llvm-23
 ```
 
 #### Building the sysroot on demand
