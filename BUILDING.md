@@ -130,35 +130,13 @@ cargo +nightly test --no-default-features --features llvm-22
 ### With Rust stable
 
 BPF targets are [Tier 3 in Rust][rustc-tiers] and therefore rustup does not
-provide BPF targets in stable editions of Rust. There are two ways to overcome
-that.
+provide BPF targets in stable editions of Rust. The tests build the required
+BPF sysroot on demand when `BPFEL_SYSROOT_DIR` does not point to a compatible
+prebuilt sysroot.
 
 [rustc-tiers]: https://doc.rust-lang.org/rustc/target-tier-policy.html
 
-#### Prebuilding the BPF sysroot
-
-Build the BPF sysroot with:
-
-```
-RUSTC_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
-BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot"
-RUSTC_BOOTSTRAP=1 cargo xtask build-std \
-  --rustc-src "$RUSTC_SRC" \
-  --sysroot-dir "$BPFEL_SYSROOT_DIR" \
-  --target bpfel-unknown-none
-```
-
-Then point the tests to the sysroot using the `BPFEL_SYSROOT_DIR` variable:
-
-```
-BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
-    cargo test --no-default-features --features llvm-22
-```
-
-#### Building the sysroot on demand
-
-It's done by the tests automatically when `BPFEL_SYSROOT_DIR` is not defined,
-but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
+Building the sysroot on stable Rust requires `RUSTC_BOOTSTRAP=1`:
 
 ```
 RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-22
