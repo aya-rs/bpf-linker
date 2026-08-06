@@ -174,7 +174,7 @@ pub(crate) fn link_ir_buffer<'ctx>(
     };
 
     let mut temp_module = ptr::null_mut();
-    #[cfg(feature = "llvm-22")]
+    #[cfg(any(feature = "llvm-22", feature = "llvm-23"))]
     let (ret, message) = Message::with(|error_msg| unsafe {
         // LLVMParseIRInContext2 does not take ownership of mem_buffer, so we need
         // to dispose it ourselves.
@@ -186,7 +186,7 @@ pub(crate) fn link_ir_buffer<'ctx>(
             error_msg,
         )
     });
-    #[cfg(not(feature = "llvm-22"))]
+    #[cfg(feature = "llvm-21")]
     let (ret, message) = Message::with(|error_msg| unsafe {
         // LLVMParseIRInContext takes ownership of mem_buffer, so we don't need to dispose of it ourselves.
         // https://github.com/llvm/llvm-project/blob/00276b67d36a665119a6a7b39dbba69f45c44e58/llvm/lib/IRReader/IRReader.cpp#L122

@@ -98,6 +98,7 @@ dependencies = [
  "libc",
  "llvm-sys 211.0.0",
  "llvm-sys 221.0.1",
+ "llvm-sys 231.0.0-rc2",
  "log",
  "object",
  "regex",
@@ -422,6 +423,20 @@ name = "llvm-sys"
 version = "221.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2abcc34a3b190f03c2a61b555f218f529589ff13657bdd2ff8ac3e85f2abe6bb"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
+ "semver",
+]
+
+[[package]]
+name = "llvm-sys"
+version = "231.0.0-rc2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4c1483ca6adf171adb0b49d3d9f380e52d68548623a70d8d6b1e266818e4d94"
 dependencies = [
  "anyhow",
  "cc",

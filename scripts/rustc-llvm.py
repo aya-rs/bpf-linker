@@ -50,8 +50,23 @@ COMPATIBILITY_SOURCES = {
             "@llvm//3rd_party/llvm-project/21.x/patches:windows_link_and_genrule.patch",
             "@llvm//3rd_party/llvm-project/21.x/patches:"
             "llvm-bazel-blake3-windows-gnu.patch",
-            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
-            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
+            "@llvm//3rd_party/llvm-project/before23.x/patches:llvm-extra.patch",
+            "@llvm//3rd_party/llvm-project/before23.x/patches:"
+            "llvm-abi-breaking-checks.patch",
+        ),
+    ),
+    22: Source(
+        repository="rust-lang/llvm-project",
+        commit="52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04",
+        version="22.1.8",
+        integrity="sha256-J/MaZjkCPZDNdUwd5C2PnXfMDD3v83iW+IwTRsbD85Y=",
+        patches=(
+            "@llvm//3rd_party/llvm-project/22.x/patches:windows_link_and_genrule.patch",
+            "@llvm//3rd_party/llvm-project/22.x/patches:"
+            "llvm-bazel-blake3-windows-gnu.patch",
+            "@llvm//3rd_party/llvm-project/before23.x/patches:llvm-extra.patch",
+            "@llvm//3rd_party/llvm-project/before23.x/patches:"
+            "llvm-abi-breaking-checks.patch",
         ),
     ),
 }
@@ -81,7 +96,7 @@ def read_pin(text: str) -> Pin:
     if prefix != commit:
         raise ValueError("LLVM archive and strip prefix do not match")
     version = match_one(
-        r'^llvm_source\.version\(llvm_version = "(\d+\.\d+\.\d+)"\)$',
+        r'^llvm\.version\(llvm_version = "(\d+\.\d+\.\d+)"\)$',
         text,
         "LLVM version",
     )
@@ -185,6 +200,20 @@ def replace_one(text: str, pattern: str, value: str, name: str) -> str:
     return result
 
 
+def replace_llvm_source(
+    text: str, replacements: tuple[tuple[str, str, str], ...]
+) -> str:
+    pattern = r"^llvm\.from_archive\(\n(?:.*\n)*?^\)$"
+    matches = list(re.finditer(pattern, text, re.MULTILINE))
+    if len(matches) != 1:
+        raise ValueError("expected exactly one LLVM source block")
+    match = matches[0]
+    source = match.group()
+    for pattern, value, name in replacements:
+        source = replace_one(source, pattern, value, name)
+    return text[: match.start()] + source + text[match.end() :]
+
+
 def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | None:
     if (nightly, commit) == (current.nightly, current.commit):
         return None
@@ -204,11 +233,6 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
         )
     replacements = (
         (
-            r'^llvm_source\.version\(llvm_version = "[^"]+"\)$',
-            f'llvm_source.version(llvm_version = "{version}")',
-            "LLVM version",
-        ),
-        (
             r'^    integrity = "[^"]+",$',
             f'    integrity = "{resolve_integrity(commit)}",',
             "LLVM integrity",
@@ -225,9 +249,13 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
             "LLVM archive",
         ),
     )
-    for pattern, value, name in replacements:
-        updated = replace_one(updated, pattern, value, name)
-    return updated
+    updated = replace_one(
+        updated,
+        r'^llvm\.version\(llvm_version = "[^"]+"\)$',
+        f'llvm.version(llvm_version = "{version}")',
+        "LLVM version",
+    )
+    return replace_llvm_source(updated, replacements)
 
 
 def select_llvm(text: str, source: Source) -> str:
@@ -241,17 +269,14 @@ def select_llvm(text: str, source: Source) -> str:
     patches = "\n".join(f'        "{patch}",' for patch in source.patches)
     replacements = (
         (
-            r'^llvm_source\.version\(llvm_version = "[^"]+"\)$',
-            f'llvm_source.version(llvm_version = "{source.version}")',
-            "LLVM version",
-        ),
-        (
             r'^    integrity = "[^"]+",$',
             f'    integrity = "{source.integrity}",',
             "LLVM integrity",
         ),
         (
-            r'^    patches = \[\n(?:        "@llvm//[^\n]+",\n)+    \],$',
+            r'^    patches = (?:\[\]|'
+            r'\["@llvm//[^\n]+"\]|\[\n'
+            r'(?:        "@llvm//[^\n]+",\n)+    \]),$',
             f"    patches = [\n{patches}\n    ],",
             "LLVM patches",
         ),
@@ -268,9 +293,13 @@ def select_llvm(text: str, source: Source) -> str:
             "LLVM archive",
         ),
     )
-    for pattern, value, name in replacements:
-        updated = replace_one(updated, pattern, value, name)
-    return updated
+    updated = replace_one(
+        updated,
+        r'^llvm\.version\(llvm_version = "[^"]+"\)$',
+        f'llvm.version(llvm_version = "{source.version}")',
+        "LLVM version",
+    )
+    return replace_llvm_source(updated, replacements)
 
 
 def configurations(text: str, pin: Pin) -> dict[str, dict[str, str]]:
