@@ -1195,7 +1195,6 @@ dependencies = [
  "anyhow",
  "clap",
  "rustc-build-sysroot",
- "walkdir",
 ]
 
 [[package]]
