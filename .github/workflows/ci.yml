@@ -20,7 +20,7 @@ env:
   # Suffix used to distinguish incompatible LLVM build variants.
   # This lets us roll out changes to the LLVM build in a pull request
   # without conflicting with artifacts produced on the main branch.
-  LLVM_BUILD_REV: 3
+  LLVM_BUILD_REV: 4
   LATEST_LLVM: 22
 
 permissions: {}
@@ -32,6 +32,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      llvm: ${{ steps.llvm.outputs.llvm }}
       rust-nightly: ${{ steps.pin.outputs.rust-nightly }}
       llvm-commit: ${{ steps.pin.outputs.llvm-commit }}
     steps:
@@ -47,80 +48,45 @@ jobs:
           printf 'rust-nightly=%s\nllvm-commit=%s\n' \
             "$nightly" "$commit" >> "$GITHUB_OUTPUT"
 
-  llvm:
-    needs: prepare
-    permissions:
-      # Needed to upload LLVM binaries as OCI artifacts to GHCR.
-      packages: write
-    runs-on: ${{ matrix.platform.os }}
-    name: llvm
-    strategy:
-      matrix:
-        platform:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            c-compiler: clang
-            cxx-compiler: clang++
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            c-compiler: clang
-            cxx-compiler: clang++
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            c-compiler: clang
-            cxx-compiler: clang++
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
-            c-compiler: aarch64-linux-musl-clang
-            cxx-compiler: aarch64-linux-musl-clang++
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            c-compiler: clang
-            cxx-compiler: clang++
-            libdir: lib64
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
-            c-compiler: x86_64-linux-musl-clang
-            cxx-compiler: x86_64-linux-musl-clang++
-        llvm:
-          - version: 21
-            git-ref: rustc/21.1-2025-08-01
-          - version: 22
-            git-ref: rustc/22.1-2026-05-19
-    steps:
-      - name: Resolve the LLVM source
-        id: ls-remote
-        env:
-          LLVM_VERSION: ${{ matrix.llvm.version }}
-          LLVM_REF: ${{ matrix.llvm.git-ref }}
-          PINNED_LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
+      - name: Configure LLVM builds
+        id: llvm
         run: |
           set -euo pipefail
 
-          if [[ $LLVM_VERSION == "$LATEST_LLVM" ]]; then
-            repository=rust-lang/llvm-project
-            llvm_commit=$PINNED_LLVM_COMMIT
-          else
-            repository=aya-rs/llvm-project
-            llvm_commit=$(
-              git ls-remote "https://github.com/$repository.git" \
-                "refs/heads/$LLVM_REF" | cut -f1
-            )
-          fi
+          llvm=$(python3 scripts/rustc-llvm.py configurations < MODULE.bazel)
+          printf 'llvm=%s\n' "$llvm" >> "$GITHUB_OUTPUT"
 
-          [[ $llvm_commit =~ ^[0-9a-f]{40}$ ]]
-          echo "repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "sha=$llvm_commit" >> "$GITHUB_OUTPUT"
-
+  llvm:
+    needs: prepare
+    permissions:
+      contents: read
+      # Needed to upload LLVM binaries as OCI artifacts to GHCR.
+      packages: write
+    runs-on: ubuntu-latest
+    name: llvm (${{ matrix.llvm }}, ${{ matrix.target }})
+    strategy:
+      matrix:
+        llvm:
+          - 21
+          - 22
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
       - id: image-tag
+        env:
+          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
         run: |
           set -euxo pipefail
           # Tag based on the LLVM git commit SHA. Used by the `artifact-restore`
           # step to pull the exact build for this source revision.
-          echo "sha=${{ env.TAG_PREFIX }}:${{ steps.ls-remote.outputs.sha }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
-          # Tag based on the LLVM version. Used by the other CI jobs to pull the
-          # expected artifact for this platform.
-          echo "version=${{ env.TAG_PREFIX }}:${{ matrix.llvm.version }}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
+          # Tag based on the LLVM version for local use.
+          echo "version=${{ env.TAG_PREFIX }}:${{ matrix.llvm }}-${{ matrix.target }}-${{ env.LLVM_BUILD_REV }}" >> "$GITHUB_OUTPUT"
 
       - uses: oras-project/setup-oras@v2
 
@@ -140,71 +106,29 @@ jobs:
       - uses: actions/checkout@v7
         if: steps.artifact-restore.outcome != 'success'
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply the rustc LLVM candidate
         if: steps.artifact-restore.outcome != 'success'
-
-      - name: Install Tools
-        if: steps.artifact-restore.outcome != 'success' && runner.os == 'Linux'
+        env:
+          MODULE: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].module }}
         run: |
-          set -euxo pipefail
-          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-            gpg --dearmor - | \
-            sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-          echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | \
-            sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+          if [[ -n $MODULE ]]; then
+            printf '%s' "$MODULE" | openssl base64 -d -A > MODULE.bazel
+          fi
 
-          sudo apt update
-          sudo apt -y install cmake ninja-build clang lld
-
-      - name: Install tools
-        if: steps.artifact-restore.outcome != 'success' && runner.os == 'macOS'
-        run: |
-          set -euxo pipefail
-          brew bundle
-          echo "$(brew --prefix lld)/bin" >> $GITHUB_PATH
-
-      - name: Prepare sysroot
-        if: steps.artifact-restore.outcome != 'success' && endsWith(matrix.platform.target, 'musl')
-        run: |
-          set -euxo pipefail
-          sudo apt -y install bubblewrap
-          target="${{ matrix.platform.target }}"
-          arch="${target%%-*}"
-          ./ci/prepare-musl-sysroot.py \
-            "$arch" \
-            sysroot >> $GITHUB_ENV
-          echo "$(pwd)/ci" >> $GITHUB_PATH
-
-      - name: Checkout LLVM Source
-        if: steps.artifact-restore.outcome != 'success'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ steps.ls-remote.outputs.repository }}
-          ref: ${{ steps.ls-remote.outputs.sha }}
-          path: llvm-project
-
-      - name: Build LLVM
+      - name: Build and package LLVM with Bazel
         if: steps.artifact-restore.outcome != 'success'
         run: |
-          set -euxo pipefail
-          target="${{ matrix.platform.target }}"
-          arch="${target%%-*}"
-          # `--system-name` is necessary to make CMake aware that we are cross
-          # compiling.
-          cargo xtask build-llvm \
-            --src-dir llvm-project \
-            --build-dir llvm-build \
-            --install-prefix "${{ github.workspace }}/llvm-install" \
-            ${{ matrix.platform.libdir && format('--install-libdir {0}', matrix.platform.libdir) }} \
-            --c-compiler "${{ matrix.platform.c-compiler }}" \
-            --cxx-compiler "${{ matrix.platform.cxx-compiler }}" \
-            ${{ endsWith(matrix.platform.target, 'musl') && format('--cmake-system-processor "$arch" --cmake-system-name Linux --sysroot {0}/sysroot', github.workspace) || '' }}
-
-      - name: Package LLVM artifact
-        if: steps.artifact-restore.outcome != 'success'
-        run: |
-          set -euxo pipefail
-          tar --zstd -C "$GITHUB_WORKSPACE/llvm-install" -cf llvm-install.tar.zst .
+          set -euo pipefail
+          # These archives are intended for general use with linkers that may
+          # use an older LLVM. Disable ThinLTO so they contain native objects
+          # instead of version-specific LLVM bitcode.
+          bazel build //:llvm-archive \
+            --config=release \
+            --config=remote \
+            --features=-thin_lto \
+            --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
+            --remote_timeout=120 \
+            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
       - name: Publish LLVM OCI artifact
         # GitHub does not allow foreign-repository pull requests to push
@@ -216,11 +140,12 @@ jobs:
         # Disable artifact publishing for forked pull requests. This
         # restriction is a reasonable security measure.
         if: steps.artifact-restore.outcome != 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        working-directory: bazel-bin
         run: |
           set -euxo pipefail
           oras push "${{ steps.image-tag.outputs.sha }}" \
             --artifact-type application/vnd.aya.llvm.install \
-            llvm-install.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
+            llvm-archive.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd
 
           # Candidate LLVM must not replace a version tag used by other runs.
           if [[ ${{ matrix.llvm.version }} != "$LATEST_LLVM" ]]; then
@@ -289,6 +214,7 @@ jobs:
 
   build:
     permissions:
+      contents: read
       # Needed to pull LLVM binaries as OCI artifacts from GHCR.
       packages: read
     runs-on: ${{ matrix.platform.os }}
@@ -411,22 +337,23 @@ jobs:
 
       - name: Restore LLVM from ghcr.io
         env:
-          LLVM_COMMIT: ${{ needs.prepare.outputs.llvm-commit }}
-          LLVM_VERSION: ${{ matrix.toolchain.llvm }}
+          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.toolchain.llvm].commit }}
         run: |
           set -euxo pipefail
-          if [[ $LLVM_VERSION == "$LATEST_LLVM" ]]; then
-            ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
-          else
-            ref="${{ env.TAG_PREFIX }}:${LLVM_VERSION}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
-          fi
+          ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
           digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
           # Make sure LLVM is available from the current directory, so
           # bubblewrap is able to access it. See the `ci/*-run` scripts.
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
-          echo "${LLVM_INSTALL_DIR}/bin" >> $GITHUB_PATH
+          echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}/lib/llvm" >> "$GITHUB_ENV"
+          echo "LIBLLVM_PREFIX=lib" >> "$GITHUB_ENV"
+          echo "CXXSTDLIB=libcxx,libcxxabi" >> "$GITHUB_ENV"
+          echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
+          echo "ZLIB=zlib" >> "$GITHUB_ENV"
+          echo "ZLIB_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
+          echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
@@ -545,22 +472,6 @@ jobs:
           ln -s "$(rustup run "$RUST_NIGHTLY" rustc --print sysroot)" \
             "$(rustup show home)/toolchains/nightly-$(rustup run "$RUST_NIGHTLY" rustc --print host-tuple)"
           cargo xtask integration-test local
-
-      - name: Register static libraries (macOS)
-        if: runner.os == 'macOS'
-        # macOS does not provide any static libraries. Homebrew does provide
-        # them, but in custom paths that the system-wide clang is not aware of.
-        # Point build.rs to them by setting environment variables.
-        #
-        # We install llvm package only for libc++.
-        #
-        # libLLVM from homebrew requires zstd.
-        run: |
-          set -euxo pipefail
-
-          echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
-          echo "LIBZSTD_PATH=$(brew --prefix zstd)/lib" >> $GITHUB_ENV
-          echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
 
       - name: Enforce static linking
         # Static linking with glibc is not supported.
