@@ -3,12 +3,12 @@ module(
     version = "0.0.0",
 )
 
-bazel_dep(name = "llvm", version = "0.8.11")
+bazel_dep(name = "llvm", version = "0.8.17")
 bazel_dep(name = "bazel_lib", version = "3.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "rules_cc", version = "0.2.20")
+bazel_dep(name = "rules_cc", version = "0.2.22")
 bazel_dep(name = "rules_rs", version = "0.0.92")
-bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
@@ -22,28 +22,22 @@ single_version_override(
 )
 
 # @llvm-project uses the rust-lang/llvm-project commit referenced by
-# nightly-2026-08-05.
-llvm_source = use_extension("@llvm//extensions:llvm_source.bzl", "llvm_source")
+# nightly-2026-08-06.
+llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 
-# llvm_source.version only sets generated LLVM version constants; from_archive
+# llvm.version only sets generated LLVM version constants; from_archive
 # below selects the LLVM source archive.
-llvm_source.version(llvm_version = "22.1.8")
-llvm_source.from_archive(
-    build_file_content = "# EMPTY",
-    integrity = "sha256-J/MaZjkCPZDNdUwd5C2PnXfMDD3v83iW+IwTRsbD85Y=",
+llvm.version(llvm_version = "23.1.0")
+llvm.from_archive(
+    integrity = "sha256-yAiqllLCuJsbFtkQLzmBO5nCj/qX+GMljEU3w7VE/Zs=",
     patch_args = ["-p1"],
     patches = [
-        "@llvm//3rd_party/llvm-project/22.x/patches:windows_link_and_genrule.patch",
-        "@llvm//3rd_party/llvm-project/22.x/patches:llvm-bazel-blake3-windows-gnu.patch",
+        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-http-windows-gnu.patch",
         "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
-        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
     ],
-    strip_prefix = "llvm-project-52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04",
-    urls = ["https://github.com/rust-lang/llvm-project/archive/52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04.tar.gz"],
+    strip_prefix = "llvm-project-21cf28432798952d942bacc6bcee3a328faa3638",
+    urls = ["https://github.com/rust-lang/llvm-project/archive/21cf28432798952d942bacc6bcee3a328faa3638.tar.gz"],
 )
-use_repo(llvm_source, "llvm-raw", "llvm_config", "llvm_zlib", "llvm_zstd")
-
-llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 use_repo(llvm, "llvm-project")
 
 rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
@@ -111,11 +105,15 @@ crate.from_cargo(
     ],
 )
 
-# bpf-linker links LLVM through Bazel's @llvm-project graph. The llvm-sys
-# crates provide Rust bindings only, so their Cargo build scripts must not try
-# to discover or link a host LLVM installation.
+# bpf-linker links LLVM through Bazel's @llvm-project graph. The LLVM crates
+# provide Rust bindings only, so their Cargo build scripts must not try to
+# discover or link a host LLVM installation.
 crate.annotation(
     crate = "llvm-sys",
+    gen_build_script = "off",
+)
+crate.annotation(
+    crate = "aya-llvm-sys",
     gen_build_script = "off",
 )
 
