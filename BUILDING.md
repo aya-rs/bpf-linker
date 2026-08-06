@@ -16,16 +16,16 @@ They can be retrieved using [oras][oras].
 First, pick an appropriate image from our [LLVM container page][containers-llvm].
 The tags mention the LLVM version, the platform, and our custom revision, e.g.
 
-* `22-x86_64-unknown-linux-gnu-3` - LLVM 22, x86_64 Linux, glibc, revision 3
-* `21-aarch64-unknown-linux-musl-3` - LLVM 21, aarch64 Linux, musl, revision 3
-* `22-aarch64-apple-darwin-3` - LLVM 22, aarch64 macOS, revision 3
+* `22-x86_64-unknown-linux-gnu-4` - LLVM 22, x86_64 Linux, glibc, revision 4
+* `21-aarch64-unknown-linux-musl-4` - LLVM 21, aarch64 Linux, musl, revision 4
+* `22-aarch64-apple-darwin-4` - LLVM 22, aarch64 macOS, revision 4
 
 Always pick the latest revision available, if there are multiple.
 
 After picking an appropriate image, it can be downloaded with oras, e.g.
 
 ```sh
-oras pull ghcr.io/aya-rs/llvm:22-x86_64-unknown-linux-gnu-3
+oras pull ghcr.io/aya-rs/llvm:22-x86_64-unknown-linux-gnu-4
 ```
 
 And the resulting tarball unpacked to a directory:
@@ -38,37 +38,20 @@ tar --zstd -xpf llvm-install.tar.zst -C llvm-install/
 [oras]: https://oras.land/
 [containers-llvm]: https://github.com/aya-rs/bpf-linker/pkgs/container/llvm/versions
 
-### Building LLVM from source
+### Building LLVM with Bazel
 
-LLVM can be built from source using the `xtask build-llvm` subcommand, included
-in the bpf-linker sources.
-
-First, clone the LLVM sources from [our fork][llvm-fork], using the branch
-that matches the Rust toolchain you want to use. For example:
+The repository's Bazel graph builds the pinned LLVM revision from source and
+can package its outputs in the same layout as the ghcr.io artifact:
 
 ```sh
-git clone -b rustc/22.1-2026-05-19 https://github.com/aya-rs/llvm-project ./llvm-project
+bazel build //:llvm-install --config=release
+mkdir llvm-install
+tar --zstd -xpf bazel-bin/llvm-install.tar.zst -C llvm-install/
 ```
 
-If in doubt about which branch to use, check the LLVM version used by your Rust
-compiler:
-
-```sh
-rustc [+toolchain] --version -v | grep LLVM
-```
-
-Once the sources are available, LLVM can be built and installed into the
-directory specified by `--install-prefix`, using `--build-dir` to store the
-build state.
-
-```sh
-cargo xtask llvm build \
-    --src-dir ./llvm-project \
-    --build-dir ./llvm-build \
-    --install-prefix ./llvm-install
-```
-
-[llvm-fork]: https://github.com/aya-rs/llvm-project
+The archive contains the shared LLVM library and its static component
+libraries. It is intended for building and debugging bpf-linker, rather than
+as a complete LLVM developer installation.
 
 ### System packages
 
@@ -86,18 +69,14 @@ bpf-linker uses Cargo features to select the LLVM version, via `llvm-*`
 features such as `llvm-22`. By default, LLVM and its dependencies are linked
 dynamically. Static linking can be enabled with the `llvm-link-static` feature.
 
-If you used any of the first two methods of obtaining LLVM (ghcr.io or building
-from source), either set the `LLVM_PREFIX` variable to point to the prefix:
+If you used either of the first two methods of obtaining LLVM, set the
+`LLVM_PREFIX` variable to point to the extracted prefix:
 
 ```sh
 export LLVM_PREFIX=./llvm-install
 ```
 
-Or add the `bin` directory from the prefix to `PATH`:
-
-```sh
-export PATH="$(pwd)/llvm-install/bin:$PATH"
-```
+Installations that provide `llvm-config` are also discovered through `PATH`.
 
 Examples:
 

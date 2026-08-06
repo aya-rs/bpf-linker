@@ -32,6 +32,32 @@ class Pin(NamedTuple):
     version: str
 
 
+class Source(NamedTuple):
+    repository: str
+    commit: str
+    version: str
+    integrity: str
+    patches: tuple[str, ...]
+
+
+COMPATIBILITY_SOURCES = {
+    21: Source(
+        repository="aya-rs/llvm-project",
+        commit="00d23d10dc48c6bb9d57ba96d4a748d85d77d0c7",
+        version="21.1.8",
+        integrity="sha256-VDptNFG5E4/tVGR8bQlfrBXsmjkrxOhpt2hapPu0T6U=",
+        patches=(
+            "@llvm//3rd_party/llvm-project/21.x/patches:llvm-bazel9.patch",
+            "@llvm//3rd_party/llvm-project/21.x/patches:windows_link_and_genrule.patch",
+            "@llvm//3rd_party/llvm-project/21.x/patches:"
+            "llvm-bazel-blake3-windows-gnu.patch",
+            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
+            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
+        ),
+    ),
+}
+
+
 def match_one(pattern: str, text: str, name: str) -> str:
     matches = list(re.finditer(pattern, text, re.MULTILINE))
     if len(matches) != 1:
@@ -202,14 +228,50 @@ def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | N
     return updated
 
 
-def write_outputs(pin: Pin, module: str | None = None) -> None:
-    outputs = {
-        "rust-nightly": pin.nightly,
-        "llvm-commit": pin.commit,
-        "llvm-version": pin.version,
-    }
-    if module is not None:
-        outputs["module"] = base64.b64encode(module.encode()).decode()
+def select_llvm(text: str, source: Source) -> str:
+    updated = replace_one(
+        text,
+        r"^# @llvm-project uses the rust-lang/llvm-project commit referenced by\n"
+        r"# nightly-\d{4}-\d{2}-\d{2}\.$",
+        f"# @llvm-project uses {source.repository} commit {source.commit}.",
+        "LLVM source comment",
+    )
+    patches = "\n".join(f'        "{patch}",' for patch in source.patches)
+    replacements = (
+        (
+            r'^llvm_source\.version\(llvm_version = "[^"]+"\)$',
+            f'llvm_source.version(llvm_version = "{source.version}")',
+            "LLVM version",
+        ),
+        (
+            r'^    integrity = "[^"]+",$',
+            f'    integrity = "{source.integrity}",',
+            "LLVM integrity",
+        ),
+        (
+            r'^    patches = \[\n(?:        "@llvm//[^\n]+",\n)+    \],$',
+            f"    patches = [\n{patches}\n    ],",
+            "LLVM patches",
+        ),
+        (
+            rf'^    strip_prefix = "llvm-project-{SHA}",$',
+            f'    strip_prefix = "llvm-project-{source.commit}",',
+            "LLVM strip prefix",
+        ),
+        (
+            rf'^    urls = \["https://github\.com/[^/]+/llvm-project/archive/'
+            rf'{SHA}\.tar\.gz"\],$',
+            f'    urls = ["https://github.com/{source.repository}/archive/'
+            f'{source.commit}.tar.gz"],',
+            "LLVM archive",
+        ),
+    )
+    for pattern, value, name in replacements:
+        updated = replace_one(updated, pattern, value, name)
+    return updated
+
+
+def write_outputs(outputs: dict[str, str]) -> None:
     rendered = "".join(f"{key}={value}\n" for key, value in outputs.items())
     print(rendered, end="")
     if output := os.getenv("GITHUB_OUTPUT"):
@@ -217,23 +279,71 @@ def write_outputs(pin: Pin, module: str | None = None) -> None:
             destination.write(rendered)
 
 
+def write_pin_outputs(pin: Pin, module: str | None = None) -> None:
+    outputs = {
+        "rust-nightly": pin.nightly,
+        "llvm-commit": pin.commit,
+        "llvm-version": pin.version,
+    }
+    if module is not None:
+        outputs["module"] = base64.b64encode(module.encode()).decode()
+    write_outputs(outputs)
+
+
+def write_configurations(text: str, pin: Pin) -> None:
+    configurations = {
+        pin.version.partition(".")[0]: {
+            "commit": pin.commit,
+            "module": base64.b64encode(text.encode()).decode(),
+        }
+    }
+    for version, source in COMPATIBILITY_SOURCES.items():
+        configurations[str(version)] = {
+            "commit": source.commit,
+            "module": base64.b64encode(select_llvm(text, source).encode()).decode(),
+        }
+    write_outputs(
+        {"llvm": json.dumps(configurations, separators=(",", ":"), sort_keys=True)}
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--update",
         action="store_true",
         help="update MODULE.bazel to the latest supported Rust nightly",
+    )
+    mode.add_argument(
+        "--llvm-version",
+        type=int,
+        choices=COMPATIBILITY_SOURCES,
+        help="render MODULE.bazel for a supported compatibility LLVM version",
+    )
+    mode.add_argument(
+        "--configurations",
+        action="store_true",
+        help="render all supported LLVM configurations as JSON",
     )
     args = parser.parse_args()
     try:
         text = MODULE.read_text(encoding="utf-8")
         pin = read_pin(text)
-        if not args.update:
-            write_outputs(pin)
+        if args.configurations:
+            write_configurations(text, pin)
+        elif args.llvm_version is not None:
+            source = COMPATIBILITY_SOURCES[args.llvm_version]
+            write_pin_outputs(
+                Pin(pin.nightly, source.commit, source.version),
+                select_llvm(text, source),
+            )
+        elif not args.update:
+            write_pin_outputs(pin)
         elif updated := update_module(text, pin, *resolve_latest()):
             candidate = read_pin(updated)
             MODULE.write_text(updated, encoding="utf-8")
-            write_outputs(candidate, updated)
+            write_pin_outputs(candidate, updated)
         return 0
     except (IncompleteRead, KeyError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
