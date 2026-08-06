@@ -6,9 +6,9 @@ use std::{
     ptr,
 };
 
-use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type, DW_TAG_variant_part};
+use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
-use tracing::{Level, span, trace, warn};
+use tracing::{Level, span, trace};
 
 use super::types::{
     di::DIType,
@@ -27,7 +27,6 @@ pub(crate) struct DISanitizer<'ctx> {
     builder: DIBuilder<'ctx>,
     visited_nodes: HashSet<u64>,
     replace_operands: HashMap<u64, LLVMMetadataRef>,
-    skipped_types_lossy: Vec<String>,
 }
 
 // Sanitize Rust type names to be valid C type names.
@@ -63,7 +62,6 @@ impl<'ctx> DISanitizer<'ctx> {
             builder: DIBuilder::new(module),
             visited_nodes: HashSet::new(),
             replace_operands: HashMap::new(),
-            skipped_types_lossy: Vec::new(),
         }
     }
 
@@ -85,38 +83,11 @@ impl<'ctx> DISanitizer<'ctx> {
                             return;
                         }
 
-                        let mut is_data_carrying_enum = false;
                         let mut members: Vec<DIType<'_>> = Vec::new();
                         for element in di_composite_type.elements() {
                             match element {
-                                Metadata::DICompositeType(di_composite_type_inner) => {
-                                    // The presence of a composite type with `DW_TAG_variant_part`
-                                    // as a member of another composite type means that we are
-                                    // processing a data-carrying enum. Such types are not supported
-                                    // by the Linux kernel. We need to remove the children, so BTF
-                                    // doesn't contain data carried by the enum variant.
-                                    match di_composite_type_inner.tag() {
-                                        DW_TAG_variant_part => {
-                                            if let Some((ref name, _)) = names {
-                                                let file = di_composite_type.file();
-                                                let name = String::from_utf8_lossy(name.as_slice())
-                                                    .to_string();
-                                                trace!(
-                                                    "found data carrying enum {name} ({filename}:{line}), not emitting the debug info for it",
-                                                    filename = file.filename().map_or(
-                                                        "<unknown>".into(),
-                                                        String::from_utf8_lossy
-                                                    ),
-                                                    line = di_composite_type.line(),
-                                                );
-                                                self.skipped_types_lossy.push(name);
-                                            }
-
-                                            is_data_carrying_enum = true;
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
+                                Metadata::DICompositeType(di_composite_type) => {
+                                    members.push(di_composite_type.into());
                                 }
                                 Metadata::DIDerivedType(di_derived_type) => {
                                     members.push(di_derived_type.into());
@@ -124,9 +95,7 @@ impl<'ctx> DISanitizer<'ctx> {
                                 _ => {}
                             }
                         }
-                        if is_data_carrying_enum {
-                            di_composite_type.replace_elements(MDNode::empty(self.context));
-                        } else if !members.is_empty() {
+                        if !members.is_empty() {
                             members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
                             let sorted_elements =
                                 MDNode::with_elements(self.context, members.as_mut_slice());
@@ -248,13 +217,6 @@ impl<'ctx> DISanitizer<'ctx> {
 
         for function in module.functions() {
             self.visit_item(Item::Function(function));
-        }
-
-        if !self.skipped_types_lossy.is_empty() {
-            warn!(
-                "debug info was not emitted for the following types: {}",
-                self.skipped_types_lossy.join(", ")
-            );
         }
     }
 
