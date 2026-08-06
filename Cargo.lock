@@ -96,7 +96,6 @@ dependencies = [
  "compiletest_rs",
  "gimli",
  "libc",
- "llvm-sys 201.0.1",
  "llvm-sys 211.0.0",
  "llvm-sys 221.0.1",
  "log",
@@ -403,20 +402,6 @@ name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
-
-[[package]]
-name = "llvm-sys"
-version = "201.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb947e8b79254ca10d496d0798a9ba1287dcf68e50a92b016fec1cc45bef447"
-dependencies = [
- "anyhow",
- "cc",
- "lazy_static",
- "libc",
- "regex-lite",
- "semver",
-]
 
 [[package]]
 name = "llvm-sys"
