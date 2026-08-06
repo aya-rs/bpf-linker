@@ -55,6 +55,19 @@ COMPATIBILITY_SOURCES = {
             "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
         ),
     ),
+    22: Source(
+        repository="rust-lang/llvm-project",
+        commit="52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04",
+        version="22.1.8",
+        integrity="sha256-J/MaZjkCPZDNdUwd5C2PnXfMDD3v83iW+IwTRsbD85Y=",
+        patches=(
+            "@llvm//3rd_party/llvm-project/22.x/patches:windows_link_and_genrule.patch",
+            "@llvm//3rd_party/llvm-project/22.x/patches:"
+            "llvm-bazel-blake3-windows-gnu.patch",
+            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
+            "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
+        ),
+    ),
 }
 
 
@@ -244,12 +257,19 @@ def select_llvm(text: str, source: Source) -> str:
             "LLVM version",
         ),
         (
+            r'^    files = \{\n(?:        "[^"]+": "[^"]+",\n)+    \},$',
+            "    files = {},",
+            "LLVM overlay files",
+        ),
+        (
             r'^    integrity = "[^"]+",$',
             f'    integrity = "{source.integrity}",',
             "LLVM integrity",
         ),
         (
-            r'^    patches = \[\n(?:        "@llvm//[^\n]+",\n)+    \],$',
+            r'^    patches = (?:\[\]|'
+            r'\["//bazel/patches:llvm_23_windows_gnu\.patch"\]|\[\n'
+            r'(?:        "@llvm//[^\n]+",\n)+    \]),$',
             f"    patches = [\n{patches}\n    ],",
             "LLVM patches",
         ),

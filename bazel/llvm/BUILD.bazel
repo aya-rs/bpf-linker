@@ -1,0 +1,5 @@
+exports_files([
+    "third_party_build.BUILD.bazel",
+    "zlib-ng.BUILD.bazel",
+    "zstd.BUILD.bazel",
+])

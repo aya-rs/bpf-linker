@@ -1,0 +1,91 @@
+diff --git a/3rd_party/llvm-project/x.x/libc/libc.BUILD.bazel b/3rd_party/llvm-project/x.x/libc/libc.BUILD.bazel
+index 7994192..7f4bd49 100644
+--- a/3rd_party/llvm-project/x.x/libc/libc.BUILD.bazel
++++ b/3rd_party/llvm-project/x.x/libc/libc.BUILD.bazel
+@@ -141,7 +141,26 @@ cc_library(
+         ".",
+     ],
+     visibility = ["//visibility:public"],
+     deps = [
+         "@llvm-project//compiler-rt:sanitizers_interface_headers",
+-    ],
++    ] + (
++        [":shared_math_headers_for_apfloat"]
++        if int(LLVM_VERSION_MAJOR) >= 23 else EMPTY_STRING_LIST
++    ),
+ )
++
++# This target is required by APFloat.cpp in LLVM 23 and newer.
++cc_library(
++    name = "shared_math_headers_for_apfloat",
++    hdrs = glob([
++        "hdr/**/*.h",
++        "include/**/*.h",
++        "shared/**/*.h",
++        "src/__support/**/*.h",
++    ]),
++    includes = ["."],
++    visibility = ["//visibility:public"],
++    deps = [
++        "@llvm-project//compiler-rt:sanitizers_interface_headers",
++    ],
++)
+diff --git a/3rd_party/llvm-project/x.x/libcxx/libcxx.BUILD.bazel b/3rd_party/llvm-project/x.x/libcxx/libcxx.BUILD.bazel
+index 9fc3788..59001c6 100644
+--- a/3rd_party/llvm-project/x.x/libcxx/libcxx.BUILD.bazel
++++ b/3rd_party/llvm-project/x.x/libcxx/libcxx.BUILD.bazel
+@@ -21,13 +21,21 @@ filegroup(
+     visibility = ["//visibility:public"],
+ )
+ 
++filegroup(
++    name = "libcxx_23_headers_files",
++    srcs = glob(["include/**/*"]),
++    visibility = ["//visibility:public"],
++)
++
+ filegroup(
+     name = "libcxx_headers_files",
+     srcs = ([
++        ":libcxx_23_headers_files",
++    ] if int(LLVM_VERSION_MAJOR) >= 23 else [
+         ":libcxx_22_headers_files",
+     ] if int(LLVM_VERSION_MAJOR) >= 22 else [
+         ":libcxx_21_headers_files",
+     ]),
+     visibility = ["//visibility:public"],
+ )
+ 
+@@ -187,7 +195,9 @@ cc_library(
+         "src/functional.cpp",
+         "src/hash.cpp",
+-        "src/include/apple_availability.h",
++    ] + ([
++        "src/include/apple_availability.h",
++    ] if int(LLVM_VERSION_MAJOR) < 23 else []) + [
+         "src/include/atomic_support.h",
+         "src/include/config_elast.h",
+         "src/include/refstring.h",
+         "src/include/ryu/common.h",
+@@ -277,6 +287,6 @@ cc_library(
+     ],
+     copts = [
+         "-faligned-allocation",
+-        "-std=c++23",
++        "-std=c++26" if int(LLVM_VERSION_MAJOR) >= 23 else "-std=c++23",
+         "-fvisibility=hidden",
+         "-fvisibility-inlines-hidden",
+diff --git a/llvm_versions.json b/llvm_versions.json
+index fe2d1e1..9caf585 100644
+--- a/llvm_versions.json
++++ b/llvm_versions.json
+@@ -1,4 +1,9 @@
+ {
++  "23.1.0": {
++    "url": "https://github.com/rust-lang/llvm-project/archive/21cf28432798952d942bacc6bcee3a328faa3638.tar.gz",
++    "sha256": "c808aa9652c2b89b1b16d9102f39813b99c28ffa97f863258c4537c3b544fd9b",
++    "strip_prefix": "llvm-project-21cf28432798952d942bacc6bcee3a328faa3638"
++  },
+   "21.1.8": {
+     "url": "https://github.com/hermeticbuild/llvm-redist/releases/download/llvmorg-21.1.8-r1/llvm-project-21.1.8.src.tar.zst",
+     "sha256": "64a773b61d91abec7faab139aeda3b8773f2330abc4d97bd26d1513a4e98cf55"
