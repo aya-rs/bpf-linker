@@ -198,12 +198,19 @@ fn target_architecture_from_env() -> anyhow::Result<Architecture> {
 /// `basedir`.
 fn find_libdir<P>(
     stdout: &mut io::StdoutLock<'_>,
+    target_arch: Architecture,
+    target_bits: u8,
     basedir: &Path,
     candidates: &[P],
 ) -> anyhow::Result<PathBuf>
 where
     P: AsRef<Path> + fmt::Debug,
 {
+    writeln!(
+        stdout,
+        "cargo:warning={target_arch:?} is a {target_bits}-bit target, searching for LLVM library directories {candidates:?} in {}",
+        basedir.display(),
+    )?;
     candidates
         .iter()
         .find_map(|candidate| {
@@ -530,8 +537,8 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
     // the build uses a custom LLVM via `LLVM_PREFIX` or a custom `llvm-config`
     // found through `PATH`.
     //
-    // This matters especially for LLVM built with `cargo xtask build-llvm`,
-    // which produces a minimal LLVM containing only the BPF target. Using
+    // This matters especially for custom LLVM builds, which can produce a
+    // minimal LLVM containing only the BPF target. Using
     // rpath keeps that override scoped to the `bpf-linker` binaries, unlike
     // global linker configuration or `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH`
     // which could also affect `rustc` on targets where it links LLVM
@@ -580,39 +587,6 @@ fn main() -> anyhow::Result<()> {
     const PATH: &str = "PATH";
     writeln!(stdout, "cargo:rerun-if-env-changed={LLVM_PREFIX}")?;
     writeln!(stdout, "cargo:rerun-if-env-changed={PATH}")?;
-    let (var_name, paths_os) = env::var_os(LLVM_PREFIX)
-        .map(|mut p| {
-            p.push("/bin");
-            (LLVM_PREFIX, p)
-        })
-        .or_else(|| env::var_os(PATH).map(|p| (PATH, p)))
-        .ok_or_else(|| anyhow!("neither {LLVM_PREFIX} nor {PATH} is set"))?;
-    let llvm_config = env::split_paths(&paths_os)
-        .find_map(|dir| {
-            let candidate = Path::new(&dir).join("llvm-config");
-            candidate
-                .try_exists()
-                .with_context(|| format!("failed to inspect the file {}", candidate.display()))
-                .map(|exists| exists.then_some(candidate))
-                .transpose()
-        })
-        .transpose()?
-        .ok_or_else(|| {
-            anyhow!(
-                "could not find llvm-config in directories specified by environment
-variable `{var_name}` {}",
-                paths_os.display()
-            )
-        })?;
-    let llvm_basedir = llvm_config
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or_else(|| {
-            anyhow!(
-                "llvm-config location has no parent: {}",
-                llvm_config.display()
-            )
-        })?;
     let target_arch = target_architecture_from_env()?;
     let target_address_size = target_arch.address_size().ok_or_else(|| {
         anyhow!("address size of target architecture {target_arch:?} is unknown",)
@@ -628,13 +602,51 @@ variable `{var_name}` {}",
             "target {target_arch:?} with address size {target_address_size:?} is not supported",
         ),
     };
-    writeln!(
-        stdout,
-        "cargo:warning={target_arch:?} is a {target_bits}-bit target, searching for LLVM library directories {lib_dir_candidates:?} in {}",
-        llvm_basedir.display(),
-    )?;
-    let llvm_lib_dir = find_libdir(&mut stdout, llvm_basedir, &lib_dir_candidates)
-        .with_context(|| "could not find LLVM lib directory")?;
+    let llvm_lib_dir = (if let Some(prefix) = env::var_os(LLVM_PREFIX) {
+        find_libdir(
+            &mut stdout,
+            target_arch,
+            target_bits,
+            Path::new(&prefix),
+            &lib_dir_candidates,
+        )
+    } else {
+        let paths_os = env::var_os(PATH).ok_or_else(|| anyhow!("{PATH} is not set"))?;
+        let llvm_config = env::split_paths(&paths_os)
+            .find_map(|dir| {
+                let candidate = Path::new(&dir).join("llvm-config");
+                candidate
+                    .try_exists()
+                    .with_context(|| format!("failed to inspect the file {}", candidate.display()))
+                    .map(|exists| exists.then_some(candidate))
+                    .transpose()
+            })
+            .transpose()?
+            .ok_or_else(|| {
+                anyhow!(
+                    "could not find llvm-config in directories specified by environment
+variable `{PATH}` {}",
+                    paths_os.display()
+                )
+            })?;
+        let llvm_basedir = llvm_config
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| {
+                anyhow!(
+                    "llvm-config location has no parent: {}",
+                    llvm_config.display()
+                )
+            })?;
+        find_libdir(
+            &mut stdout,
+            target_arch,
+            target_bits,
+            llvm_basedir,
+            &lib_dir_candidates,
+        )
+    })
+    .with_context(|| "could not find LLVM lib directory")?;
 
     let llvm_lib_dir = fs::canonicalize(&llvm_lib_dir).with_context(|| {
         format!(
