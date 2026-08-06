@@ -32,10 +32,17 @@ pub static Y: DataCarryingEnum = DataCarryingEnum::Second(54, -23);
 #[no_mangle]
 pub static Z: DataCarryingEnum = DataCarryingEnum::Third(36);
 
-// The data-carrying enum should be not included in BTF.
+// The data-carrying enum and its variants should be included in BTF.
 
 // CHECK: <ENUM> 'SimpleEnum' sz:1 n:3
 // CHECK-NEXT: First = 0
 // CHECK-NEXT: Second = 1
 // CHECK-NEXT: Third = 2
-// CHECK-NOT: <ENUM> 'DataCarryingEnum'
+// CHECK: <STRUCT> 'DataCarryingEnum'
+// CHECK: <UNION> '<anon>'
+// CHECK: 'First' off:0
+// CHECK-NEXT: 'Second' off:0
+// CHECK-NEXT: 'Third' off:0
+// CHECK: <STRUCT> 'First'
+// CHECK: <STRUCT> 'Second'
+// CHECK: <STRUCT> 'Third'
