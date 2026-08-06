@@ -80,6 +80,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
+name = "aya-llvm-sys"
+version = "231.0.0-rc2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a501f7839835026eab8ba325652d71c3d43e3d2fb8d2f7b841e8755cf521607"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
+ "semver",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,6 +106,7 @@ dependencies = [
  "anyhow",
  "ar",
  "assert_matches",
+ "aya-llvm-sys",
  "clap",
  "compiletest_rs",
  "gimli",

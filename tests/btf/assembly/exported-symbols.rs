@@ -12,8 +12,8 @@ extern crate dep_exports as dep;
 pub use dep::dep_public_symbol as local_re_exported;
 
 #[no_mangle]
-fn local_no_mangle() -> u8 {
-    local_public(1, 2)
+fn local_no_mangle(_arg1: u32, _arg2: u32) -> u8 {
+    local_public(_arg1, _arg2)
 }
 
 #[inline(never)]
@@ -21,7 +21,7 @@ pub fn local_public(_arg1: u32, _arg2: u32) -> u8 {
     // bind v so we create a debug variable which needs its scope to be fixed
     let v = dep::dep_public_symbol();
     // call inline functions so we get inlinedAt scopes to be fixed
-    inline_function_1(v) + inline_function_2(v)
+    inline_function_1(v) + inline_function_2(v) + _arg1 as u8 + _arg2 as u8
 }
 
 #[inline(always)]
