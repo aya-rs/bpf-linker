@@ -29,6 +29,10 @@ common --@llvm-project//llvm:enable_abi_breaking_checks
 # Default opt flags undef NDEBUG, force it on so release builds have assertions.
 common --copt=-DNDEBUG
 
+# Build libc++ and libc++abi against their source headers, not the toolchain's,
+# to keep the runtime build hermetic.
+common --per_file_copt=external/llvm.*/libcxx(abi)?/.*@-nostdinc++
+
 common:release --compilation_mode=opt
 common:release --copt=-g
 common:release --features=thin_lto
