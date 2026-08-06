@@ -1,0 +1,17 @@
+diff --git a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+index 1a88e11d02f1..37cbf6a7a678 100644
+--- a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++++ b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+@@ -4820,7 +4820,11 @@ cc_library(
+     hdrs = glob(["include/llvm/HTTP/*.h"]),
+     includes = ["include"],
+     linkopts = select({
+-        "@platforms//os:windows": [
++        ":is_windows_clang_mingw": [
++            "-lcrypt32",
++            "-lwinhttp",
++        ],
++        "@platforms//os:windows": [
+             "crypt32.lib",
+             "winhttp.lib",
+         ],

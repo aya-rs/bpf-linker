@@ -1,3 +1,5 @@
 exports_files([
+    "hermetic_llvm_23.patch",
+    "llvm_23_windows_gnu.patch",
     "rules_rs_bpf_linker_from_source.patch",
 ])

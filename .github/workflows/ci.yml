@@ -21,7 +21,7 @@ env:
   # This lets us roll out changes to the LLVM build in a pull request
   # without conflicting with artifacts produced on the main branch.
   LLVM_BUILD_REV: 4
-  LATEST_LLVM: 22
+  LATEST_LLVM: 23
 
 permissions: {}
 
@@ -72,6 +72,7 @@ jobs:
         llvm:
           - 21
           - 22
+          - 23
         target:
           - aarch64-apple-darwin
           - x86_64-apple-darwin
@@ -166,7 +167,7 @@ jobs:
           components: clippy, rust-src
 
       - name: Run clippy
-        run: cargo clippy --features llvm-22,no-llvm-linking --all-targets --workspace -- --deny warnings
+        run: cargo clippy --features llvm-23,no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
     runs-on: ubuntu-latest
@@ -240,13 +241,16 @@ jobs:
         toolchain:
           - rust: 1.94.0
             llvm: 21
-            exclude-features: default,llvm-22
+            exclude-features: default,llvm-22,llvm-23
           - rust: stable
             llvm: 22
-            exclude-features: llvm-21
+            exclude-features: default,llvm-21,llvm-23
           - rust: beta
             llvm: 22
-            exclude-features: llvm-21
+            exclude-features: default,llvm-21,llvm-23
+          - rust: ${{ needs.prepare.outputs.rust-nightly }}
+            llvm: 23
+            exclude-features: llvm-21,llvm-22
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -331,13 +335,13 @@ jobs:
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
           echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}" >> $GITHUB_ENV
 
-      # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
-      # flags may be incorrect when the cache is reused across LLVM versions.
-      - name: Bust llvm-sys cache
+      # The LLVM binding crates discover link flags at build script time; these are cached by
+      # cargo. The cached flags may be incorrect when the cache is reused across LLVM versions.
+      - name: Bust LLVM binding cache
         run: |
           set -euxo pipefail
-          cargo clean --target ${{ matrix.platform.target }} -p llvm-sys
-          cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
+          cargo clean --target ${{ matrix.platform.target }} -p llvm-sys -p aya-llvm-sys
+          cargo clean --target ${{ matrix.platform.target }} -p llvm-sys -p aya-llvm-sys --release
 
       - name: Check (default features)
         if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
@@ -379,24 +383,24 @@ jobs:
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v7
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
+        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         with:
           repository: aya-rs/aya
           path: aya
           submodules: recursive
 
       - name: Install (dynamic)
-        if: endsWith(matrix.platform.target, 'gnu') && matrix.toolchain.rust == 'stable'
+        if: endsWith(matrix.platform.target, 'gnu') && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         run: |
           cargo install --path . --no-default-features --features \
             ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Install autopoint for aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
+        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         run: sudo apt -y install autopoint
 
       - name: Run aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.rust == 'stable'
+        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         working-directory: aya
         env:
           RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
@@ -405,7 +409,7 @@ jobs:
 
           rustup toolchain install "$RUST_NIGHTLY" \
             --component rust-src --profile minimal --no-self-update
-          # Aya invokes `nightly` internally; keep stable as the default.
+          # Aya invokes `nightly` internally; point it at the validated dated nightly.
           ln -s "$(rustup run "$RUST_NIGHTLY" rustc --print sysroot)" \
             "$(rustup show home)/toolchains/nightly-$(rustup run "$RUST_NIGHTLY" rustc --print host-tuple)"
           cargo xtask integration-test local
