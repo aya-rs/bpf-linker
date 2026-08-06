@@ -30,10 +30,6 @@ tracing-tree = { version = "0.4.1", default-features = false }
 ar = { version = "0.9.0" }
 gimli = { version = "0.32.0" }
 libc = { version = "0.2.174" }
-llvm-sys-20 = { package = "llvm-sys", features = [
-  "disable-alltargets-init",
-  "no-llvm-linking",
-], version = "201.0.1", optional = true }
 llvm-sys-21 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
   "no-llvm-linking",
@@ -65,7 +61,6 @@ which = { version = "8.0.0", default-features = false, features = [
 workspace = true
 
 [features]
-llvm-20 = ["dep:llvm-sys-20"]
 llvm-21 = ["dep:llvm-sys-21"]
 llvm-22 = ["dep:llvm-sys-22"]
 
