@@ -165,7 +165,6 @@ impl Metadata<'_> {
                 | LLVMMetadataKind::LLVMDIGenericSubrangeMetadataKind
                 | LLVMMetadataKind::LLVMDIArgListMetadataKind
                 | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Other(value),
-                #[cfg(not(feature = "llvm-20"))]
                 LLVMMetadataKind::LLVMDISubrangeTypeMetadataKind
                 | LLVMMetadataKind::LLVMDIFixedPointTypeMetadataKind => Metadata::Other(value),
             }
