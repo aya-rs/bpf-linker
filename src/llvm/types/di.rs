@@ -200,14 +200,9 @@ impl DIDerivedType<'_> {
 /// correspond to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DICompositeTypeOperand {
-    /// Elements of the composite type. Reference in [LLVM 20][llvm-20] and
-    /// [LLVM 21][llvm-21].
+    /// Elements of the composite type. Reference in [LLVM 21][llvm-21].
     ///
-    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1332
     /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813
-    #[cfg(feature = "llvm-20")]
-    Elements = 4,
-    #[cfg(not(feature = "llvm-20"))]
     Elements = 6,
 }
 
