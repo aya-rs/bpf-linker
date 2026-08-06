@@ -21,25 +21,31 @@ single_version_override(
     patches = ["//bazel/patches:rules_rs_bpf_linker_from_source.patch"],
 )
 
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//bazel/patches:hermetic_llvm_23.patch"],
+)
+
 # @llvm-project uses the rust-lang/llvm-project commit referenced by
-# nightly-2026-08-05.
+# nightly-2026-08-06.
 llvm_source = use_extension("@llvm//extensions:llvm_source.bzl", "llvm_source")
 
 # llvm_source.version only sets generated LLVM version constants; from_archive
 # below selects the LLVM source archive.
-llvm_source.version(llvm_version = "22.1.8")
+llvm_source.version(llvm_version = "23.1.0")
 llvm_source.from_archive(
     build_file_content = "# EMPTY",
-    integrity = "sha256-J/MaZjkCPZDNdUwd5C2PnXfMDD3v83iW+IwTRsbD85Y=",
+    files = {
+        "utils/bazel/third_party_build/BUILD.bazel": "//bazel/llvm:third_party_build.BUILD.bazel",
+        "utils/bazel/third_party_build/zlib-ng.BUILD": "//bazel/llvm:zlib-ng.BUILD.bazel",
+        "utils/bazel/third_party_build/zstd.BUILD": "//bazel/llvm:zstd.BUILD.bazel",
+    },
+    integrity = "sha256-yAiqllLCuJsbFtkQLzmBO5nCj/qX+GMljEU3w7VE/Zs=",
     patch_args = ["-p1"],
-    patches = [
-        "@llvm//3rd_party/llvm-project/22.x/patches:windows_link_and_genrule.patch",
-        "@llvm//3rd_party/llvm-project/22.x/patches:llvm-bazel-blake3-windows-gnu.patch",
-        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
-        "@llvm//3rd_party/llvm-project/x.x/patches:llvm-abi-breaking-checks.patch",
-    ],
-    strip_prefix = "llvm-project-52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04",
-    urls = ["https://github.com/rust-lang/llvm-project/archive/52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04.tar.gz"],
+    patches = [],
+    strip_prefix = "llvm-project-21cf28432798952d942bacc6bcee3a328faa3638",
+    urls = ["https://github.com/rust-lang/llvm-project/archive/21cf28432798952d942bacc6bcee3a328faa3638.tar.gz"],
 )
 use_repo(llvm_source, "llvm-raw", "llvm_config", "llvm_zlib", "llvm_zstd")
 
@@ -111,11 +117,15 @@ crate.from_cargo(
     ],
 )
 
-# bpf-linker links LLVM through Bazel's @llvm-project graph. The llvm-sys
-# crates provide Rust bindings only, so their Cargo build scripts must not try
-# to discover or link a host LLVM installation.
+# bpf-linker links LLVM through Bazel's @llvm-project graph. The LLVM crates
+# provide Rust bindings only, so their Cargo build scripts must not try to
+# discover or link a host LLVM installation.
 crate.annotation(
     crate = "llvm-sys",
+    gen_build_script = "off",
+)
+crate.annotation(
+    crate = "aya-llvm-sys",
     gen_build_script = "off",
 )
 
