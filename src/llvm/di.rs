@@ -6,7 +6,7 @@ use std::{
     ptr,
 };
 
-use gimli::{DW_TAG_pointer_type, DW_TAG_structure_type, DW_TAG_union_type};
+use gimli::{DW_TAG_structure_type, DW_TAG_union_type};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{Level, span, trace};
 
@@ -105,17 +105,6 @@ impl<'ctx> DISanitizer<'ctx> {
                             // Clear the name from characters incompatible with C.
                             di_composite_type.replace_name(self.context, sanitized_name.as_slice())
                         }
-                    }
-                    _ => (),
-                }
-            }
-            Metadata::DIDerivedType(mut di_derived_type) => {
-                #[expect(clippy::single_match)]
-                #[expect(non_upper_case_globals)]
-                match di_derived_type.tag() {
-                    DW_TAG_pointer_type => {
-                        // remove rust names
-                        di_derived_type.replace_name(self.context, &[])
                     }
                     _ => (),
                 }
