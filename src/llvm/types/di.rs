@@ -113,7 +113,6 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
 /// alternative name. The examples of derived types are pointers, references,
 /// typedefs, etc.
 pub(crate) struct DIDerivedType<'ctx> {
-    metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
@@ -128,32 +127,10 @@ impl DIDerivedType<'_> {
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
     pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
         Self {
-            metadata_ref,
             value_ref,
             _marker: PhantomData,
         }
-    }
-
-    /// Replaces the name of the type with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub(crate) fn replace_name(&mut self, context: &LLVMContext, name: &[u8]) {
-        super::ir::replace_name(
-            self.value_ref,
-            context.as_mut_ptr(),
-            DITypeOperand::Name as u32,
-            name,
-        )
-    }
-
-    /// Returns a DWARF tag of the given derived type.
-    pub(crate) fn tag(&self) -> DwTag {
-        unsafe { di_node_tag(self.metadata_ref) }
     }
 }
 
