@@ -17,10 +17,10 @@ load("//bazel:llvm_archive.bzl", "llvm_archive", "llvm_archive_for_platform")
 # (For example `my_serde = { package = "serde", version = "1.0" }`)
 CRATE_ALIASES = aliases()
 
-# Bazel supplies LLVM through :llvm, so llvm-sys provides bindings without
-# linking LLVM itself.
+# Bazel supplies LLVM through :llvm, so the LLVM crates provide bindings
+# without linking LLVM themselves.
 CRATE_FEATURES = [
-    "llvm-22",
+    "llvm-23",
     "no-llvm-linking",
 ]
 

@@ -56,6 +56,7 @@
     "https://bcr.bazel.build/modules/bazel_skylib/1.2.0/MODULE.bazel": "44fe84260e454ed94ad326352a698422dbe372b21a1ac9f3eab76eb531223686",
     "https://bcr.bazel.build/modules/bazel_skylib/1.2.1/MODULE.bazel": "f35baf9da0efe45fa3da1696ae906eea3d615ad41e2e3def4aeb4e8bc0ef9a7a",
     "https://bcr.bazel.build/modules/bazel_skylib/1.3.0/MODULE.bazel": "20228b92868bf5cfc41bda7afc8a8ba2a543201851de39d990ec957b513579c5",
+    "https://bcr.bazel.build/modules/bazel_skylib/1.4.0/MODULE.bazel": "2ab127ef8d56a739a99bb2ce00ec4c7d1ecc7977d4370c0ca6efd0d8f03d6d99",
     "https://bcr.bazel.build/modules/bazel_skylib/1.4.1/MODULE.bazel": "a0dcb779424be33100dcae821e9e27e4f2901d9dfd5333efe5ac6a8d7ab75e1d",
     "https://bcr.bazel.build/modules/bazel_skylib/1.4.2/MODULE.bazel": "3bd40978e7a1fac911d5989e6b09d8f64921865a45822d8b09e815eaa726a651",
     "https://bcr.bazel.build/modules/bazel_skylib/1.5.0/MODULE.bazel": "32880f5e2945ce6a03d1fbd588e9198c0a959bb42297b2cfaf1685b7bc32e138",
@@ -86,8 +87,8 @@
     "https://bcr.bazel.build/modules/jsoncpp/1.9.6/MODULE.bazel": "2f8d20d3b7d54143213c4dfc3d98225c42de7d666011528dc8fe91591e2e17b0",
     "https://bcr.bazel.build/modules/jsoncpp/1.9.6/source.json": "a04756d367a2126c3541682864ecec52f92cdee80a35735a3cb249ce015ca000",
     "https://bcr.bazel.build/modules/libpfm/4.11.0/MODULE.bazel": "45061ff025b301940f1e30d2c16bea596c25b176c8b6b3087e92615adbd52902",
-    "https://bcr.bazel.build/modules/llvm/0.8.11/MODULE.bazel": "0f8c30b74be64f0e91764e925d0f562c70e8d85b6cea912f724d6b3753d6a33f",
-    "https://bcr.bazel.build/modules/llvm/0.8.11/source.json": "b40edb2bb2ed271bf613b396d245cb473c42fb057a2b26a3bc7d7e8bfcf6aa71",
+    "https://bcr.bazel.build/modules/llvm/0.8.17/MODULE.bazel": "1d90735de43b21720434f025fb7a609085490ad695692eec1315def8e1145869",
+    "https://bcr.bazel.build/modules/llvm/0.8.17/source.json": "77e3aa25f7c34947f7551eced742fe8008a0c140274409f54cdf4e7410216927",
     "https://bcr.bazel.build/modules/llvm/0.8.3/MODULE.bazel": "dbc1bc13171f8f9980a75524883abef1c491613e8d8d805cd4ffa3767ba9708e",
     "https://bcr.bazel.build/modules/nlohmann_json/3.6.1/MODULE.bazel": "6f7b417dcc794d9add9e556673ad25cb3ba835224290f4f848f8e2db1e1fca74",
     "https://bcr.bazel.build/modules/package_metadata/0.0.3/MODULE.bazel": "77890552ecea9e284b5424c9de827a58099348763a4359e975c359a83d4faa83",
@@ -142,8 +143,8 @@
     "https://bcr.bazel.build/modules/rules_cc/0.2.13/MODULE.bazel": "eecdd666eda6be16a8d9dc15e44b5c75133405e820f620a234acc4b1fdc5aa37",
     "https://bcr.bazel.build/modules/rules_cc/0.2.17/MODULE.bazel": "1849602c86cb60da8613d2de887f9566a6d354a6df6d7009f9d04a14402f9a84",
     "https://bcr.bazel.build/modules/rules_cc/0.2.18/MODULE.bazel": "4460ec36adc8f722a6a2a4ac9374cb91f2acebadaa93fc37966129afb3dece87",
-    "https://bcr.bazel.build/modules/rules_cc/0.2.20/MODULE.bazel": "f5c07bce5ddcb99be21a0812ff5aadb439e688b7449c6542152363b2fd859c1a",
-    "https://bcr.bazel.build/modules/rules_cc/0.2.20/source.json": "1155433dc6b8161bc339ce94095b337ed95feb1f048b014e10b62339d4b4239c",
+    "https://bcr.bazel.build/modules/rules_cc/0.2.22/MODULE.bazel": "94df4328edef9e44d38de5e73b037cd348e75e7ae55f4e21bf07878c41a31ebb",
+    "https://bcr.bazel.build/modules/rules_cc/0.2.22/source.json": "b2d6d6f9c332ce269ad75b89c6f3168d809a66173c9040210fb9bcc733ab42fa",
     "https://bcr.bazel.build/modules/rules_cc/0.2.4/MODULE.bazel": "1ff1223dfd24f3ecf8f028446d4a27608aa43c3f41e346d22838a4223980b8cc",
     "https://bcr.bazel.build/modules/rules_cc/0.2.8/MODULE.bazel": "f1df20f0bf22c28192a794f29b501ee2018fa37a3862a1a2132ae2940a23a642",
     "https://bcr.bazel.build/modules/rules_foreign_cc/0.9.0/MODULE.bazel": "c9e8c682bf75b0e7c704166d79b599f93b72cfca5ad7477df596947891feeef6",
@@ -194,14 +195,16 @@
     "https://bcr.bazel.build/modules/rules_python/1.6.0/MODULE.bazel": "7e04ad8f8d5bea40451cf80b1bd8262552aa73f841415d20db96b7241bd027d8",
     "https://bcr.bazel.build/modules/rules_python/1.6.3/MODULE.bazel": "a7b80c42cb3de5ee2a5fa1abc119684593704fcd2fec83165ebe615dec76574f",
     "https://bcr.bazel.build/modules/rules_python/1.7.0/MODULE.bazel": "d01f995ecd137abf30238ad9ce97f8fc3ac57289c8b24bd0bf53324d937a14f8",
-    "https://bcr.bazel.build/modules/rules_python/1.7.0/source.json": "028a084b65dcf8f4dc4f82f8778dbe65df133f234b316828a82e060d81bdce32",
+    "https://bcr.bazel.build/modules/rules_python/1.8.0/MODULE.bazel": "c151c025dbcc93d8f62ab68ecc313c9176a868a0e6386981bf2a12aec77cbe7b",
+    "https://bcr.bazel.build/modules/rules_python/1.8.0/source.json": "356397eed5b46971d8c585c92098d70495078a80bf18bebcb4209f44b495f3e6",
     "https://bcr.bazel.build/modules/rules_rs/0.0.92/MODULE.bazel": "192dbfb4643063187ce6b0f741df6df96c57d7d9a6979453ff50b58fed23b8e6",
     "https://bcr.bazel.build/modules/rules_rs/0.0.92/source.json": "67b004c0288ea636ac098c7584d24d7eea526334c35758ae81225d7781275e3a",
     "https://bcr.bazel.build/modules/rules_shell/0.2.0/MODULE.bazel": "fda8a652ab3c7d8fee214de05e7a9916d8b28082234e8d2c0094505c5268ed3c",
     "https://bcr.bazel.build/modules/rules_shell/0.3.0/MODULE.bazel": "de4402cd12f4cc8fda2354fce179fdb068c0b9ca1ec2d2b17b3e21b24c1a937b",
     "https://bcr.bazel.build/modules/rules_shell/0.4.1/MODULE.bazel": "00e501db01bbf4e3e1dd1595959092c2fadf2087b2852d3f553b5370f5633592",
     "https://bcr.bazel.build/modules/rules_shell/0.6.1/MODULE.bazel": "72e76b0eea4e81611ef5452aa82b3da34caca0c8b7b5c0c9584338aa93bae26b",
-    "https://bcr.bazel.build/modules/rules_shell/0.6.1/source.json": "20ec05cd5e592055e214b2da8ccb283c7f2a421ea0dc2acbf1aa792e11c03d0c",
+    "https://bcr.bazel.build/modules/rules_shell/0.8.0/MODULE.bazel": "f6a89f1d6a669a26f28fe814503857055d76306b79cfc11d12399af08d0b80ae",
+    "https://bcr.bazel.build/modules/rules_shell/0.8.0/source.json": "eb53cc815bc503c6683c5fe12d943f98883f81fc22f51403ec8a95610cba4195",
     "https://bcr.bazel.build/modules/rules_swift/1.16.0/MODULE.bazel": "4a09f199545a60d09895e8281362b1ff3bb08bbde69c6fc87aff5b92fcc916ca",
     "https://bcr.bazel.build/modules/rules_swift/2.1.1/MODULE.bazel": "494900a80f944fc7aa61500c2073d9729dff0b764f0e89b824eb746959bc1046",
     "https://bcr.bazel.build/modules/rules_swift/2.4.0/MODULE.bazel": "1639617eb1ede28d774d967a738b4a68b0accb40650beadb57c21846beab5efd",
@@ -221,10 +224,14 @@
     "https://bcr.bazel.build/modules/with_cfg.bzl/0.14.6/source.json": "12363ac76d821f6c7dabfebbd673615391da06e2e33f576402d31a96a7b56532",
     "https://bcr.bazel.build/modules/xz/5.4.5.bcr.8/MODULE.bazel": "e48a69bd54053c2ec5fffc2a29fb70122afd3e83ab6c07068f63bc6553fa57cc",
     "https://bcr.bazel.build/modules/xz/5.4.5.bcr.8/source.json": "bd7e928ccd63505b44f4784f7bbf12cc11f9ff23bf3ca12ff2c91cd74846099e",
+    "https://bcr.bazel.build/modules/zlib-ng/2.3.3.bcr.2/MODULE.bazel": "86130924115bf8dfc4aba286fb49a2ec8d32430a21771db9ccf5381acf0d10cc",
+    "https://bcr.bazel.build/modules/zlib-ng/2.3.3.bcr.2/source.json": "7aa4112eb2fbb99757e97cf0b7a4e2bdb3464b2b3cfb351bc807ffcb34bd349f",
     "https://bcr.bazel.build/modules/zlib/1.2.11/MODULE.bazel": "07b389abc85fdbca459b69e2ec656ae5622873af3f845e1c9d80fe179f3effa0",
     "https://bcr.bazel.build/modules/zlib/1.3.1.bcr.5/MODULE.bazel": "eec517b5bbe5492629466e11dae908d043364302283de25581e3eb944326c4ca",
     "https://bcr.bazel.build/modules/zlib/1.3.1.bcr.5/source.json": "22bc55c47af97246cfc093d0acf683a7869377de362b5d1c552c2c2e16b7a806",
-    "https://bcr.bazel.build/modules/zlib/1.3.1/MODULE.bazel": "751c9940dcfe869f5f7274e1295422a34623555916eb98c174c1e945594bf198"
+    "https://bcr.bazel.build/modules/zlib/1.3.1/MODULE.bazel": "751c9940dcfe869f5f7274e1295422a34623555916eb98c174c1e945594bf198",
+    "https://bcr.bazel.build/modules/zstd/1.5.7.bcr.1/MODULE.bazel": "c5977176dd8555be7a9d598512ae0cae11831259c06f00a5e5e0037d5db4e3f5",
+    "https://bcr.bazel.build/modules/zstd/1.5.7.bcr.1/source.json": "aa95e0b5aac9d80195b9047d223beaf26b1948be55d49f0e803e180e9ccc6e75"
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
@@ -345,8 +352,8 @@
     },
     "@@rules_python+//python/extensions:config.bzl%config": {
       "general": {
-        "bzlTransitiveDigest": "iibnRYgg8LpcfmH7EAnVwYePC3jsVaJ6Id8XxUjSZps=",
-        "usagesDigest": "ZVSXMAGpD+xzVNPuvF1IoLBkty7TROO0+akMapt1pAg=",
+        "bzlTransitiveDigest": "vr9ddlKwZY5E9diixm5DtS4qbXGoYSdvchYrfpG6MdQ=",
+        "usagesDigest": "EocbSr4I3/Shk4QaFool8b8navUiUFqgzF9bOaaYfFk=",
         "recordedInputs": [
           "REPO_MAPPING:rules_python+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_python+,pypi__build rules_python++config+pypi__build",
@@ -514,7 +521,7 @@
     "@@rules_python+//python/uv:uv.bzl%uv": {
       "general": {
         "bzlTransitiveDigest": "ijW9KS7qsIY+yBVvJ+Nr1mzwQox09j13DnE3iIwaeTM=",
-        "usagesDigest": "H8dQoNZcoqP+Mu0tHZTi4KHATzvNkM5ePuEqoQdklIU=",
+        "usagesDigest": "yXvWfXAzpBeW71mWgwU3AqAzXX/dFACnx12eYvBsJ8w=",
         "recordedInputs": [
           "REPO_MAPPING:rules_python+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_python+,platforms platforms"
@@ -565,6 +572,7 @@
       "autocfg_1.5.0": "{\"dependencies\":[],\"features\":{}}",
       "axum-core_0.5.6": "{\"dependencies\":[{\"name\":\"bytes\",\"req\":\"^1.2\"},{\"name\":\"futures-core\",\"req\":\"^0.3\"},{\"name\":\"http\",\"req\":\"^1.0.0\"},{\"name\":\"http-body\",\"req\":\"^1.0.0\"},{\"name\":\"http-body-util\",\"req\":\"^0.1.0\"},{\"kind\":\"dev\",\"name\":\"hyper\",\"req\":\"^1.0.0\"},{\"name\":\"mime\",\"req\":\"^0.3.16\"},{\"name\":\"pin-project-lite\",\"req\":\"^0.2.7\"},{\"name\":\"sync_wrapper\",\"req\":\"^1.0.0\"},{\"features\":[\"macros\"],\"kind\":\"dev\",\"name\":\"tokio\",\"req\":\"^1.25.0\"},{\"features\":[\"limit\"],\"name\":\"tower-http\",\"optional\":true,\"req\":\"^0.6.0\"},{\"features\":[\"limit\"],\"kind\":\"dev\",\"name\":\"tower-http\",\"req\":\"^0.6.0\"},{\"name\":\"tower-layer\",\"req\":\"^0.3\"},{\"name\":\"tower-service\",\"req\":\"^0.3\"},{\"default_features\":false,\"name\":\"tracing\",\"optional\":true,\"req\":\"^0.1.37\"}],\"features\":{\"__private_docs\":[\"dep:tower-http\"],\"tracing\":[\"dep:tracing\"]}}",
       "axum_0.8.8": "{\"dependencies\":[{\"kind\":\"dev\",\"name\":\"anyhow\",\"req\":\"^1.0\"},{\"name\":\"axum-core\",\"req\":\"^0.5.5\"},{\"name\":\"axum-macros\",\"optional\":true,\"req\":\"^0.5.0\"},{\"name\":\"base64\",\"optional\":true,\"req\":\"^0.22.1\"},{\"name\":\"bytes\",\"req\":\"^1.0\"},{\"name\":\"form_urlencoded\",\"optional\":true,\"req\":\"^1.1.0\"},{\"default_features\":false,\"features\":[\"alloc\"],\"name\":\"futures-util\",\"req\":\"^0.3\"},{\"name\":\"http\",\"req\":\"^1.0.0\"},{\"name\":\"http-body\",\"req\":\"^1.0.0\"},{\"name\":\"http-body-util\",\"req\":\"^0.1.0\"},{\"name\":\"hyper\",\"optional\":true,\"req\":\"^1.1.0\"},{\"features\":[\"client\"],\"kind\":\"dev\",\"name\":\"hyper\",\"req\":\"^1.1.0\"},{\"features\":[\"tokio\",\"server\",\"service\"],\"name\":\"hyper-util\",\"optional\":true,\"req\":\"^0.1.3\"},{\"name\":\"itoa\",\"req\":\"^1.0.5\"},{\"name\":\"matchit\",\"req\":\"=0.8.4\"},{\"name\":\"memchr\",\"req\":\"^2.4.1\"},{\"name\":\"mime\",\"req\":\"^0.3.16\"},{\"name\":\"multer\",\"optional\":true,\"req\":\"^3.0.0\"},{\"name\":\"percent-encoding\",\"req\":\"^2.1\"},{\"name\":\"pin-project-lite\",\"req\":\"^0.2.7\"},{\"kind\":\"dev\",\"name\":\"quickcheck\",\"req\":\"^1.0\"},{\"kind\":\"dev\",\"name\":\"quickcheck_macros\",\"req\":\"^1.0\"},{\"default_features\":false,\"features\":[\"json\",\"stream\",\"multipart\"],\"name\":\"reqwest\",\"optional\":true,\"req\":\"^0.12\"},{\"default_features\":false,\"features\":[\"json\",\"stream\",\"multipart\"],\"kind\":\"dev\",\"name\":\"reqwest\",\"req\":\"^0.12\"},{\"name\":\"serde\",\"optional\":true,\"req\":\"^1.0.211\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"serde\",\"req\":\"^1.0.221\"},{\"name\":\"serde_core\",\"req\":\"^1.0.221\"},{\"features\":[\"raw_value\"],\"name\":\"serde_json\",\"optional\":true,\"req\":\"^1.0\"},{\"features\":[\"raw_value\"],\"kind\":\"dev\",\"name\":\"serde_json\",\"req\":\"^1.0\"},{\"name\":\"serde_path_to_error\",\"optional\":true,\"req\":\"^0.1.8\"},{\"name\":\"serde_urlencoded\",\"optional\":true,\"req\":\"^0.7\"},{\"name\":\"sha1\",\"optional\":true,\"req\":\"^0.10\"},{\"name\":\"sync_wrapper\",\"req\":\"^1.0.0\"},{\"features\":[\"serde-human-readable\"],\"kind\":\"dev\",\"name\":\"time\",\"req\":\"^0.3\"},{\"features\":[\"time\"],\"name\":\"tokio\",\"optional\":true,\"package\":\"tokio\",\"req\":\"^1.44\"},{\"features\":[\"macros\",\"rt\",\"rt-multi-thread\",\"net\",\"test-util\"],\"kind\":\"dev\",\"name\":\"tokio\",\"package\":\"tokio\",\"req\":\"^1.44.2\"},{\"kind\":\"dev\",\"name\":\"tokio-stream\",\"req\":\"^0.1\"},{\"name\":\"tokio-tungstenite\",\"optional\":true,\"req\":\"^0.28.0\"},{\"kind\":\"dev\",\"name\":\"tokio-tungstenite\",\"req\":\"^0.28.0\"},{\"default_features\":false,\"features\":[\"util\"],\"name\":\"tower\",\"req\":\"^0.5.2\"},{\"features\":[\"util\",\"timeout\",\"limit\",\"load-shed\",\"steer\",\"filter\"],\"kind\":\"dev\",\"name\":\"tower\",\"package\":\"tower\",\"req\":\"^0.5.2\"},{\"features\":[\"add-extension\",\"auth\",\"catch-panic\",\"compression-br\",\"compression-deflate\",\"compression-gzip\",\"cors\",\"decompression-br\",\"decompression-deflate\",\"decompression-gzip\",\"follow-redirect\",\"fs\",\"limit\",\"map-request-body\",\"map-response-body\",\"metrics\",\"normalize-path\",\"propagate-header\",\"redirect\",\"request-id\",\"sensitive-headers\",\"set-header\",\"set-status\",\"timeout\",\"trace\",\"util\",\"validate-request\"],\"name\":\"tower-http\",\"optional\":true,\"req\":\"^0.6.0\"},{\"features\":[\"add-extension\",\"auth\",\"catch-panic\",\"compression-br\",\"compression-deflate\",\"compression-gzip\",\"cors\",\"decompression-br\",\"decompression-deflate\",\"decompression-gzip\",\"follow-redirect\",\"fs\",\"limit\",\"map-request-body\",\"map-response-body\",\"metrics\",\"normalize-path\",\"propagate-header\",\"redirect\",\"request-id\",\"sensitive-headers\",\"set-header\",\"set-status\",\"timeout\",\"trace\",\"util\",\"validate-request\"],\"kind\":\"dev\",\"name\":\"tower-http\",\"req\":\"^0.6.0\"},{\"name\":\"tower-layer\",\"req\":\"^0.3.2\"},{\"name\":\"tower-service\",\"req\":\"^0.3\"},{\"default_features\":false,\"name\":\"tracing\",\"optional\":true,\"req\":\"^0.1\"},{\"kind\":\"dev\",\"name\":\"tracing\",\"req\":\"^0.1\"},{\"features\":[\"json\"],\"kind\":\"dev\",\"name\":\"tracing-subscriber\",\"req\":\"^0.3\"},{\"features\":[\"serde\",\"v4\"],\"kind\":\"dev\",\"name\":\"uuid\",\"req\":\"^1.0\"}],\"features\":{\"__private\":[\"tokio\",\"http1\",\"dep:reqwest\"],\"__private_docs\":[\"axum-core/__private_docs\",\"tower/full\",\"dep:serde\",\"dep:tower-http\"],\"default\":[\"form\",\"http1\",\"json\",\"matched-path\",\"original-uri\",\"query\",\"tokio\",\"tower-log\",\"tracing\"],\"form\":[\"dep:form_urlencoded\",\"dep:serde_urlencoded\",\"dep:serde_path_to_error\"],\"http1\":[\"dep:hyper\",\"hyper?/http1\",\"hyper-util?/http1\"],\"http2\":[\"dep:hyper\",\"hyper?/http2\",\"hyper-util?/http2\"],\"json\":[\"dep:serde_json\",\"dep:serde_path_to_error\"],\"macros\":[\"dep:axum-macros\"],\"matched-path\":[],\"multipart\":[\"dep:multer\"],\"original-uri\":[],\"query\":[\"dep:form_urlencoded\",\"dep:serde_urlencoded\",\"dep:serde_path_to_error\"],\"tokio\":[\"dep:hyper-util\",\"dep:tokio\",\"tokio/net\",\"tokio/rt\",\"tower/make\",\"tokio/macros\"],\"tower-log\":[\"tower/log\"],\"tracing\":[\"dep:tracing\",\"axum-core/tracing\"],\"ws\":[\"dep:hyper\",\"tokio\",\"dep:tokio-tungstenite\",\"dep:sha1\",\"dep:base64\"]}}",
+      "aya-llvm-sys_231.0.0-rc2": "{\"dependencies\":[{\"kind\":\"build\",\"name\":\"anyhow\",\"req\":\"^1.0\"},{\"kind\":\"build\",\"name\":\"cc\",\"req\":\"^1.0\"},{\"name\":\"clang-sys\",\"optional\":true,\"req\":\"^1.2.2\"},{\"kind\":\"build\",\"name\":\"lazy_static\",\"req\":\"^1.0\"},{\"name\":\"libc\",\"req\":\"^0.2\"},{\"kind\":\"build\",\"name\":\"regex-lite\",\"req\":\"^0.1.5\"},{\"kind\":\"build\",\"name\":\"semver\",\"req\":\"^1.0.7\"},{\"name\":\"tempfile\",\"optional\":true,\"req\":\"^3.2.0\"}],\"features\":{\"disable-alltargets-init\":[],\"force-dynamic\":[],\"force-static\":[],\"no-llvm-linking\":[],\"prefer-dynamic\":[],\"prefer-static\":[],\"strict-versioning\":[]}}",
       "base64_0.13.1": "{\"dependencies\":[{\"kind\":\"dev\",\"name\":\"criterion\",\"req\":\"=0.3.2\"},{\"kind\":\"dev\",\"name\":\"rand\",\"req\":\"^0.6.1\"},{\"kind\":\"dev\",\"name\":\"structopt\",\"req\":\"^0.3\"}],\"features\":{\"alloc\":[],\"default\":[\"std\"],\"std\":[]}}",
       "base64_0.22.1": "{\"dependencies\":[{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"clap\",\"req\":\"^3.2.25\"},{\"kind\":\"dev\",\"name\":\"criterion\",\"req\":\"^0.4.0\"},{\"kind\":\"dev\",\"name\":\"once_cell\",\"req\":\"^1\"},{\"features\":[\"small_rng\"],\"kind\":\"dev\",\"name\":\"rand\",\"req\":\"^0.8.5\"},{\"kind\":\"dev\",\"name\":\"rstest\",\"req\":\"^0.13.0\"},{\"kind\":\"dev\",\"name\":\"rstest_reuse\",\"req\":\"^0.6.0\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"strum\",\"req\":\"^0.25\"}],\"features\":{\"alloc\":[],\"default\":[\"std\"],\"std\":[\"alloc\"]}}",
       "bitflags_2.10.0": "{\"dependencies\":[{\"name\":\"arbitrary\",\"optional\":true,\"req\":\"^1.0\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"arbitrary\",\"req\":\"^1.0\"},{\"name\":\"bytemuck\",\"optional\":true,\"req\":\"^1.12\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"bytemuck\",\"req\":\"^1.12.2\"},{\"kind\":\"dev\",\"name\":\"rustversion\",\"req\":\"^1.0\"},{\"default_features\":false,\"name\":\"serde_core\",\"optional\":true,\"req\":\"^1.0.228\"},{\"kind\":\"dev\",\"name\":\"serde_json\",\"req\":\"^1.0\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"serde_lib\",\"package\":\"serde\",\"req\":\"^1.0.103\"},{\"kind\":\"dev\",\"name\":\"serde_test\",\"req\":\"^1.0.19\"},{\"kind\":\"dev\",\"name\":\"trybuild\",\"req\":\"^1.0.18\"},{\"features\":[\"derive\"],\"kind\":\"dev\",\"name\":\"zerocopy\",\"req\":\"^0.8\"}],\"features\":{\"example_generated\":[],\"serde\":[\"serde_core\"],\"std\":[]}}",
