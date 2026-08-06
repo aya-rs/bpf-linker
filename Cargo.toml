@@ -73,7 +73,6 @@ no-llvm-linking = []
 default = ["llvm-22"]
 
 [workspace]
-members = ["xtask"]
 
 [workspace.package]
 edition = "2024"
@@ -86,7 +85,6 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 reqwest = { version = "0.12.24", default-features = false }
 rustc-build-sysroot = { version = "0.5.13", default-features = false }
 serde = { version = "1.0.228", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 
 [workspace.lints.clippy]
 all = "warn"
