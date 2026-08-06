@@ -1,5 +1,5 @@
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_shared_library")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
@@ -10,6 +10,7 @@ load(
     "release_macos_filegroup",
     "release_windows_filegroup",
 )
+load("//bazel:llvm_archive.bzl", "llvm_archive")
 
 # If Cargo.toml remaps any crate names, this tells Bazel how to pass the right
 # `--extern` flags.
@@ -35,6 +36,37 @@ LIB_SRCS = glob(
 
 BIN_SRCS = glob(["src/bin/**/*.rs"])
 
+LLVM_DEPS = [
+    "@llvm-project//llvm:Analysis",
+    "@llvm-project//llvm:AsmParser",
+    "@llvm-project//llvm:BPFAsmParser",
+    "@llvm-project//llvm:BPFCodeGen",
+    "@llvm-project//llvm:BPFDisassembler",
+    "@llvm-project//llvm:BPFInfo",
+    "@llvm-project//llvm:BPFUtilsAndDesc",
+    "@llvm-project//llvm:BitReader",
+    "@llvm-project//llvm:BitWriter",
+    "@llvm-project//llvm:CodeGen",
+    "@llvm-project//llvm:Core",
+    "@llvm-project//llvm:DebugInfoBTF",
+    "@llvm-project//llvm:DebugInfoDWARF",
+    "@llvm-project//llvm:Demangle",
+    "@llvm-project//llvm:IPO",
+    "@llvm-project//llvm:IRReader",
+    "@llvm-project//llvm:InstCombine",
+    "@llvm-project//llvm:Linker",
+    "@llvm-project//llvm:MC",
+    "@llvm-project//llvm:MCParser",
+    "@llvm-project//llvm:Object",
+    "@llvm-project//llvm:Passes",
+    "@llvm-project//llvm:Scalar",
+    "@llvm-project//llvm:Support",
+    "@llvm-project//llvm:Target",
+    "@llvm-project//llvm:TargetParser",
+    "@llvm-project//llvm:TransformUtils",
+    "@llvm-project//llvm:Vectorize",
+]
+
 cc_library(
     name = "llvm",
     # @llvm builds libc++ for Linux and Windows targets and provides it via the
@@ -46,36 +78,23 @@ cc_library(
         "//conditions:default": [],
     }),
     visibility = ["//tests:__pkg__"],
-    deps = [
-        "@llvm-project//llvm:Analysis",
-        "@llvm-project//llvm:AsmParser",
-        "@llvm-project//llvm:BPFAsmParser",
-        "@llvm-project//llvm:BPFCodeGen",
-        "@llvm-project//llvm:BPFDisassembler",
-        "@llvm-project//llvm:BPFInfo",
-        "@llvm-project//llvm:BPFUtilsAndDesc",
-        "@llvm-project//llvm:BitReader",
-        "@llvm-project//llvm:BitWriter",
-        "@llvm-project//llvm:CodeGen",
-        "@llvm-project//llvm:Core",
-        "@llvm-project//llvm:DebugInfoBTF",
-        "@llvm-project//llvm:DebugInfoDWARF",
-        "@llvm-project//llvm:Demangle",
-        "@llvm-project//llvm:IPO",
-        "@llvm-project//llvm:IRReader",
-        "@llvm-project//llvm:InstCombine",
-        "@llvm-project//llvm:Linker",
-        "@llvm-project//llvm:MC",
-        "@llvm-project//llvm:MCParser",
-        "@llvm-project//llvm:Object",
-        "@llvm-project//llvm:Passes",
-        "@llvm-project//llvm:Scalar",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//llvm:Target",
-        "@llvm-project//llvm:TargetParser",
-        "@llvm-project//llvm:TransformUtils",
-        "@llvm-project//llvm:Vectorize",
-    ],
+    deps = LLVM_DEPS,
+)
+
+cc_shared_library(
+    name = "LLVM",
+    deps = LLVM_DEPS,
+    tags = ["manual"],
+)
+
+llvm_archive(
+    name = "llvm-archive",
+    cxxstdlibs = {
+        "@llvm-project//libcxx:libcxx.static": "liblibcxx.a",
+        "@llvm-project//libcxxabi:libcxxabi.static": "liblibcxxabi.a",
+    },
+    llvm = ":llvm",
+    shared = ":LLVM",
 )
 
 rust_library(
