@@ -90,8 +90,6 @@ jobs:
             c-compiler: x86_64-linux-musl-clang
             cxx-compiler: x86_64-linux-musl-clang++
         llvm:
-          - version: 20
-            git-ref: rustc/20.1-2025-02-13
           - version: 21
             git-ref: rustc/21.1-2025-08-01
           - version: 22
@@ -328,18 +326,15 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - rust: 1.90.0
-            llvm: 20
-            exclude-features: default,llvm-21,llvm-22
           - rust: 1.94.0
             llvm: 21
-            exclude-features: default,llvm-20,llvm-22
+            exclude-features: default,llvm-22
           - rust: stable
             llvm: 22
-            exclude-features: llvm-20,llvm-21
+            exclude-features: llvm-21
           - rust: beta
             llvm: 22
-            exclude-features: llvm-20,llvm-21
+            exclude-features: llvm-21
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
