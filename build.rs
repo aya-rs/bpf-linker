@@ -270,6 +270,15 @@ fn emit_search_path_if_defined(
 /// which additional libraries are required, we have to determine that set
 /// ourselves using the undefined symbols, and instruct Cargo to link them.
 fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
+    const LIBLLVM_FILENAME_PREFIX: &str = "LIBLLVM_FILENAME_PREFIX";
+    writeln!(
+        stdout,
+        "cargo:rerun-if-env-changed={LIBLLVM_FILENAME_PREFIX}"
+    )?;
+    let libllvm_prefix = env::var_os(LIBLLVM_FILENAME_PREFIX)
+        .map(Cow::Owned)
+        .unwrap_or_else(|| Cow::Borrowed(OsStr::new("libLLVM")));
+
     // Link the library files found inside the directory.
     let dir_entries = fs::read_dir(llvm_lib_dir)
         .with_context(|| format!("failed to read directory {}", llvm_lib_dir.display()))?;
@@ -282,14 +291,17 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
         })?;
         let file_name = entry.file_name();
         let file_name = file_name.as_bytes();
+        if !file_name.starts_with(libllvm_prefix.as_bytes()) {
+            continue;
+        }
         let Some(trimmed) = file_name
-            .strip_prefix(b"libLLVM")
+            .strip_prefix(b"lib")
             .and_then(|name| name.strip_suffix(b".a"))
         else {
             continue;
         };
 
-        write_bytes!(stdout, "cargo:rustc-link-lib=static=LLVM", trimmed)?;
+        write_bytes!(stdout, "cargo:rustc-link-lib=static=", trimmed)?;
     }
 
     let cxxstdlibs = Cxxstdlibs::new(stdout)?;
