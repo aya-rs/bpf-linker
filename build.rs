@@ -293,6 +293,12 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
     }
 
     let cxxstdlibs = Cxxstdlibs::new(stdout)?;
+    const ZLIB: &str = "ZLIB";
+    writeln!(stdout, "cargo:rerun-if-env-changed={ZLIB}")?;
+    let zlib = env::var_os(ZLIB).unwrap_or_else(|| OsString::from("z"));
+    let mut zlib_filename = OsString::from("lib");
+    zlib_filename.push(&zlib);
+    zlib_filename.push(".a");
 
     // Find directories with static libraries we're interested in:
     // - C++ standard library
@@ -404,7 +410,6 @@ to an appropriate compiler"
         // - C++ standard library
         // - zlib (if needed)
         // - zstd (if needed)
-        const ZLIB: &str = "libz.a";
         const ZSTD: &str = "libzstd.a";
         let mut cxxstdlib_paths = (!cxxstdlib_found).then(Vec::new);
         let mut zlib_paths = (!zlib_found).then(Vec::new);
@@ -423,7 +428,7 @@ to an appropriate compiler"
                 }
             }
             if let Some(ref mut zlib_paths) = zlib_paths {
-                let zlib_path = ld_path.join(ZLIB);
+                let zlib_path = ld_path.join(&zlib_filename);
                 if zlib_path.try_exists().with_context(|| {
                     format!("failed to inspect the file {}", zlib_path.display())
                 })? {
@@ -513,14 +518,19 @@ to an appropriate compiler"
             Ok(())
         }
         check_library(stdout, ld_paths, &cxxstdlibs, cxxstdlib_paths)?;
-        check_library(stdout, ld_paths, ZLIB, zlib_paths)?;
+        check_library(
+            stdout,
+            ld_paths,
+            zlib_filename.as_os_str().display(),
+            zlib_paths,
+        )?;
         check_library(stdout, ld_paths, ZSTD, zstd_paths)?;
     }
 
     for cxxstdlib in cxxstdlibs.iter() {
         write_bytes!(stdout, "cargo:rustc-link-lib=static=", cxxstdlib)?;
     }
-    write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
+    write_bytes!(stdout, "cargo:rustc-link-lib=static=", zlib.as_bytes())?;
     write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
 
     Ok(())
