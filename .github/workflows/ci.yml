@@ -294,6 +294,16 @@ jobs:
         # [1] https://github.com/llvm/llvm-project/commit/dc1c43d
         run: echo /usr/lib/llvm-15/bin >> $GITHUB_PATH
 
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew bundle
+
+      - name: Register LLVM tools (macOS)
+        if: runner.os == 'macOS'
+        # macOS does not provide FileCheck. Homebrew provides it in a custom
+        # path.
+        run: echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
       - name: Enforce dynamic linking
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
 
@@ -428,18 +438,13 @@ jobs:
             "$(rustup show home)/toolchains/nightly-$(rustup run "$RUST_NIGHTLY" rustc --print host-tuple)"
           cargo xtask integration-test local
 
-      - name: Install static libraries (macOS)
+      - name: Register static libraries (macOS)
         if: runner.os == 'macOS'
         # macOS does not provide any static libraries. Homebrew does provide
         # them, but in custom paths that the system-wide clang is not aware of.
         # Point build.rs to them by setting environment variables.
-        #
-        # We install llvm package only for libc++.
-        #
-        # libLLVM from homebrew requires zstd.
         run: |
           set -euxo pipefail
-          brew bundle
           echo "CXXSTDLIB_PATH=$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
           echo "LIBZSTD_PATH=$(brew --prefix zstd)/lib" >> $GITHUB_ENV
           echo "ZLIB_PATH=$(brew --prefix zlib)/lib" >> $GITHUB_ENV
