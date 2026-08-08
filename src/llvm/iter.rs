@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use llvm_sys::{
     core::{
         LLVMGetFirstBasicBlock, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetFirstGlobalAlias,
@@ -9,41 +7,37 @@ use llvm_sys::{
     },
     prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef},
 };
+#[cfg(feature = "llvm-22")]
+use llvm_sys::{
+    core::{LLVMGetFirstDbgRecord, LLVMGetLastDbgRecord, LLVMGetNextDbgRecord},
+    prelude::LLVMDbgRecordRef,
+};
 
 macro_rules! llvm_iterator {
     ($trait_name:ident, $iterator_name:ident, $iterable:ty, $method_name:ident, $item_ty:ty, $first:expr, $last:expr, $next:expr $(,)?) => {
         pub(crate) trait $trait_name {
-            fn $method_name(&self) -> $iterator_name<'_>;
+            fn $method_name(&self) -> $iterator_name;
         }
 
-        pub(crate) struct $iterator_name<'a> {
-            lifetime: PhantomData<&'a $iterable>,
+        pub(crate) struct $iterator_name {
             next: $item_ty,
             last: $item_ty,
         }
 
         impl $trait_name for $iterable {
-            fn $method_name(&self) -> $iterator_name<'_> {
+            fn $method_name(&self) -> $iterator_name {
                 let first = unsafe { $first(*self) };
                 let last = unsafe { $last(*self) };
                 assert_eq!(first.is_null(), last.is_null());
-                $iterator_name {
-                    lifetime: PhantomData,
-                    next: first,
-                    last,
-                }
+                $iterator_name { next: first, last }
             }
         }
 
-        impl Iterator for $iterator_name<'_> {
+        impl Iterator for $iterator_name {
             type Item = $item_ty;
 
             fn next(&mut self) -> Option<Self::Item> {
-                let Self {
-                    lifetime: _,
-                    next,
-                    last,
-                } = self;
+                let Self { next, last } = self;
                 if next.is_null() {
                     return None;
                 }
@@ -110,4 +104,16 @@ llvm_iterator!(
     LLVMGetFirstInstruction,
     LLVMGetLastInstruction,
     LLVMGetNextInstruction
+);
+
+#[cfg(feature = "llvm-22")]
+llvm_iterator!(
+    IterDbgRecords,
+    DbgRecordsIter,
+    LLVMValueRef,
+    dbg_records_iter,
+    LLVMDbgRecordRef,
+    LLVMGetFirstDbgRecord,
+    LLVMGetLastDbgRecord,
+    LLVMGetNextDbgRecord,
 );

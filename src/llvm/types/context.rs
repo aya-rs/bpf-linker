@@ -14,6 +14,11 @@ use llvm_sys::{
     },
     prelude::{LLVMContextRef, LLVMDiagnosticInfoRef},
 };
+#[cfg(feature = "llvm-22")]
+use llvm_sys::{
+    core::{LLVMCreateTypeAttribute, LLVMGetMDKindIDInContext},
+    prelude::{LLVMAttributeRef, LLVMTypeRef},
+};
 
 use crate::llvm::{LLVMDiagnosticHandler, Message, types::module::LLVMModule};
 
@@ -60,6 +65,15 @@ impl LLVMContext {
         })
     }
 
+    #[cfg(feature = "llvm-22")]
+    pub(crate) fn create_type_attribute(
+        &self,
+        kind: u32,
+        type_ref: LLVMTypeRef,
+    ) -> LLVMAttributeRef {
+        unsafe { LLVMCreateTypeAttribute(self.as_mut_ptr(), kind, type_ref) }
+    }
+
     /// Install a context-local diagnostic handler.
     pub(crate) fn set_diagnostic_handler<T>(&mut self, handler: T) -> InstalledDiagnosticHandler<T>
     where
@@ -95,6 +109,17 @@ impl LLVMContext {
         // deal with an Option. It also contributes to keeping the handler alive
         // for as long as the handle (or the context-held clone) exists.
         InstalledDiagnosticHandler { inner: pinrc }
+    }
+
+    #[cfg(feature = "llvm-22")]
+    pub(crate) fn md_kind_id(&self, name: &CStr) -> u32 {
+        unsafe {
+            LLVMGetMDKindIDInContext(
+                self.as_mut_ptr(),
+                name.as_ptr(),
+                name.to_bytes().len().try_into().unwrap(),
+            )
+        }
     }
 }
 

@@ -1,7 +1,12 @@
 pub(super) mod context;
+#[cfg(feature = "llvm-22")]
+pub(super) mod data_layout;
 pub(super) mod di;
 pub(super) mod di_builder;
+pub(super) mod instruction;
 pub(super) mod ir;
+#[cfg(feature = "llvm-22")]
+pub(super) mod ir_builder;
 pub(super) mod memory_buffer;
 pub(super) mod module;
 pub(super) mod target_machine;
