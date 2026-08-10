@@ -860,23 +860,26 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
         severity: llvm_sys::LLVMDiagnosticSeverity,
         message: Cow<'_, str>,
     ) {
-        // TODO(https://reviews.llvm.org/D155894): Remove this when LLVM no longer emits these
-        // errors.
-        //
-        // See https://github.com/rust-lang/compiler-builtins/blob/a61823f/src/mem/mod.rs#L22-L68.
-        const MATCHERS: &[&str] = &[
-            "A call to built-in function 'memcpy' is not supported.\n",
-            "A call to built-in function 'memmove' is not supported.\n",
-            "A call to built-in function 'memset' is not supported.\n",
-            "A call to built-in function 'memcmp' is not supported.\n",
-            "A call to built-in function 'bcmp' is not supported.\n",
-            "A call to built-in function 'strlen' is not supported.\n",
-        ];
-
         match severity {
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSError => {
-                if MATCHERS.iter().any(|matcher| message.ends_with(matcher)) {
-                    return;
+                #[cfg(any(feature = "llvm-21", feature = "llvm-22"))]
+                {
+                    // LLVM 21 and 22 emit errors for libcalls supplied by
+                    // compiler-builtins. LLVM 23 no longer does:
+                    //
+                    // https://github.com/llvm/llvm-project/commit/8446b9ffb
+                    const MATCHERS: &[&str] = &[
+                        "A call to built-in function 'memcpy' is not supported.\n",
+                        "A call to built-in function 'memmove' is not supported.\n",
+                        "A call to built-in function 'memset' is not supported.\n",
+                        "A call to built-in function 'memcmp' is not supported.\n",
+                        "A call to built-in function 'bcmp' is not supported.\n",
+                        "A call to built-in function 'strlen' is not supported.\n",
+                    ];
+
+                    if MATCHERS.iter().any(|matcher| message.ends_with(matcher)) {
+                        return;
+                    }
                 }
                 self.has_errors = true;
 
