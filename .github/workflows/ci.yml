@@ -146,20 +146,13 @@ jobs:
           set -euxo pipefail
           for target in $LLVM_TARGETS; do
             sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            version="${{ env.TAG_PREFIX }}:${{ matrix.llvm }}-${target}-${{ env.LLVM_BUILD_REV }}"
             oras push "$sha" \
               --artifact-type application/vnd.aya.llvm.install \
               "llvm-archive-${target}.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd"
-
-            # Candidate LLVM must not replace a version tag used by other runs.
-            if [[ ${{ matrix.llvm }} != "$LATEST_LLVM" ]]; then
-              oras tag "$sha" "$version"
-            fi
           done
 
       - name: Publish validated LLVM version
         if: >-
-          matrix.llvm == fromJSON(env.LATEST_LLVM) &&
           github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         env:
           LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
