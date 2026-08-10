@@ -1,14 +1,34 @@
 # Building bpf-linker from source
 
-## LLVM
+## Building bpf-linker with Bazel
+
+Bazel can build bpf-linker and its LLVM dependency in a single graph without
+requiring a separately installed LLVM. It uses the pinned Rust toolchain and
+builds the pinned LLVM revision from source:
+
+```sh
+bazel build //:bpf-linker --config=release
+```
+
+The resulting executable is available under `bazel-bin/`.
+
+To build release archives for every supported platform, run:
+
+```sh
+bazel build //:release-archives --config=release
+```
+
+## Building bpf-linker with Cargo
+
+### LLVM
 
 bpf-linker is a bitcode linker that uses libLLVM to link bitcode inputs. That
 means the LLVM version used by bpf-linker must match the LLVM version used by
 the Rust toolchain you intend to use.
 
-There are three recommended ways of obtaining an appropriate LLVM.
+There are several recommended ways of obtaining an appropriate LLVM.
 
-### Our prebuilt LLVM on ghcr.io
+#### Our prebuilt LLVM on ghcr.io
 
 We regularly build LLVM in CI and publish the binary artifacts on ghcr.io.
 They can be retrieved using [oras][oras].
@@ -16,61 +36,74 @@ They can be retrieved using [oras][oras].
 First, pick an appropriate image from our [LLVM container page][containers-llvm].
 The tags mention the LLVM version, the platform, and our custom revision, e.g.
 
-* `22-x86_64-unknown-linux-gnu-3` - LLVM 22, x86_64 Linux, glibc, revision 3
-* `21-aarch64-unknown-linux-musl-3` - LLVM 21, aarch64 Linux, musl, revision 3
-* `22-aarch64-apple-darwin-3` - LLVM 22, aarch64 macOS, revision 3
+* `23-x86_64-unknown-linux-gnu-4` - LLVM 23, x86_64 Linux, glibc, revision 4
+* `21-aarch64-unknown-linux-musl-4` - LLVM 21, aarch64 Linux, musl, revision 4
+* `22-aarch64-apple-darwin-4` - LLVM 22, aarch64 macOS, revision 4
 
 Always pick the latest revision available, if there are multiple.
 
 After picking an appropriate image, it can be downloaded with oras, e.g.
 
 ```sh
-oras pull ghcr.io/aya-rs/llvm:22-x86_64-unknown-linux-gnu-3
+oras pull ghcr.io/aya-rs/llvm:23-x86_64-unknown-linux-gnu-4
 ```
 
 And the resulting tarball unpacked to a directory:
 
 ```sh
-mkdir llvm-install
-tar --zstd -xpf llvm-install.tar.zst -C llvm-install/
+mkdir llvm
+tar --zstd -xpf llvm-archive-x86_64-unknown-linux-gnu.tar.zst \
+    -C llvm/
 ```
 
 [oras]: https://oras.land/
 [containers-llvm]: https://github.com/aya-rs/bpf-linker/pkgs/container/llvm/versions
 
-### Building LLVM from source
+#### Building LLVM with Bazel
 
-LLVM can be built from source using the `xtask build-llvm` subcommand, included
-in the bpf-linker sources.
-
-First, clone the LLVM sources from [our fork][llvm-fork], using the branch
-that matches the Rust toolchain you want to use. For example:
-
-```sh
-git clone -b rustc/22.1-2026-05-19 https://github.com/aya-rs/llvm-project ./llvm-project
-```
-
-If in doubt about which branch to use, check the LLVM version used by your Rust
-compiler:
+The repository's Bazel graph builds the pinned LLVM revision from source and
+can package its outputs in the same layout as the ghcr.io artifact. It's
+recommended to disable ThinLTO to avoid linker errors if your system linker
+uses a different LLVM version than the one you're building.
 
 ```sh
-rustc [+toolchain] --version -v | grep LLVM
+bazel build //:llvm-archive --config=release --features=-thin_lto
+mkdir llvm
+tar --zstd -xpf bazel-bin/llvm-archive.tar.zst -C llvm/
 ```
 
-Once the sources are available, LLVM can be built and installed into the
-directory specified by `--install-prefix`, using `--build-dir` to store the
-build state.
+The archive contains FileCheck, the shared LLVM library, and its static
+component libraries. It is intended for building and debugging bpf-linker,
+rather than as a complete LLVM developer installation.
+
+#### Building LLVM with CMake
+
+If you prefer to build LLVM the way it is built upstream, check out the
+appropriate branch from
+[rust-lang/llvm-project](https://github.com/rust-lang/llvm-project/) for the
+LLVM version used by your Rust toolchain, then configure and install it with
+CMake:
 
 ```sh
-cargo xtask llvm build \
-    --src-dir ./llvm-project \
-    --build-dir ./llvm-build \
-    --install-prefix ./llvm-install
+cmake -S llvm-project/llvm -B llvm-build -G Ninja \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_INSTALL_PREFIX="$PWD/llvm" \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DLLVM_BUILD_LLVM_DYLIB=ON \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_PROJECTS= \
+    -DLLVM_ENABLE_RUNTIMES= \
+    -DLLVM_INSTALL_UTILS=ON \
+    -DLLVM_LINK_LLVM_DYLIB=ON \
+    -DLLVM_TARGETS_TO_BUILD=BPF \
+    -DLLVM_USE_LINKER=lld
+cmake --build llvm-build --target install
+export LLVM_PREFIX="$PWD/llvm"
 ```
 
-[llvm-fork]: https://github.com/aya-rs/llvm-project
-
-### System packages
+#### System packages
 
 On Debian-based distributions, you can install the `llvm-<version>-dev` and
 `libclang-<version>-dev` packages from the official LLVM repository at
@@ -80,54 +113,61 @@ Different operating systems and Linux distributions might provide their own
 LLVM packages. If you're interested in packaging bpf-linker, you may also need
 to ensure that the correct LLVM version is packaged for that environment.
 
-## Building bpf-linker with Cargo
+### bpf-linker
 
 bpf-linker uses Cargo features to select the LLVM version, via `llvm-*`
-features such as `llvm-22`. By default, LLVM and its dependencies are linked
+features such as `llvm-23`. By default, LLVM and its dependencies are linked
 dynamically. Static linking can be enabled with the `llvm-link-static` feature.
 
-If you used any of the first two methods of obtaining LLVM (ghcr.io or building
-from source), either set the `LLVM_PREFIX` variable to point to the prefix:
+If you are using either a prebuilt LLVM archive from ghcr.io or one built
+locally with Bazel, set `LLVM_PREFIX` to the directory where you extracted the
+archive. When linking statically, also configure the names and locations of
+the Bazel-built libraries:
 
 ```sh
-export LLVM_PREFIX=./llvm-install
+export LLVM_PREFIX="$PWD/llvm"
+export CXXSTDLIB=libcxx,libcxxabi
+export CXXSTDLIB_PATH="$PWD/llvm/lib"
+export ZLIB_PATH="$PWD/llvm/lib"
+export LIBZSTD_PATH="$PWD/llvm/lib"
 ```
 
-Or add the `bin` directory from the prefix to `PATH`:
-
-```sh
-export PATH="$(pwd)/llvm-install/bin:$PATH"
-```
+If `LLVM_PREFIX` is not set, `build.rs` searches `PATH` for `llvm-config` and
+uses its location to find LLVM libraries installed under a versioned prefix,
+as is common with Linux distribution packages. For example, if LLVM is
+installed under `/usr/lib/llvm/<VERSION>` and its `bin/llvm-config` is exposed
+through `PATH`, `build.rs` searches `/usr/lib/llvm/<VERSION>/lib64` and
+`/usr/lib/llvm/<VERSION>/lib` for the libraries.
 
 Examples:
 
 ```
 # Dynamic linking
-cargo build --no-default-features --features llvm-22
-cargo install bpf-linker --no-default-features --features llvm-22
-cargo install --path . --no-default-features --features llvm-22
+cargo build --no-default-features --features llvm-23
+cargo install bpf-linker --no-default-features --features llvm-23
+cargo install --path . --no-default-features --features llvm-23
 
 # Static linking
-cargo build --no-default-features --features llvm-22,llvm-link-static
-cargo install bpf-linker --no-default-features --features llvm-22,llvm-link-static
-cargo install --path . --no-default-features --features llvm-22,llvm-link-static
+cargo build --no-default-features --features llvm-23,llvm-link-static
+cargo install bpf-linker --no-default-features --features llvm-23,llvm-link-static
+cargo install --path . --no-default-features --features llvm-23,llvm-link-static
 ```
 
-## Running tests
+### Running tests
 
 bpf-linker comes with compiletests, similar to the ones in Rust and LLVM, that
 compile the code to LLVM IR (or BTF) and assert the output matches the
 expected IR.
 
-### With Rust nightly
+#### With Rust nightly
 
 Use `cargo test` with same arguments as used for build, e.g.:
 
 ```
-cargo +nightly test --no-default-features --features llvm-22
+cargo +nightly test --no-default-features --features llvm-23
 ```
 
-### With Rust stable
+#### With Rust stable
 
 BPF targets are [Tier 3 in Rust][rustc-tiers] and therefore rustup does not
 provide BPF targets in stable editions of Rust. There are two ways to overcome
@@ -135,7 +175,7 @@ that.
 
 [rustc-tiers]: https://doc.rust-lang.org/rustc/target-tier-policy.html
 
-#### Prebuilding the BPF sysroot
+##### Prebuilding the BPF sysroot
 
 Build the BPF sysroot with:
 
@@ -155,11 +195,11 @@ BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
     cargo test --no-default-features --features llvm-22
 ```
 
-#### Building the sysroot on demand
+##### Building the sysroot on demand
 
 It's done by the tests automatically when `BPFEL_SYSROOT_DIR` is not defined,
 but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
 
 ```
-RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-22
+RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-23
 ```
