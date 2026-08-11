@@ -204,7 +204,7 @@ jobs:
 
   bazel:
     needs: prepare
-    name: bazel (${{ matrix.os }})
+    name: bazel (${{ matrix.os }}, ${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -212,6 +212,9 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
     defaults:
       run:
         shell: bash
@@ -222,8 +225,14 @@ jobs:
         run: |
           set -euo pipefail
           # The default JVM heap is under 2 GB on 7 GB macOS runners.
+          # Bazel's default test toolchain requires the execution platform to
+          # match the target platform constraints. Disable it because the musl
+          # test binaries are statically linked and can run on the regular
+          # glibc remote workers.
           bazel --host_jvm_args=-Xmx4g test //... \
             --config=remote \
+            --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
+            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false \
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
   build:
