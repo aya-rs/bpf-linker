@@ -101,6 +101,7 @@ crate.from_cargo(
             "apple-darwin",
             "pc-windows-msvc",
             "unknown-linux-gnu",
+            "unknown-linux-musl",
         ]
     ],
 )
