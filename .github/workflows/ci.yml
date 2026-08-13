@@ -367,7 +367,9 @@ jobs:
         if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
         run: cargo build --target ${{ matrix.platform.target }}
 
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@v2.85.13
+        with:
+          tool: cargo-hack
 
       - name: Check (dynamic linking, feature powerset)
         run: |
