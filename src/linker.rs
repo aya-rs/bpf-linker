@@ -96,6 +96,7 @@ pub enum Cpu {
     V1,
     V2,
     V3,
+    V4,
 }
 
 impl Cpu {
@@ -106,6 +107,7 @@ impl Cpu {
             Self::V1 => c"v1",
             Self::V2 => c"v2",
             Self::V3 => c"v3",
+            Self::V4 => c"v4",
         }
     }
 }
@@ -118,6 +120,7 @@ impl std::fmt::Display for Cpu {
             Self::V1 => "v1",
             Self::V2 => "v2",
             Self::V3 => "v3",
+            Self::V4 => "v4",
         })
     }
 }
@@ -132,6 +135,7 @@ impl FromStr for Cpu {
             "v1" => Self::V1,
             "v2" => Self::V2,
             "v3" => Self::V3,
+            "v4" => Self::V4,
             _ => return Err(LinkerError::InvalidCpu(s.to_string())),
         })
     }
@@ -829,6 +833,8 @@ fn llvm_init(
         args.push(c"--bpf-disable-trap-unreachable".into());
     }
     args.extend(options.llvm_args.iter().map(Into::into));
+    #[cfg(feature = "llvm-23")]
+    args.push(c"--bpf-allows-libcalls".into());
     info!("LLVM command line: {:?}", args);
     llvm::init(args.as_slice(), c"BPF linker");
 
@@ -856,23 +862,26 @@ impl llvm::LLVMDiagnosticHandler for DiagnosticHandler {
         severity: llvm_sys::LLVMDiagnosticSeverity,
         message: Cow<'_, str>,
     ) {
-        // TODO(https://reviews.llvm.org/D155894): Remove this when LLVM no longer emits these
-        // errors.
-        //
-        // See https://github.com/rust-lang/compiler-builtins/blob/a61823f/src/mem/mod.rs#L22-L68.
-        const MATCHERS: &[&str] = &[
-            "A call to built-in function 'memcpy' is not supported.\n",
-            "A call to built-in function 'memmove' is not supported.\n",
-            "A call to built-in function 'memset' is not supported.\n",
-            "A call to built-in function 'memcmp' is not supported.\n",
-            "A call to built-in function 'bcmp' is not supported.\n",
-            "A call to built-in function 'strlen' is not supported.\n",
-        ];
-
         match severity {
             llvm_sys::LLVMDiagnosticSeverity::LLVMDSError => {
-                if MATCHERS.iter().any(|matcher| message.ends_with(matcher)) {
-                    return;
+                #[cfg(any(feature = "llvm-21", feature = "llvm-22"))]
+                {
+                    // LLVM 21 and 22 emit errors for libcalls supplied by
+                    // compiler-builtins. LLVM 23 no longer does:
+                    //
+                    // https://github.com/llvm/llvm-project/commit/8446b9ffb
+                    const MATCHERS: &[&str] = &[
+                        "A call to built-in function 'memcpy' is not supported.\n",
+                        "A call to built-in function 'memmove' is not supported.\n",
+                        "A call to built-in function 'memset' is not supported.\n",
+                        "A call to built-in function 'memcmp' is not supported.\n",
+                        "A call to built-in function 'bcmp' is not supported.\n",
+                        "A call to built-in function 'strlen' is not supported.\n",
+                    ];
+
+                    if MATCHERS.iter().any(|matcher| message.ends_with(matcher)) {
+                        return;
+                    }
                 }
                 self.has_errors = true;
 

@@ -4,9 +4,8 @@ use gimli::DwTag;
 use llvm_sys::{
     core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
     debuginfo::{
-        LLVMDIFileGetFilename, LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine,
-        LLVMDITypeGetFlags, LLVMDITypeGetLine, LLVMDITypeGetName, LLVMDITypeGetOffsetInBits,
-        LLVMGetDINodeTag,
+        LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine, LLVMDITypeGetFlags,
+        LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMGetDINodeTag,
     },
     prelude::{LLVMMetadataRef, LLVMValueRef},
 };
@@ -35,44 +34,6 @@ fn mdstring<'a>(mdstring: LLVMValueRef) -> &'a [u8] {
 /// doesn't perform any validation checks.
 unsafe fn di_node_tag(metadata_ref: LLVMMetadataRef) -> DwTag {
     DwTag(unsafe { LLVMGetDINodeTag(metadata_ref) })
-}
-
-/// Represents a source code file in debug infomation.
-///
-/// A `DIFile` debug info node, which represents a given file, is referenced by
-/// other debug info nodes which belong to the file.
-pub(crate) struct DIFile<'ctx> {
-    pub(super) metadata_ref: LLVMMetadataRef,
-    _marker: PhantomData<&'ctx ()>,
-}
-
-impl DIFile<'_> {
-    /// Constructs a new [`DIFile`] from the given `metadata`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `metadata` corresponds to a valid
-    /// instance of [LLVM `DIFile`](https://llvm.org/doxygen/classllvm_1_1DIFile.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(metadata_ref: LLVMMetadataRef) -> Self {
-        Self {
-            metadata_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    pub(crate) fn filename(&self) -> Option<&[u8]> {
-        let mut len = 0;
-        // `LLVMDIFileGetName` doesn't allocate any memory, it just returns
-        // a pointer to the string which is already a part of `DIFile`:
-        // https://github.com/llvm/llvm-project/blob/eee1f7cef856241ad7d66b715c584d29b1c89ca9/llvm/lib/IR/DebugInfo.cpp#L1175-L1179
-        //
-        // Therefore, we don't need to call `LLVMDisposeMessage`. The memory
-        // gets freed when calling `LLVMDisposeDIBuilder`.
-        let ptr = unsafe { LLVMDIFileGetFilename(self.metadata_ref, &mut len) };
-        (!ptr.is_null()).then(|| unsafe { slice::from_raw_parts(ptr.cast(), len as usize) })
-    }
 }
 
 /// Represents the operands for a [`DIType`]. The enum values correspond to the
@@ -152,7 +113,6 @@ impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
 /// alternative name. The examples of derived types are pointers, references,
 /// typedefs, etc.
 pub(crate) struct DIDerivedType<'ctx> {
-    metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
 }
@@ -167,32 +127,10 @@ impl DIDerivedType<'_> {
     /// It's the caller's responsibility to ensure this invariant, as this
     /// method doesn't perform any validation checks.
     pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
         Self {
-            metadata_ref,
             value_ref,
             _marker: PhantomData,
         }
-    }
-
-    /// Replaces the name of the type with a new name.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `NulError` if the new name contains a NUL byte, as it cannot
-    /// be converted into a `CString`.
-    pub(crate) fn replace_name(&mut self, context: &LLVMContext, name: &[u8]) {
-        super::ir::replace_name(
-            self.value_ref,
-            context.as_mut_ptr(),
-            DITypeOperand::Name as u32,
-            name,
-        )
-    }
-
-    /// Returns a DWARF tag of the given derived type.
-    pub(crate) fn tag(&self) -> DwTag {
-        unsafe { di_node_tag(self.metadata_ref) }
     }
 }
 
@@ -200,14 +138,9 @@ impl DIDerivedType<'_> {
 /// correspond to the operand indices within metadata nodes.
 #[repr(u32)]
 enum DICompositeTypeOperand {
-    /// Elements of the composite type. Reference in [LLVM 20][llvm-20] and
-    /// [LLVM 21][llvm-21].
+    /// Elements of the composite type. Reference in [LLVM 21][llvm-21].
     ///
-    /// [llvm-20]: https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/llvm/include/llvm/IR/DebugInfoMetadata.h#L1332
     /// [llvm-21]: https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0-rc3/llvm/include/llvm/IR/DebugInfoMetadata.h#L1813
-    #[cfg(feature = "llvm-20")]
-    Elements = 4,
-    #[cfg(not(feature = "llvm-20"))]
     Elements = 6,
 }
 
@@ -219,6 +152,12 @@ pub(crate) struct DICompositeType<'ctx> {
     metadata_ref: LLVMMetadataRef,
     value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
+}
+
+impl<'ctx> From<DICompositeType<'ctx>> for DIType<'ctx> {
+    fn from(di_composite_type: DICompositeType<'_>) -> Self {
+        unsafe { Self::from_value_ref(di_composite_type.value_ref) }
+    }
 }
 
 impl DICompositeType<'_> {
@@ -260,22 +199,9 @@ impl DICompositeType<'_> {
         unsafe { di_type_name(self.metadata_ref) }
     }
 
-    /// Returns the file that the composite type belongs to.
-    pub(crate) fn file(&self) -> DIFile<'_> {
-        unsafe {
-            let metadata = LLVMDIScopeGetFile(self.metadata_ref);
-            DIFile::from_metadata_ref(metadata)
-        }
-    }
-
     /// Returns the flags associated with the composity type.
     pub(crate) fn flags(&self) -> LLVMDIFlags {
         unsafe { LLVMDITypeGetFlags(self.metadata_ref) }
-    }
-
-    /// Returns the line number in the source code where the type is defined.
-    pub(crate) fn line(&self) -> u32 {
-        unsafe { LLVMDITypeGetLine(self.metadata_ref) }
     }
 
     /// Replaces the elements of the composite type with a new metadata node.

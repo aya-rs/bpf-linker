@@ -84,7 +84,7 @@ struct CommandLine {
     #[clap(long)]
     target: Option<CString>,
 
-    /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`
+    /// Target BPF processor. Can be one of `generic`, `probe`, `v1`, `v2`, `v3`, `v4`
     #[clap(long, default_value = "generic")]
     cpu: Cpu,
 
@@ -92,7 +92,12 @@ struct CommandLine {
     /// LLVM 22 builds also support allows-misaligned-mem-access. Use +feature to enable a
     /// feature, or -feature to disable it. For example
     /// --cpu-features=+allows-misaligned-mem-access,+alu32,-dwarfris
-    #[clap(long, value_name = "features", default_value = "")]
+    #[clap(
+        long,
+        value_name = "features",
+        default_value = "",
+        allow_hyphen_values = true
+    )]
     cpu_features: CString,
 
     /// Write output to <output>
@@ -395,5 +400,19 @@ mod test {
             inputs,
             [PathBuf::from("symbols.o"), PathBuf::from("rcgu.o")]
         );
+    }
+
+    #[test]
+    fn test_cpu_features_accepts_disabled_alu32() {
+        let args = [
+            "bpf-linker",
+            "symbols.o",
+            "-o",
+            "/tmp/bin.o",
+            "--cpu-features",
+            "-alu32",
+        ];
+        let CommandLine { cpu_features, .. } = Parser::parse_from(args);
+        assert_eq!(cpu_features, CString::new("-alu32").unwrap());
     }
 }

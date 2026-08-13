@@ -1,6 +1,6 @@
 [package]
 name = "bpf-linker"
-version = "0.10.4"
+version = "0.11.0"
 authors = ["Alessandro Decina <alessandro.d@gmail.com>"]
 description = "BPF static linker"
 license = "MIT OR Apache-2.0"
@@ -30,10 +30,6 @@ tracing-tree = { version = "0.4.1", default-features = false }
 ar = { version = "0.9.0" }
 gimli = { version = "0.32.0" }
 libc = { version = "0.2.174" }
-llvm-sys-20 = { package = "llvm-sys", features = [
-  "disable-alltargets-init",
-  "no-llvm-linking",
-], version = "201.0.1", optional = true }
 llvm-sys-21 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
   "no-llvm-linking",
@@ -42,6 +38,10 @@ llvm-sys-22 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
   "no-llvm-linking",
 ], version = "221.0.1", optional = true }
+llvm-sys-23 = { package = "llvm-sys", features = [
+  "disable-alltargets-init",
+  "no-llvm-linking",
+], version = "231.0.0-rc2", optional = true }
 log = { version = "0.4.27" }
 thiserror = { version = "2.0.12" }
 tracing = { version = "0.1.44" }
@@ -65,9 +65,9 @@ which = { version = "8.0.0", default-features = false, features = [
 workspace = true
 
 [features]
-llvm-20 = ["dep:llvm-sys-20"]
 llvm-21 = ["dep:llvm-sys-21"]
 llvm-22 = ["dep:llvm-sys-22"]
+llvm-23 = ["dep:llvm-sys-23"]
 
 # Link LLVM and its dependencies statically. When not enabled, they're linked
 # dynamically.
@@ -75,7 +75,7 @@ llvm-link-static = []
 # Skip LLVM linking.
 no-llvm-linking = []
 
-default = ["llvm-22"]
+default = ["llvm-23"]
 
 [workspace]
 members = ["xtask"]
@@ -91,7 +91,6 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 reqwest = { version = "0.12.24", default-features = false }
 rustc-build-sysroot = { version = "0.5.13", default-features = false }
 serde = { version = "1.0.228", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 
 [workspace.lints.clippy]
 all = "warn"

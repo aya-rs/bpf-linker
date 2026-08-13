@@ -165,7 +165,6 @@ impl Metadata<'_> {
                 | LLVMMetadataKind::LLVMDIGenericSubrangeMetadataKind
                 | LLVMMetadataKind::LLVMDIArgListMetadataKind
                 | LLVMMetadataKind::LLVMDIAssignIDMetadataKind => Metadata::Other(value),
-                #[cfg(not(feature = "llvm-20"))]
                 LLVMMetadataKind::LLVMDISubrangeTypeMetadataKind
                 | LLVMMetadataKind::LLVMDIFixedPointTypeMetadataKind => Metadata::Other(value),
             }
@@ -218,13 +217,6 @@ impl MDNode<'_> {
             value_ref,
             _marker: PhantomData,
         }
-    }
-
-    /// Constructs an empty metadata node.
-    pub(crate) fn empty(context: &LLVMContext) -> Self {
-        let metadata =
-            unsafe { LLVMMDNodeInContext2(context.as_mut_ptr(), core::ptr::null_mut(), 0) };
-        unsafe { Self::from_metadata_ref(context.as_mut_ptr(), metadata) }
     }
 
     /// Constructs a new metadata node from an array of [`DIType`] elements.
