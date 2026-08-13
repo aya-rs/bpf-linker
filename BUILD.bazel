@@ -11,6 +11,7 @@ load(
     "release_windows_filegroup",
 )
 load("//bazel:llvm_archive.bzl", "llvm_archive", "llvm_archive_for_platform")
+load("//bazel/version:version.bzl", "BPF_LINKER_VERSION")
 
 # If Cargo.toml remaps any crate names, this tells Bazel how to pass the right
 # `--extern` flags.
@@ -129,6 +130,7 @@ rust_library(
     aliases = CRATE_ALIASES,
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
+    rustc_env = {"CARGO_PKG_VERSION": BPF_LINKER_VERSION},
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS,
 )
@@ -140,6 +142,7 @@ rust_binary(
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
     crate_root = "src/bin/bpf-linker.rs",
+    rustc_env = {"CARGO_PKG_VERSION": BPF_LINKER_VERSION},
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS + [":bpf-linker-lib"],
 )
@@ -161,6 +164,7 @@ rust_test(
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
     crate_root = "src/bin/bpf-linker.rs",
+    rustc_env = {"CARGO_PKG_VERSION": BPF_LINKER_VERSION},
     deps = TEST_DEPS + [":bpf-linker-lib"],
 )
 
