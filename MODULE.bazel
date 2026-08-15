@@ -22,7 +22,7 @@ single_version_override(
 )
 
 # @llvm-project uses the rust-lang/llvm-project commit referenced by
-# nightly-2026-08-14.
+# nightly-2026-08-15.
 llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 
 # llvm.version only sets generated LLVM version constants; from_archive
