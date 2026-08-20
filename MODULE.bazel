@@ -12,6 +12,16 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
+cargo_toml_version = use_repo_rule(
+    "//bazel:cargo_toml_version.bzl",
+    "cargo_toml_version",
+)
+
+cargo_toml_version(
+    name = "cargo_toml_version",
+    cargo_toml = "//:Cargo.toml",
+)
+
 # @llvm-project uses the rust-lang/llvm-project commit referenced by
 # nightly-2026-08-18.
 llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
