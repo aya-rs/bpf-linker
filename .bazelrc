@@ -41,6 +41,12 @@ common:release --@rules_rust//rust/settings:codegen_units=1
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebuginfo=2
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdwarf-version=5
 common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
+# Linux --fission=opt still splits Rust and C/C++ debug information in the
+# C/C++ ThinLTO backend and packages the resulting .dwo files into .dwp.
+# Disable only rustc's own .dwo generation: rules_rust requires nightly-only
+# -Zsplit-dwarf-out-dir, but the Rust 1.96.0 toolchain is stable.
+# https://github.com/bazelbuild/rules_rust/pull/4186
+common:release --@rules_rust//rust/settings:skip_fission_for_rust
 
 # Bit of rules_rust magic that is required when the C linker drives the link.
 # This should be smoothed over, see

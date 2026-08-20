@@ -1,3 +1,5 @@
+load("@rules_rs//rs/toolchains:declare_rustc_toolchains.bzl", "declare_rustc_toolchains")
+
 # Bazel selects this platform for BuildBuddy remote execution.
 platform(
     name = "rbe_x86_64_linux",
@@ -16,4 +18,11 @@ platform(
         "container-image": "docker://ubuntu@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11",
     },
     visibility = ["//visibility:public"],
+)
+
+declare_rustc_toolchains(
+    name = "default",
+    bpf_linker = "//:bpf-linker",
+    edition = "2024",
+    version = "1.96.0",
 )
