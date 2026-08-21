@@ -1,3 +1,4 @@
+load("@rules_python//python:py_test.bzl", "py_test")
 load("//bazel:python_lint.bzl", "ruff_test", "ty_test")
 
 filegroup(
@@ -22,6 +23,17 @@ test_suite(
     name = "check",
     tests = [
         ":ruff",
+        ":rustc-llvm-test",
         ":ty",
     ],
+)
+
+py_test(
+    name = "rustc-llvm-test",
+    size = "small",
+    srcs = ["rustc-llvm_test.py"],
+    data = ["rustc-llvm.py"],
+    env = {"PYTHONDONTWRITEBYTECODE": "1"},
+    main = "rustc-llvm_test.py",
+    python_version = "3.10",
 )

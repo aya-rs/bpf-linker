@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Inspect or update the Rust nightly and LLVM pinned by MODULE.bazel."""
+"""Inspect or update the pinned Rust toolchains and their LLVM versions."""
 
 from __future__ import annotations
 
@@ -11,23 +11,41 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
-import tomllib
 from collections.abc import Callable
+from enum import Enum
 from http.client import HTTPResponse, IncompleteRead
+from pathlib import Path
 from typing import NamedTuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
 SHA = r"[0-9a-f]{40}"
+RELEASE = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+LLVM_SOURCE_COMMENT = "# @llvm-project follows the nightly_rust_toolchains pin below."
+MODULE = Path("MODULE.bazel").resolve()
 
 
-class Pin(NamedTuple):
-    nightly: str
+class Channel(str, Enum):
+    STABLE = "stable"
+    BETA = "beta"
+    NIGHTLY = "nightly"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class LlvmPin(NamedTuple):
     commit: str
     version: str
+
+
+class Candidate(NamedTuple):
+    rust: str
+    rustc_commit: str
 
 
 class Source(NamedTuple):
@@ -78,9 +96,7 @@ def match_one(pattern: str, text: str, name: str) -> str:
     return matches[0].group(1)
 
 
-def read_pin(text: str) -> Pin:
-    date = match_one(r"^# nightly-(\d{4}-\d{2}-\d{2})\.$", text, "nightly pin")
-    datetime.date.fromisoformat(date)
+def read_pin(text: str) -> LlvmPin:
     commit = match_one(
         rf'^\s*urls = \["https://github\.com/rust-lang/'
         rf'llvm-project/archive/({SHA})\.tar\.gz"\],\s*$',
@@ -99,7 +115,7 @@ def read_pin(text: str) -> Pin:
         text,
         "LLVM version",
     )
-    return Pin(f"nightly-{date}", commit, version)
+    return LlvmPin(commit, version)
 
 
 def open_url(url: str) -> HTTPResponse:
@@ -134,18 +150,37 @@ def download(url: str) -> bytes:
     return fetch(url, lambda response: response.read())
 
 
-def resolve_commit(nightly: str) -> str:
-    date = nightly.removeprefix("nightly-")
-    manifest = tomllib.loads(
-        download(
-            f"https://static.rust-lang.org/dist/{date}/channel-rust-nightly.toml"
-        ).decode()
-    )
-    if manifest.get("date") != date:
-        raise ValueError("nightly manifest does not match the pinned date")
-    rust_commit = manifest["pkg"]["rustc"]["git_commit_hash"]
-    if not isinstance(rust_commit, str) or not re.fullmatch(SHA, rust_commit):
-        raise ValueError("nightly manifest contains an invalid rustc commit")
+def parse_release(toolchain: str) -> tuple[int, int, int]:
+    match = re.fullmatch(RELEASE, toolchain)
+    if match is None:
+        raise ValueError("expected a full Rust release version")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)
+
+
+def parse_dated_toolchain(toolchain: str) -> tuple[Channel, datetime.date]:
+    channel, separator, value = toolchain.partition("-")
+    if not separator:
+        raise ValueError("expected a dated Rust prerelease toolchain")
+    date = datetime.date.fromisoformat(value)
+    if date.isoformat() != value:
+        raise ValueError("expected a dated Rust prerelease toolchain")
+    channel = Channel(channel)
+    if channel == Channel.STABLE:
+        raise ValueError("expected a full Rust release version")
+    return channel, date
+
+
+def selection_key(toolchain: str, channel: Channel) -> tuple[int, int, int]:
+    if channel == Channel.STABLE:
+        return parse_release(toolchain)
+    actual_channel, date = parse_dated_toolchain(toolchain)
+    if actual_channel != channel:
+        raise ValueError(f"expected a dated Rust {channel}")
+    return date.year, date.month, date.day
+
+
+def resolve_commit(rust_commit: str) -> str:
     source = json.loads(
         download(
             "https://api.github.com/repos/rust-lang/rust/contents/"
@@ -215,55 +250,10 @@ def replace_llvm_source(
     return text[: match.start()] + source + text[match.end() :]
 
 
-def update_module(text: str, current: Pin, nightly: str, commit: str) -> str | None:
-    if (nightly, commit) == (current.nightly, current.commit):
-        return None
-
-    updated = replace_one(
-        text, r"^# nightly-\d{4}-\d{2}-\d{2}\.$", f"# {nightly}.", "nightly pin"
-    )
-    if commit == current.commit:
-        return updated
-
-    version = resolve_version(commit)
-    major = current.version.partition(".")[0]
-    if version.partition(".")[0] != major:
-        raise ValueError(
-            f"Rust nightly {nightly} uses unsupported LLVM {version}; "
-            f"expected LLVM major {major}"
-        )
-    replacements = (
-        (
-            r'^    integrity = "[^"]+",$',
-            f'    integrity = "{resolve_integrity(commit)}",',
-            "LLVM integrity",
-        ),
-        (
-            rf'^    strip_prefix = "llvm-project-{SHA}",$',
-            f'    strip_prefix = "llvm-project-{commit}",',
-            "LLVM strip prefix",
-        ),
-        (
-            rf'^    urls = \["https://github\.com/rust-lang/'
-            rf'llvm-project/archive/{SHA}\.tar\.gz"\],$',
-            f'    urls = ["https://github.com/rust-lang/llvm-project/archive/{commit}.tar.gz"],',
-            "LLVM archive",
-        ),
-    )
-    updated = replace_one(
-        updated,
-        r'^llvm\.version\(llvm_version = "[^"]+"\)$',
-        f'llvm.version(llvm_version = "{version}")',
-        "LLVM version",
-    )
-    return replace_llvm_source(updated, replacements)
-
-
 def select_llvm(text: str, source: Source) -> str:
     updated = replace_one(
         text,
-        r"^# @llvm-project uses the rust-lang/llvm-project commit referenced by\n"
-        r"# nightly-\d{4}-\d{2}-\d{2}\.$",
+        "^" + re.escape(LLVM_SOURCE_COMMENT) + "$",
         f"# @llvm-project uses {source.repository} commit {source.commit}.",
         "LLVM source comment",
     )
@@ -303,7 +293,7 @@ def select_llvm(text: str, source: Source) -> str:
     return replace_llvm_source(updated, replacements)
 
 
-def configurations(text: str, pin: Pin) -> dict[str, dict[str, str]]:
+def configurations(text: str, pin: LlvmPin) -> dict[str, dict[str, str]]:
     configurations = {
         pin.version.partition(".")[0]: {
             "commit": pin.commit,
@@ -318,35 +308,167 @@ def configurations(text: str, pin: Pin) -> dict[str, dict[str, str]]:
     return configurations
 
 
+def supported_llvm(pin: LlvmPin) -> set[int]:
+    return {int(pin.version.partition(".")[0]), *COMPATIBILITY_SOURCES}
+
+
+def read_candidate(value: object, channel: Channel) -> Candidate:
+    match value:
+        case {"rust": str(rust), "rustc-commit": str(commit), **extra} if not extra:
+            if not re.fullmatch(SHA, commit):
+                raise ValueError(f"invalid Rust {channel} rustc commit")
+            selection_key(rust, channel)
+            return Candidate(rust, commit)
+        case _:
+            raise ValueError(f"invalid Rust {channel} candidate")
+
+
+def read_candidates(text: str) -> dict[Channel, Candidate]:
+    value = json.loads(text)
+    if not isinstance(value, dict) or value.keys() != set(Channel):
+        raise ValueError("expected stable, beta, and nightly Rust candidates")
+    return {channel: read_candidate(value[channel], channel) for channel in Channel}
+
+
+def buildozer(*commands: str) -> str:
+    result = subprocess.run(
+        [
+            "bazel",
+            "run",
+            "--lockfile_mode=error",
+            "@buildifier_prebuilt//:buildozer",
+            "--",
+            "-f",
+            "-",
+        ],
+        input="\n".join(commands) + "\n",
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    # Buildozer returns 3 when an edit leaves the file unchanged.
+    if result.returncode not in (0, 3):
+        result.check_returncode()
+    return result.stdout
+
+
+def current_toolchains() -> dict[Channel, str]:
+    versions = buildozer(
+        *(f"print version|{MODULE}:{channel}_rust_toolchains" for channel in Channel)
+    ).splitlines()
+    if len(versions) != len(Channel):
+        raise ValueError("expected one pin for each Rust channel")
+    current = {}
+    for channel, version in zip(Channel, versions):
+        rust = version.replace("/", "-", 1)
+        selection_key(rust, channel)
+        current[channel] = rust
+    return current
+
+
+def llvm_selection(report: str, pin: LlvmPin) -> dict[str, str | int]:
+    major = int(match_one(
+        r"^LLVM version: (\d+)\.\d+\.\d+$", report, "rustc LLVM version"
+    ))
+    if major not in supported_llvm(pin):
+        raise ValueError(f"rustc uses unsupported LLVM {major}")
+    excluded = [
+        f"llvm-{version}" for version in sorted(supported_llvm(pin)) if version != major
+    ]
+    if major != int(pin.version.partition(".")[0]):
+        excluded.insert(0, "default")
+    return {"llvm": major, "exclude-features": ",".join(excluded)}
+
+
+def resolve_selection(
+    current: str, channel: Channel, pin: LlvmPin, candidate: Candidate
+) -> LlvmPin:
+    if selection_key(candidate.rust, channel) < selection_key(current, channel):
+        raise ValueError(f"Rust {channel} regressed from {current} to {candidate.rust}")
+    commit = resolve_commit(candidate.rustc_commit)
+    source = LlvmPin(commit, resolve_version(commit))
+    if int(source.version.partition(".")[0]) not in supported_llvm(pin):
+        raise ValueError(
+            f"Rust {channel} {candidate.rust} uses unsupported LLVM {source.version}"
+        )
+    return source
+
+
+def update_toolchains(
+    pin: LlvmPin, candidates: dict[Channel, Candidate]
+) -> dict[str, object] | None:
+    current = current_toolchains()
+    resolved = {
+        channel: resolve_selection(previous, channel, pin, candidates[channel])
+        for channel, previous in current.items()
+    }
+    commit, version = resolved[Channel.NIGHTLY]
+    major = int(pin.version.partition(".")[0])
+    if int(version.partition(".")[0]) != major:
+        raise ValueError(
+            f"Rust nightly {candidates[Channel.NIGHTLY].rust} uses unsupported LLVM {version}; "
+            f"expected LLVM major {major}"
+        )
+    edits = [
+        f"set version {json.dumps(candidate.rust.replace('-', '/', 1))}|"
+        f"{MODULE}:{channel}_rust_toolchains"
+        for channel, candidate in candidates.items()
+        if candidate.rust != current[channel]
+    ]
+    if version != pin.version:
+        edits.append(f"set llvm_version {json.dumps(version)}|{MODULE}:%llvm.version")
+    if commit != pin.commit:
+        edits.extend(
+            f"set {attribute} {value}|{MODULE}:%llvm.from_archive"
+            for attribute, value in (
+                ("integrity", json.dumps(resolve_integrity(commit))),
+                ("strip_prefix", json.dumps(f"llvm-project-{commit}")),
+                (
+                    "urls",
+                    json.dumps([
+                        f"https://github.com/rust-lang/llvm-project/archive/{commit}.tar.gz"
+                    ]),
+                ),
+            )
+        )
+    if not edits:
+        return None
+    # Resolve and validate every channel before writing the declarations once.
+    buildozer(*edits)
+    return {
+        "toolchains": {
+            channel: {
+                "rust": candidates[channel].rust,
+                "llvm": int(value.version.partition(".")[0]),
+            }
+            for channel, value in resolved.items()
+        },
+        "llvm-commit": commit,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("current")
     commands.add_parser("configurations")
+    commands.add_parser("toolchains")
+    commands.add_parser("llvm")
     update = commands.add_parser("update")
-    update.add_argument("nightly")
+    update.add_argument("candidates", type=read_candidates)
     arguments = parser.parse_args()
 
-    text = sys.stdin.read()
-    pin = read_pin(text)
-    if arguments.command == "current":
-        print(pin.nightly, pin.commit)
+    if arguments.command == "toolchains":
+        print(json.dumps(current_toolchains()))
         return
+    text = MODULE.read_text()
+    pin = read_pin(text)
     if arguments.command == "configurations":
         print(json.dumps(configurations(text, pin), separators=(",", ":"), sort_keys=True))
         return
-
-    nightly = arguments.nightly
-    match = re.fullmatch(r"nightly-(\d{4}-\d{2}-\d{2})", nightly)
-    if match is None:
-        raise ValueError("expected a dated Rust nightly")
-    datetime.date.fromisoformat(match.group(1))
-    if nightly < pin.nightly:
-        raise ValueError(f"Rust nightly regressed from {pin.nightly} to {nightly}")
-
-    if updated := update_module(text, pin, nightly, resolve_commit(nightly)):
-        read_pin(updated)
-        sys.stdout.write(updated)
+    if arguments.command == "llvm":
+        print(json.dumps(llvm_selection(sys.stdin.read(), pin)))
+        return
+    if updated := update_toolchains(pin, arguments.candidates):
+        print(json.dumps(updated))
 
 
 if __name__ == "__main__":

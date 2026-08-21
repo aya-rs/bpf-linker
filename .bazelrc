@@ -3,6 +3,10 @@
 
 common --test_output=errors
 
+# Start Python tests with their hermetic interpreter; remote workers do not
+# install a system Python for rules_python's legacy bootstrap.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
 # Tell @apple_support and @rules_cc modules that we are not interested in
 # their automatic non-hermetic toolchains. We use a fully hermetic @llvm
 # toolchain.

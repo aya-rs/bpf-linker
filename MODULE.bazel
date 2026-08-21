@@ -10,13 +10,23 @@ bazel_dep(name = "llvm", version = "0.8.17")
 bazel_dep(name = "bazel_lib", version = "3.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.22")
+
+bazel_dep(
+    name = "rules_python",
+    version = "1.8.0",
+    dev_dependency = True,
+)
+
 bazel_dep(name = "rules_rs", version = "0.0.104")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
-# @llvm-project uses the rust-lang/llvm-project commit referenced by
-# nightly-2026-08-18.
+# Match the oldest Python used by the Ubuntu 22.04 CI jobs.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python", dev_dependency = True)
+python.toolchain(python_version = "3.10")
+
+# @llvm-project follows the nightly_rust_toolchains pin below.
 llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 
 # llvm.version only sets generated LLVM version constants; from_archive
@@ -45,9 +55,29 @@ toolchains.toolchain(
     edition = "2024",
     version = "1.96.0",
 )
+
+# CI channel pins are unregistered: Bazel keeps its independent compiler above.
+toolchains.toolchain(
+    name = "stable_rust_toolchains",
+    edition = "2024",
+    version = "1.97.1",
+)
+toolchains.toolchain(
+    name = "beta_rust_toolchains",
+    edition = "2024",
+    version = "beta/2026-08-18",
+)
+toolchains.toolchain(
+    name = "nightly_rust_toolchains",
+    edition = "2024",
+    version = "nightly/2026-08-18",
+)
 use_repo(
     toolchains,
+    "beta_rust_toolchains",
     "default_rust_toolchains",
+    "nightly_rust_toolchains",
+    "stable_rust_toolchains",
 )
 
 crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
