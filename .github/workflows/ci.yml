@@ -221,6 +221,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check Starlark
+        run: bazel run //bazel/format:format.check
+
+      - name: Check production target without dev dependencies
+        run: |
+          bazel --noworkspace_rc query //:bpf-linker \
+            --ignore_dev_dependency --lockfile_mode=off
+
       - name: Test
         run: |
           set -euo pipefail

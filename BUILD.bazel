@@ -3,6 +3,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_shared_library")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("//bazel:llvm_archive.bzl", "llvm_archive", "llvm_archive_for_platform")
 load(
     "//bazel:release.bzl",
     "bpf_linker_release",
@@ -10,7 +11,6 @@ load(
     "release_macos_filegroup",
     "release_windows_filegroup",
 )
-load("//bazel:llvm_archive.bzl", "llvm_archive", "llvm_archive_for_platform")
 
 exports_files(["pyproject.toml"])
 
@@ -29,7 +29,10 @@ CRATE_FEATURES = [
 CRATE_DEPS = all_crate_deps(normal = True) + [":llvm"]
 
 # Unit tests compile both [dependencies] and [dev-dependencies] from Cargo.toml.
-TEST_DEPS = all_crate_deps(normal = True, normal_dev = True) + [":llvm"]
+TEST_DEPS = all_crate_deps(
+    normal = True,
+    normal_dev = True,
+) + [":llvm"]
 
 LIB_SRCS = glob(
     ["src/**/*.rs"],
@@ -85,8 +88,8 @@ cc_library(
 
 cc_shared_library(
     name = "LLVM",
-    deps = LLVM_DEPS,
     tags = ["manual"],
+    deps = LLVM_DEPS,
 )
 
 llvm_archive(
@@ -120,9 +123,9 @@ LLVM_ARCHIVE_TARGETS = [
 
 filegroup(
     name = "llvm-archives",
+    testonly = True,
     srcs = [":llvm-archive-" + target for target in LLVM_ARCHIVE_TARGETS],
     tags = ["manual"],
-    testonly = True,
 )
 
 rust_library(
