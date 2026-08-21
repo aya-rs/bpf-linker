@@ -12,6 +12,8 @@ load(
 )
 load("//bazel:llvm_archive.bzl", "llvm_archive", "llvm_archive_for_platform")
 
+exports_files(["pyproject.toml"])
+
 # If Cargo.toml remaps any crate names, this tells Bazel how to pass the right
 # `--extern` flags.
 # (For example `my_serde = { package = "serde", version = "1.0" }`)
