@@ -13,6 +13,8 @@ load(
     "release_windows_filegroup",
 )
 
+exports_files(["pyproject.toml"])
+
 format_multirun(
     name = "format",
     starlark = "@buildifier_prebuilt//:buildifier",
