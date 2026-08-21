@@ -11,7 +11,7 @@ on:
     types: [published]
 
   schedule:
-    # Validate the committed nightly and external dependencies every day.
+    # Validate the committed Rust toolchains and dependencies every day.
     - cron: 00 4 * * *
 
 env:
@@ -36,27 +36,24 @@ jobs:
     outputs:
       llvm: ${{ steps.llvm.outputs.llvm }}
       llvm-targets: ${{ steps.llvm.outputs.llvm-targets }}
-      rust-nightly: ${{ steps.pin.outputs.rust-nightly }}
-      llvm-commit: ${{ steps.pin.outputs.llvm-commit }}
+      rust-toolchains: ${{ steps.pin.outputs.rust-toolchains }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Resolve the committed Rust nightly and LLVM
+      - name: Resolve the committed Rust toolchains and LLVM
         id: pin
         run: |
           set -euo pipefail
 
-          pin=$(python3 scripts/rustc-llvm.py current < MODULE.bazel)
-          read -r nightly commit <<< "$pin"
-          printf 'rust-nightly=%s\nllvm-commit=%s\n' \
-            "$nightly" "$commit" >> "$GITHUB_OUTPUT"
+          toolchains=$(python3 -B scripts/rustc-llvm.py toolchains)
+          printf 'rust-toolchains=%s\n' "$toolchains" >> "$GITHUB_OUTPUT"
 
       - name: Configure LLVM builds
         id: llvm
         run: |
           set -euo pipefail
 
-          llvm=$(python3 scripts/rustc-llvm.py configurations < MODULE.bazel)
+          llvm=$(python3 -B scripts/rustc-llvm.py configurations)
           llvm_targets=$(
             bazel query 'labels(srcs, //:llvm-archives)' --output=label |
               sed 's|^//:llvm-archive-||' |
@@ -175,6 +172,7 @@ jobs:
           done
 
   lint-stable:
+    needs: prepare
     runs-on: ubuntu-latest
 
     steps:
@@ -182,13 +180,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ fromJSON(needs.prepare.outputs.rust-toolchains).stable }}
           components: clippy, rust-src
 
       - name: Run clippy
         run: cargo clippy --features llvm-23,no-llvm-linking --all-targets --workspace -- --deny warnings
 
   lint-nightly:
+    needs: prepare
     runs-on: ubuntu-latest
 
     steps:
@@ -196,7 +195,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: ${{ fromJSON(needs.prepare.outputs.rust-toolchains).nightly }}
           components: rustfmt, rust-src
 
       - name: Check formatting
@@ -272,18 +271,10 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - rust: 1.94.0
-            llvm: 21
-            exclude-features: default,llvm-22,llvm-23
-          - rust: stable
-            llvm: 22
-            exclude-features: default,llvm-21,llvm-23
-          - rust: beta
-            llvm: 22
-            exclude-features: default,llvm-21,llvm-23
-          - rust: ${{ needs.prepare.outputs.rust-nightly }}
-            llvm: 23
-            exclude-features: llvm-21,llvm-22
+          - 1.94.0
+          - ${{ fromJSON(needs.prepare.outputs.rust-toolchains).stable }}
+          - ${{ fromJSON(needs.prepare.outputs.rust-toolchains).beta }}
+          - ${{ fromJSON(needs.prepare.outputs.rust-toolchains).nightly }}
         platform:
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -294,17 +285,13 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-    name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain.rust }} llvm=${{ matrix.toolchain.llvm }}
+    name: target=${{ matrix.platform.target }} rustc=${{ matrix.toolchain }}
     needs:
       - prepare
       - llvm
 
     env:
       RUST_BACKTRACE: full
-      # Features that have to be included for dynamic linking.
-      LLVM_FEATURES_DYNAMIC: llvm-${{ matrix.toolchain.llvm }}
-      # Features that have to be included for static linking.
-      LLVM_FEATURES_STATIC: llvm-${{ matrix.toolchain.llvm }},llvm-link-static
       # Features that have to be excluded when running `cargo hack --feature-powerset`
       # and intending to link dynamically.
       LLVM_EXCLUDE_FEATURES_DYNAMIC: llvm-link-static,no-llvm-linking
@@ -314,12 +301,23 @@ jobs:
         with:
           path: bpf-linker
 
-      - name: Install Rust ${{ matrix.toolchain.rust }}
+      - name: Install Rust ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain.rust }}
+          toolchain: ${{ matrix.toolchain }}
           targets: ${{ matrix.platform.target }}
           components: rust-src
+
+      - name: Select LLVM for the installed compiler
+        id: rustc-llvm
+        run: |
+          set -euo pipefail
+          selection=$(rustc -vV | python3 -B scripts/rustc-llvm.py llvm)
+          llvm=$(jq -r .llvm <<< "$selection")
+          excluded=$(jq -r '.["exclude-features"]' <<< "$selection")
+          printf 'llvm=%s\nexclude-features=%s\n' "$llvm" "$excluded" >> "$GITHUB_OUTPUT"
+          printf 'LLVM_FEATURES_DYNAMIC=llvm-%s\nLLVM_FEATURES_STATIC=llvm-%s,llvm-link-static\n' \
+            "$llvm" "$llvm" >> "$GITHUB_ENV"
 
       - name: Add clang to PATH
         if: runner.os == 'Linux'
@@ -348,7 +346,7 @@ jobs:
 
       - name: Restore LLVM from ghcr.io
         env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.toolchain.llvm].commit }}
+          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[steps.rustc-llvm.outputs.llvm].commit }}
         run: |
           set -euxo pipefail
           ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
@@ -372,11 +370,11 @@ jobs:
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
 
       - name: Check (default features)
-        if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo check --target ${{ matrix.platform.target }}
 
       - name: Build (default features)
-        if: matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo build --target ${{ matrix.platform.target }}
 
       - uses: taiki-e/install-action@v2.85.13
@@ -387,14 +385,14 @@ jobs:
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             check --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build (dynamic linking, feature powerset)
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             hack build --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # Toolchains provided by rustup include standard library artifacts
@@ -409,7 +407,7 @@ jobs:
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack --target ${{ matrix.platform.target }} \
             test --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # To make things easier for package maintainers, the step of building a
@@ -437,31 +435,31 @@ jobs:
           BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
             cargo hack --target ${{ matrix.platform.target }} test \
             --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ matrix.toolchain.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v7
-        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: runner.os == 'Linux' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         with:
           repository: aya-rs/aya
           path: aya
           submodules: recursive
 
       - name: Install (dynamic)
-        if: endsWith(matrix.platform.target, 'gnu') && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: endsWith(matrix.platform.target, 'gnu') && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: |
           cargo install --path . --no-default-features --features \
             ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Install autopoint for aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: runner.os == 'Linux' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: sudo apt -y install autopoint
 
       - name: Run aya integration tests
-        if: runner.os == 'Linux' && matrix.toolchain.llvm == fromJSON(env.LATEST_LLVM)
+        if: runner.os == 'Linux' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         working-directory: aya
         env:
-          RUST_NIGHTLY: ${{ needs.prepare.outputs.rust-nightly }}
+          RUST_NIGHTLY: ${{ fromJSON(needs.prepare.outputs.rust-toolchains).nightly }}
         run: |
           set -euo pipefail
 
