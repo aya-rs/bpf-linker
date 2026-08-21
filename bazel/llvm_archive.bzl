@@ -49,6 +49,7 @@ def _llvm_archive_mtree_impl(ctx):
     content.add(_mtree_line("bin", "dir"))
     content.add(_mtree_line("bin/FileCheck", "file", filecheck.path))
     content.add(_mtree_line("lib", "dir"))
+
     # Keep the mtree content stable so changes in the input order do not
     # invalidate Bazel's action cache.
     for library in sorted(static_libraries, key = lambda library: library.file.path):
@@ -59,9 +60,9 @@ def _llvm_archive_mtree_impl(ctx):
         basename = library.file.basename
         if library.is_llvm:
             basename = "libLLVM" + basename[len("lib"):]
-        # Bazel names zlib-ng's zlib-compatible archive `libzlib-ng.a`, whereas
-        # CMake installs it as `libz.a`. Use the CMake name for Cargo consumers.
         elif basename == "libzlib-ng.a":
+            # Bazel names zlib-ng's zlib-compatible archive `libzlib-ng.a`, whereas
+            # CMake installs it as `libz.a`. Use the CMake name for Cargo consumers.
             basename = "libz.a"
         content.add(_mtree_line(
             "lib/{}".format(basename),
@@ -99,7 +100,15 @@ _llvm_archive_mtree = rule(
 )
 
 def llvm_archive(name, cxxstdlibs, filecheck, llvm, shared):
-    """Build a zstd archive from Bazel LLVM outputs."""
+    """Build a zstd archive from Bazel LLVM outputs.
+
+    Args:
+        name: Name of the archive target.
+        cxxstdlibs: C++ runtime library targets mapped to archive filenames.
+        filecheck: FileCheck executable target.
+        llvm: LLVM library target supplying headers and static libraries.
+        shared: Shared LLVM library target.
+    """
     mtree = name + "-mtree"
     _llvm_archive_mtree(
         name = mtree,
