@@ -1,4 +1,4 @@
-name: Update Rust nightly
+name: Update Rust toolchains
 
 on:
   push:
@@ -10,15 +10,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  nightly:
+  resolve:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     permissions:
-      contents: write
-      pull-requests: write
-    uses: aya-rs/aya/.github/workflows/nightly-update.yml@15a0de1b363e51d55d0fca4245df54a61e8d5521
+      contents: read
+    # Shared Rust channel discovery (aya-rs/aya#1688).
+    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@3e2478226f9b4509a06b0b753c0ed28c1876dca1
+    with:
+      channels: stable beta nightly
 
   update:
-    needs: nightly
+    needs: resolve
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,26 +32,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Update the rustc LLVM
+      - name: Update Rust toolchains and LLVM
         id: update
         env:
           GH_TOKEN: ${{ github.token }}
+          RUST_TOOLCHAINS: ${{ needs.resolve.outputs.rust-toolchains }}
         run: |
           set -euo pipefail
 
-          nightly='${{ needs.nightly.outputs.rust-nightly }}'
-          module=$(python3 scripts/rustc-llvm.py update "$nightly" < MODULE.bazel)
-          if [[ -n "$module" ]]; then
-            printf '%s\n' "$module" > MODULE.bazel
-            pin=$(python3 scripts/rustc-llvm.py current < MODULE.bazel)
-            read -r nightly commit <<< "$pin"
-            printf 'date=%s\nllvm-commit=%s\n' \
-              "${nightly#nightly-}" "$commit" >> "$GITHUB_OUTPUT"
+          candidate=$(python3 -B scripts/rustc-llvm.py update "$RUST_TOOLCHAINS")
+          if [[ -n "$candidate" ]]; then
+            bazel mod deps --lockfile_mode=update
+            toolchains=$(jq -c .toolchains <<< "$candidate")
+            commit=$(jq -r '.["llvm-commit"]' <<< "$candidate")
+            printf 'toolchains=%s\nllvm-commit=%s\n' \
+              "$toolchains" "$commit" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create or update the Rust nightly pull request
+      - name: Create or update the Rust toolchain pull request
         id: pull-request
-        if: steps.update.outputs.date != ''
+        if: steps.update.outputs.toolchains != ''
         uses: peter-evans/create-pull-request@v8
         with:
           # GitHub requires approval before GITHUB_TOKEN-created PRs run CI.
@@ -57,16 +59,19 @@ jobs:
           # Forks use GITHUB_TOKEN and approve their checks manually.
           token: ${{ secrets.CRABBY_GITHUB_TOKEN || github.token }}
           branch: create-pull-request/rust-nightly
-          add-paths: MODULE.bazel
+          add-paths: |
+            MODULE.bazel
+            MODULE.bazel.lock
           commit-message: |-
-            Update rustc LLVM to ${{ steps.update.outputs.date }}
+            Update Rust toolchains
 
-            Match the Aya integration nightly to rustc LLVM commit
+            Match ${{ fromJSON(steps.update.outputs.toolchains).nightly.rust }} to rustc LLVM commit
             ${{ steps.update.outputs.llvm-commit }}.
-          title: 'Update rustc LLVM to ${{ steps.update.outputs.date }}'
+            Test Rust ${{ fromJSON(steps.update.outputs.toolchains).stable.rust }} with LLVM ${{ fromJSON(steps.update.outputs.toolchains).stable.llvm }}.
+            Test ${{ fromJSON(steps.update.outputs.toolchains).beta.rust }} with LLVM ${{ fromJSON(steps.update.outputs.toolchains).beta.llvm }}.
+          title: Update Rust toolchains
           body: |-
-            Match the Aya integration nightly to rustc LLVM commit
-            ${{ steps.update.outputs.llvm-commit }}.
+            Update the pinned Rust toolchains and their LLVM selections.
 
       - name: Enable auto-merge
         # Forks do not receive the Crabby token required for auto-merge.
