@@ -221,6 +221,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check Starlark
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.bzl' '*.bazel' BUILD WORKSPACE '*/BUILD' '*/WORKSPACE' \
+            | xargs -0 bazel run @buildifier_prebuilt//:buildifier -- \
+                -mode=check -lint=warn
+
+      - name: Check production target without dev dependencies
+        run: |
+          bazel --noworkspace_rc query //:bpf-linker \
+            --ignore_dev_dependency --lockfile_mode=off
+
       - name: Test
         run: |
           set -euo pipefail
