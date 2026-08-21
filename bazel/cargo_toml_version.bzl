@@ -1,5 +1,7 @@
 """Expose the Cargo package version to Bazel Rust targets."""
 
+# rules_rs has no public repository-time TOML helper.
+# buildifier: disable=bzl-visibility
 load("@rules_rs//rs/private:toml2json.bzl", "run_toml2json")
 
 def _cargo_toml_version_impl(rctx):

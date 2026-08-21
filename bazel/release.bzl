@@ -25,7 +25,12 @@ release_windows_filegroup, _release_windows_filegroup_internal = with_cfg(platfo
 ).build()
 
 def bpf_linker_release(name, binary):
-    """Archives the binary and debug information as separate zstd archives."""
+    """Archives the binary and debug information as separate zstd archives.
+
+    Args:
+        name: Name of the release archive target.
+        binary: Binary target supplying the executable and debug output groups.
+    """
     debug_info = name + "_debug_info"
 
     native.filegroup(
