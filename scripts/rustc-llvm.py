@@ -8,7 +8,6 @@ import argparse
 import base64
 import datetime
 import hashlib
-import itertools
 import json
 import os
 import re
@@ -114,7 +113,8 @@ def open_url(url: str) -> HTTPResponse:
 
 
 def fetch(url: str, consume: Callable[[HTTPResponse], bytes]) -> bytes:
-    for attempt in itertools.count():
+    attempt = 0
+    while True:
         try:
             with open_url(url) as response:
                 return consume(response)
@@ -127,6 +127,7 @@ def fetch(url: str, consume: Callable[[HTTPResponse], bytes]) -> bytes:
             if attempt == 5:
                 raise
         time.sleep(2**attempt)
+        attempt += 1
 
 
 def download(url: str) -> bytes:
