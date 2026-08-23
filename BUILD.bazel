@@ -1,3 +1,4 @@
+load("@cargo_toml_version//:version.bzl", "VERSION")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_shared_library")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
@@ -129,6 +130,7 @@ rust_library(
     aliases = CRATE_ALIASES,
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
+    version = VERSION,
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS,
 )
@@ -140,6 +142,7 @@ rust_binary(
     crate_features = CRATE_FEATURES,
     crate_name = "bpf_linker",
     crate_root = "src/bin/bpf-linker.rs",
+    version = VERSION,
     visibility = ["//visibility:public"],
     deps = CRATE_DEPS + [":bpf-linker-lib"],
 )
