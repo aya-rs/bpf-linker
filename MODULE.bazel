@@ -43,14 +43,14 @@ llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 # below selects the LLVM source archive.
 llvm.version(llvm_version = "23.1.0")
 llvm.from_archive(
-    integrity = "sha256-yAiqllLCuJsbFtkQLzmBO5nCj/qX+GMljEU3w7VE/Zs=",
+    integrity = "sha256-EvQs0ozzutyxocxm0H4RMLH9m+Uv6S9ZbdXLjaGZ0tA=",
     patch_args = ["-p1"],
     patches = [
         "@llvm//3rd_party/llvm-project/x.x/patches:llvm-http-windows-gnu.patch",
         "@llvm//3rd_party/llvm-project/x.x/patches:llvm-extra.patch",
     ],
-    strip_prefix = "llvm-project-21cf28432798952d942bacc6bcee3a328faa3638",
-    urls = ["https://github.com/rust-lang/llvm-project/archive/21cf28432798952d942bacc6bcee3a328faa3638.tar.gz"],
+    strip_prefix = "llvm-project-16696adcd119e6ba9cc175207d984d7021211acb",
+    urls = ["https://github.com/rust-lang/llvm-project/archive/16696adcd119e6ba9cc175207d984d7021211acb.tar.gz"],
 )
 use_repo(llvm, "llvm-project")
 
@@ -70,7 +70,7 @@ toolchains.toolchain(
 toolchains.toolchain(
     name = "stable_rust_toolchains",
     edition = "2024",
-    version = "1.97.1",
+    version = "1.98.0",
 )
 toolchains.toolchain(
     name = "beta_rust_toolchains",
@@ -80,7 +80,7 @@ toolchains.toolchain(
 toolchains.toolchain(
     name = "nightly_rust_toolchains",
     edition = "2024",
-    version = "nightly/2026-08-18",
+    version = "nightly/2026-08-24",
 )
 use_repo(
     toolchains,
