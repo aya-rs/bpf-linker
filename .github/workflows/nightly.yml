@@ -1,6 +1,10 @@
 name: Update Rust toolchains
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+
   push:
     branches:
       - main
@@ -11,16 +15,17 @@ on:
 
 jobs:
   resolve:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     permissions:
       contents: read
     # Shared Rust channel discovery (aya-rs/aya#1688).
-    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@3e2478226f9b4509a06b0b753c0ed28c1876dca1
+    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@c29cd71cb4fe1440bc0d566633afa822f1b41fc5
     with:
       channels: stable beta nightly
 
   update:
     needs: resolve
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     permissions:
       contents: write
