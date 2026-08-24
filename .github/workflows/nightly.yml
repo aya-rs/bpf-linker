@@ -74,7 +74,10 @@ jobs:
             ${{ steps.update.outputs.llvm-commit }}.
             Test Rust ${{ fromJSON(steps.update.outputs.toolchains).stable.rust }} with LLVM ${{ fromJSON(steps.update.outputs.toolchains).stable.llvm }}.
             Test ${{ fromJSON(steps.update.outputs.toolchains).beta.rust }} with LLVM ${{ fromJSON(steps.update.outputs.toolchains).beta.llvm }}.
-          title: Update Rust toolchains
+          title: >-
+            Update Rust ${{ fromJSON(steps.update.outputs.toolchains).stable.rust }},
+            ${{ fromJSON(steps.update.outputs.toolchains).beta.rust }},
+            ${{ fromJSON(steps.update.outputs.toolchains).nightly.rust }}
           body: |-
             Update the pinned Rust toolchains and their LLVM selections.
 
