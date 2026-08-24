@@ -137,6 +137,9 @@ jobs:
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
       - name: Publish LLVM OCI artifact
+        # Build jobs fetch commit-tagged archives, so same-repo PRs must be
+        # able to publish them when selecting a new LLVM commit.
+        #
         # GitHub does not allow foreign-repository pull requests to push
         # container images. Attempting to do so fails with:
         #
@@ -145,7 +148,13 @@ jobs:
         #
         # Disable artifact publishing for forked pull requests. This
         # restriction is a reasonable security measure.
-        if: steps.artifact-restore.outputs.missing == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: >-
+          steps.artifact-restore.outputs.missing == 'true' &&
+          (
+            github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
+            github.event_name == 'release' ||
+            github.event.pull_request.head.repo.full_name == github.repository
+          )
         env:
           LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
         working-directory: bazel-bin
