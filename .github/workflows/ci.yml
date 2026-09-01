@@ -382,7 +382,7 @@ jobs:
         if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo build --target ${{ matrix.platform.target }}
 
-      - uses: taiki-e/install-action@v2.85.13
+      - uses: taiki-e/install-action@v2.87.1
         with:
           tool: cargo-hack
 
