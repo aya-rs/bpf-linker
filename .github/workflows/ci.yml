@@ -339,6 +339,10 @@ jobs:
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
 
       - name: Install btfdump
+        # TODO(https://github.com/anakryiko/btfdump/issues/38): Remove the override
+        # once btfdump releases a lockfile with a fixed rustix dependency.
+        env:
+          RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg=rustix_use_libc
         run: cargo install btfdump
 
       - uses: oras-project/setup-oras@v2
