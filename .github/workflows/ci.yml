@@ -395,14 +395,14 @@ jobs:
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             check --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build (dynamic linking, feature powerset)
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             hack build --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # Toolchains provided by rustup include standard library artifacts
@@ -417,7 +417,7 @@ jobs:
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack --target ${{ matrix.platform.target }} \
             test --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       # To make things easier for package maintainers, the step of building a
@@ -445,7 +445,7 @@ jobs:
           BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
             cargo hack --target ${{ matrix.platform.target }} test \
             --feature-powerset --exclude-features \
-            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }},${{ matrix.platform.exclude-features }} \
+            ${{ env.LLVM_EXCLUDE_FEATURES_DYNAMIC }},${{ steps.rustc-llvm.outputs.exclude-features }} \
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - uses: actions/checkout@v7
