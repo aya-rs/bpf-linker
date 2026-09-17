@@ -336,7 +336,7 @@ jobs:
         run: echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
 
       - name: Enforce dynamic linking
-        run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> $GITHUB_ENV
+        run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> "$GITHUB_ENV"
 
       - name: Install btfdump
         # TODO(https://github.com/anakryiko/btfdump/issues/38): Remove the override
@@ -483,7 +483,7 @@ jobs:
       - name: Enforce static linking
         # Static linking with glibc is not supported.
         if: ${{ !endsWith(matrix.platform.target, 'gnu') }}
-        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> "$GITHUB_ENV"
 
       - name: Check (static linking, single feature set)
         if: ${{ !endsWith(matrix.platform.target, 'gnu') }}
