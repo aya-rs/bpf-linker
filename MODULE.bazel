@@ -114,31 +114,6 @@ crate.from_cargo(
         "x86_64-unknown-linux-musl",
     ],
 )
-crate.from_cargo(
-    name = "btfdump_crates",
-    cargo_lock = "//bazel/btfdump:Cargo.lock",
-    cargo_toml = "//bazel/btfdump:Cargo.toml",
-    # Any platform that is a potential target or exec platform for Rust
-    # compilations must be included here, so we can properly evaluate
-    # `cfg(target)` features and dependencies for them in the third party
-    # crates.
-    # btfdump runs during tests, so we just include rules_rs supported exec
-    # platforms for the sake of contributors.
-    # Our own CI only runs btfdump on linux since actions execute remotely.
-    platform_triples = [
-        "%s-%s" % (arch, target_suffix)
-        for arch in [
-            "aarch64",
-            "x86_64",
-        ]
-        for target_suffix in [
-            "apple-darwin",
-            "pc-windows-msvc",
-            "unknown-linux-gnu",
-            "unknown-linux-musl",
-        ]
-    ],
-)
 
 # bpf-linker links LLVM through Bazel's @llvm-project graph. The llvm-sys
 # crates provide Rust bindings only, so their Cargo build scripts must not try
@@ -152,13 +127,8 @@ crate.annotation(
 crate.annotation(
     crate = "btfdump",
     gen_binaries = ["btf"],
-    repositories = ["btfdump_crates"],
 )
-use_repo(
-    crate,
-    "btfdump_crates",
-    "crates",
-)
+use_repo(crate, "crates")
 
 register_toolchains(
     "//bazel/toolchains:all",

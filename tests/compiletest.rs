@@ -1,7 +1,8 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs, io,
+    fs,
+    io::{self, Write as _},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     process::Command,
@@ -180,16 +181,16 @@ fn prepare_filecheck_input(src: &Path, dst: &Path) {
         return;
     }
 
-    let dst = fs::File::create(dst)
+    let elf = object::File::parse(input.as_slice())
+        .unwrap_or_else(|err| panic!("could not parse ELF file '{}': {err}", src.display()));
+    let btf = btf::types::Btf::load_elf(&elf)
+        .unwrap_or_else(|err| panic!("could not read BTF from '{}': {err}", src.display()));
+    let mut output = fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
-    let mut btf = Command::new("btf");
-    let status = btf
-        .arg("dump")
-        .arg(src)
-        .stdout(dst)
-        .status()
-        .unwrap_or_else(|err| panic!("could not run {btf:?}: {err}"));
-    assert_eq!(status.code(), Some(0), "{btf:?} failed");
+    for (id, ty) in btf.types().iter().enumerate() {
+        writeln!(output, "#{id}: {ty}")
+            .unwrap_or_else(|err| panic!("could not write BTF dump '{}': {err}", dst.display()));
+    }
 }
 
 #[test]

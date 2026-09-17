@@ -140,8 +140,8 @@ def _bpf_filecheck_test(
         "MODE": "btf" if btf else "assembly",
     }
     if btf:
-        data.append("@btfdump_crates//:btfdump__btf")
-        env["BTFDUMP"] = "$(location @btfdump_crates//:btfdump__btf)"
+        data.append("@crates//:btfdump__btf")
+        env["BTFDUMP"] = "$(location @crates//:btfdump__btf)"
 
     # filecheck_wrapper.sh runs btfdump before FileCheck for BTF tests.
     sh_test(
