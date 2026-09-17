@@ -119,7 +119,7 @@ crate.from_cargo(
     cargo_lock = "//bazel/btfdump:Cargo.lock",
     cargo_toml = "//bazel/btfdump:Cargo.toml",
     # Any platform that is a potential target or exec platform for Rust
-    # compilations must be included here, so we can properly evalaute
+    # compilations must be included here, so we can properly evaluate
     # `cfg(target)` features and dependencies for them in the third party
     # crates.
     # btfdump runs during tests, so we just include rules_rs supported exec

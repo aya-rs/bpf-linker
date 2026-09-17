@@ -206,7 +206,7 @@ impl DICompositeType<'_> {
 
     /// Replaces the elements of the composite type with a new metadata node.
     /// The provided metadata node should contain new composite type elements
-    /// as operants. The metadata node can be empty if the intention is to
+    /// as operands. The metadata node can be empty if the intention is to
     /// remove all elements of the composite type.
     pub(crate) fn replace_elements(&mut self, mdnode: MDNode<'_>) {
         unsafe {

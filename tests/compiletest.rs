@@ -1,5 +1,3 @@
-#![expect(unused_crate_dependencies, reason = "used in lib/bin")]
-
 use std::{
     env,
     ffi::{OsStr, OsString},

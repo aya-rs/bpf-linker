@@ -530,7 +530,7 @@ to an appropriate compiler"
 ///
 /// Unlike [`link_llvm_static`], it does not require explicit search for
 /// dependencies, since shared libraries contain `DT_NEEDED` entries that
-/// specify the names of libaries that the dynamic linker should link
+/// specify the names of libraries that the dynamic linker should link
 /// beforehand.
 fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> anyhow::Result<()> {
     // Emit an rpath so `bpf-linker` loads the intended `libLLVM`, even when

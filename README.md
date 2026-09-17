@@ -113,7 +113,7 @@ build-std = ["core"]
 To emit [BTF debug information](https://www.kernel.org/doc/html/next/bpf/btf.html),
 set the following rustflags:
 
-```
+```text
 -C debuginfo=2 -C link-arg=--btf
 ```
 
@@ -156,7 +156,7 @@ shows how to compile the C code and then link it.
 
 ### CLI syntax
 
-```
+```text
 bpf-linker
 
 USAGE:
@@ -164,7 +164,7 @@ USAGE:
 
 FLAGS:
         --disable-expand-memcpy-in-order    Disable passing --bpf-expand-memcpy-in-order to LLVM
-        --disable-memory-builtins           Disble exporting memcpy, memmove, memset, memcmp and bcmp. Exporting those
+        --disable-memory-builtins           Disable exporting memcpy, memmove, memset, memcmp and bcmp. Exporting those
                                             is commonly needed when LLVM does not manage to expand memory intrinsics to
                                             a sequence of loads and stores
     -h, --help                              Prints help information
@@ -202,7 +202,9 @@ ARGS:
 
 bpf-linker is licensed under either of
 
-- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
 
 at your option.

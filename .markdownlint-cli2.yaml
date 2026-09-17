@@ -1,0 +1,10 @@
+config:
+  no-duplicate-heading: false
+  line-length:
+    code_blocks: false
+
+globs:
+  - "**/*.md"
+ignores:
+  - "bazel-*/**/*"
+  - "target/**/*"

@@ -107,7 +107,7 @@ export LLVM_PREFIX="$PWD/llvm"
 
 On Debian-based distributions, you can install the `llvm-<version>-dev` and
 `libclang-<version>-dev` packages from the official LLVM repository at
-https://apt.llvm.org.
+<https://apt.llvm.org>.
 
 Different operating systems and Linux distributions might provide their own
 LLVM packages. If you're interested in packaging bpf-linker, you may also need
@@ -142,7 +142,7 @@ through `PATH`, `build.rs` searches `/usr/lib/llvm/<VERSION>/lib64` and
 
 Examples:
 
-```
+```sh
 # Dynamic linking
 cargo build --no-default-features --features llvm-23
 cargo install bpf-linker --no-default-features --features llvm-23
@@ -164,7 +164,7 @@ expected IR.
 
 Use `cargo test` with same arguments as used for build, e.g.:
 
-```
+```sh
 cargo +nightly test --no-default-features --features llvm-23
 ```
 
@@ -180,7 +180,7 @@ that.
 
 Build the BPF sysroot with:
 
-```
+```sh
 RUSTC_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
 BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot"
 RUSTC_BOOTSTRAP=1 cargo xtask build-std \
@@ -191,7 +191,7 @@ RUSTC_BOOTSTRAP=1 cargo xtask build-std \
 
 Then point the tests to the sysroot using the `BPFEL_SYSROOT_DIR` variable:
 
-```
+```sh
 BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
     cargo test --no-default-features --features llvm-23
 ```
@@ -201,6 +201,6 @@ BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
 It's done by the tests automatically when `BPFEL_SYSROOT_DIR` is not defined,
 but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
 
-```
+```sh
 RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-23
 ```

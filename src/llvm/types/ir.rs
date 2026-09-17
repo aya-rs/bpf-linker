@@ -114,7 +114,7 @@ impl Metadata<'_> {
     /// This method assumes that the provided `value` corresponds to a valid
     /// instance of [LLVM `Metadata`](https://llvm.org/doxygen/classllvm_1_1Metadata.html).
     /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any valiation checks.
+    /// method doesn't perform any validation checks.
     pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
         unsafe {
             let metadata = LLVMValueAsMetadata(value);
@@ -211,7 +211,7 @@ impl MDNode<'_> {
     /// This method assumes that the provided `value` corresponds to a valid
     /// instance of [LLVM `MDNode`](https://llvm.org/doxygen/classllvm_1_1MDNode.html).
     /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any valiation checks.
+    /// method doesn't perform any validation checks.
     pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
         Self {
             value_ref,
@@ -297,7 +297,7 @@ impl<'ctx> Function<'ctx> {
     /// This method assumes that the provided `value` corresponds to a valid
     /// instance of [LLVM `Function`](https://llvm.org/doxygen/classllvm_1_1Function.html).
     /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any valiation checks.
+    /// method doesn't perform any validation checks.
     pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
         Self {
             value_ref,
