@@ -365,11 +365,13 @@ jobs:
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
           echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
-          echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}" >> "$GITHUB_ENV"
-          echo "CXXSTDLIB=libcxx,libcxxabi" >> "$GITHUB_ENV"
-          echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
-          echo "ZLIB_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
-          echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR}/lib" >> "$GITHUB_ENV"
+          {
+            echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}"
+            echo "CXXSTDLIB=libcxx,libcxxabi"
+            echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR}/lib"
+            echo "ZLIB_PATH=${LLVM_INSTALL_DIR}/lib"
+            echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR}/lib"
+          } >> "$GITHUB_ENV"
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
       # flags may be incorrect when the cache is reused across LLVM versions.
