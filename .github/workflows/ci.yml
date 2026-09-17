@@ -180,22 +180,7 @@ jobs:
             oras tag "$sha" "$version"
           done
 
-  lint-stable:
-    needs: prepare
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ fromJSON(needs.prepare.outputs.rust-toolchains).stable }}
-          components: clippy, rust-src
-
-      - name: Run clippy
-        run: cargo clippy --features llvm-23,no-llvm-linking --all-targets --workspace -- --deny warnings
-
-  lint-nightly:
+  lint:
     needs: prepare
     runs-on: ubuntu-latest
 
@@ -205,10 +190,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ fromJSON(needs.prepare.outputs.rust-toolchains).nightly }}
-          components: rustfmt, rust-src
+          components: clippy,rustfmt,rust-src
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      # Clippy denies compiler warnings; fetch checks Cargo's manifest warnings.
+      - name: Check Cargo manifest warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo fetch --locked
+
+      - uses: taiki-e/install-action@v2.87.9
+        with:
+          tool: taplo-cli,typos-cli
+
+      - run: git ls-files -- '*.c' '*.h' | xargs clang-format --dry-run --Werror
+
+      - uses: DavidAnson/markdownlint-cli2-action@v24
+
+      - run: taplo fmt --check
+
+      - run: typos
+
+      - run: cargo fmt --all -- --check
+
+      - run: cargo clippy --features llvm-23,no-llvm-linking --all-targets --workspace -- --deny warnings
+
 
   bazel:
     needs: prepare
@@ -562,8 +567,7 @@ jobs:
     if: always()
     needs:
       - prepare
-      - lint-stable
-      - lint-nightly
+      - lint
       - bazel
       - build
       - release

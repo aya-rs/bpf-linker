@@ -12,7 +12,6 @@ categories = [
   "os::linux-apis",
 ]
 repository = "https://github.com/aya-rs/bpf-linker"
-readme = "README.md"
 edition.workspace = true
 
 [dependencies]
@@ -88,9 +87,7 @@ edition = "2024"
 anyhow = { version = "1.0.102", default-features = false }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 # dev deps
-reqwest = { version = "0.12.24", default-features = false }
 rustc-build-sysroot = { version = "0.5.13", default-features = false }
-serde = { version = "1.0.228", default-features = false }
 
 [workspace.lints.clippy]
 all = "warn"

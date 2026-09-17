@@ -1,5 +1,3 @@
-#![expect(unused_crate_dependencies, reason = "used in lib")]
-
 use std::{
     env,
     ffi::CString,
