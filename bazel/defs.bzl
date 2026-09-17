@@ -46,6 +46,7 @@ def bpf_assembly_test(
         src,
         crate_type = "bin",
         deps = [],
+        compile_data = [],
         rustc_flags = [],
         check_prefixes = "",
         emit = "asm",
@@ -55,6 +56,7 @@ def bpf_assembly_test(
         name = name,
         src = src,
         check_prefixes = check_prefixes,
+        compile_data = compile_data,
         crate_type = crate_type,
         deps = deps + ([panic_handler] if panic_handler else []),
         rustc_flags = rustc_flags + ["-Clink-arg=--emit=" + emit],
@@ -63,17 +65,21 @@ def bpf_assembly_test(
 def bpf_btf_test(
         name,
         src,
+        crate_name = None,
         crate_type = "bin",
         deps = [],
         compile_data = [],
         rustc_flags = [],
+        check_prefixes = "",
         panic_handler = ":btf-loop-panic-handler"):
     """Checks the BTF emitted for a BPF Rust fixture."""
     _bpf_filecheck_test(
         name = name,
         src = src,
         btf = True,
+        check_prefixes = check_prefixes,
         compile_data = compile_data,
+        crate_name = crate_name,
         crate_type = crate_type,
         deps = deps + ([panic_handler] if panic_handler else []),
         rustc_flags = [
@@ -85,6 +91,7 @@ def bpf_btf_test(
 def _bpf_filecheck_test(
         name,
         src,
+        crate_name = None,
         crate_type = "bin",
         deps = [],
         compile_data = [],
@@ -95,7 +102,7 @@ def _bpf_filecheck_test(
     bpf_name = fixture_name + "-bpfel"
     rust_kwargs = {
         "name": bpf_name,
-        "crate_name": _crate_name(src),
+        "crate_name": crate_name or _crate_name(src),
         "crate_root": src,
         "compile_data": compile_data,
         "deps": deps,

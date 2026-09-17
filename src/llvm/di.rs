@@ -208,8 +208,8 @@ impl<'ctx> DISanitizer<'ctx> {
         }
     }
 
-    // Make it so that only exported symbols (programs marked as #[no_mangle]) get BTF
-    // linkage=global. For all other functions we want linkage=static. This avoid issues like:
+    // Make it so that only exported definitions (programs marked as #[no_mangle]) get BTF
+    // linkage=global. For all other definitions we want linkage=static. This avoids issues like:
     //
     //     Global function write() doesn't return scalar. Only those are supported.
     //     verification time 18 usec
@@ -233,6 +233,10 @@ impl<'ctx> DISanitizer<'ctx> {
             .map(|value| unsafe { Function::from_value_ref(value) })
         {
             if export_symbols.contains(function.name()) {
+                continue;
+            }
+
+            if unsafe { LLVMIsDeclaration(function.value_ref) != 0 } {
                 continue;
             }
 

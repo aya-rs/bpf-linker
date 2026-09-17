@@ -18,8 +18,8 @@ use llvm_sys::{
     core::{
         LLVMCreateMemoryBufferWithMemoryRange, LLVMDisposeMemoryBuffer, LLVMDisposeMessage,
         LLVMGetEnumAttributeKindForName, LLVMGetMDString, LLVMGetModuleInlineAsm, LLVMGetTarget,
-        LLVMGetValueName2, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage, LLVMSetModuleInlineAsm2,
-        LLVMSetVisibility,
+        LLVMGetValueName2, LLVMIsDeclaration, LLVMRemoveEnumAttributeAtIndex, LLVMSetLinkage,
+        LLVMSetModuleInlineAsm2, LLVMSetVisibility,
     },
     error::{
         LLVMDisposeErrorMessage, LLVMGetErrorMessage, LLVMGetErrorTypeId, LLVMGetStringErrorTypeId,
@@ -326,6 +326,10 @@ pub(crate) fn internalize(
     name: &[u8],
     export_symbols: &HashSet<Cow<'_, [u8]>>,
 ) {
+    if unsafe { LLVMIsDeclaration(value) != 0 } {
+        return;
+    }
+
     if !name.starts_with(b"llvm.") && !export_symbols.contains(name) {
         unsafe { LLVMSetLinkage(value, LLVMLinkage::LLVMInternalLinkage) };
         unsafe { LLVMSetVisibility(value, LLVMVisibility::LLVMDefaultVisibility) };

@@ -1,7 +1,7 @@
 // assembly-output: bpf-linker
 // revisions: cdylib bin
-// [cdylib]compile-flags: --crate-type cdylib
-// [bin]compile-flags: --crate-type bin
+//[cdylib] compile-flags: --crate-type cdylib
+//[bin] compile-flags: --crate-type bin
 //
 // When compiling cdylibs or bins, only #[no_mangle] symbols are exported.
 //
@@ -34,17 +34,12 @@ pub fn local_public() -> u8 {
 }
 
 // #[no_mangle] symbols are exported
-// CHECK,cdylib: .globl local_no_mangle
-// CHECK,cdylib: .globl dep_no_mangle
-// CHECK,bin: .globl local_no_mangle
-// CHECK,bin: .globl dep_no_mangle
+// CHECK: .globl local_no_mangle
+// CHECK: .globl dep_no_mangle
 
 // public symbols are not exported
 // public symbols of dependencies are not exported
 // re-exported symbols are not exported
-// CHECK,cdylib-NOT: .globl local_public
-// CHECK,cdylib-NOT: .globl dep_public_symbol
-// CHECK,cdylib-NOT: .globl local_re_exported
-// CHECK,bin-NOT: .globl local_public
-// CHECK,bin-NOT: .globl dep_public_symbol
-// CHECK,bin-NOT: .globl local_re_exported
+// CHECK-NOT: .globl local_public
+// CHECK-NOT: .globl dep_public_symbol
+// CHECK-NOT: .globl local_re_exported

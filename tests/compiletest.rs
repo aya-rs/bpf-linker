@@ -36,6 +36,7 @@ where
         target: target.to_owned(),
         target_rustcflags: Some(target_rustcflags),
         llvm_filecheck,
+        llvm_filecheck_preprocess: Some(prepare_filecheck_input),
         mode,
         src_base: PathBuf::from(format!("tests/{mode}")),
         ..Default::default()
@@ -170,7 +171,15 @@ fn toolchain_bpf_sysroot(target: &str) -> Option<PathBuf> {
     has_core.then_some(sysroot)
 }
 
-fn btf_dump(src: &Path, dst: &Path) {
+fn prepare_filecheck_input(src: &Path, dst: &Path) {
+    let input =
+        fs::read(src).unwrap_or_else(|err| panic!("could not read '{}': {err}", src.display()));
+    if !input.starts_with(b"\x7fELF") {
+        fs::write(dst, input)
+            .unwrap_or_else(|err| panic!("could not write '{}': {err}", dst.display()));
+        return;
+    }
+
     let dst = fs::File::create(dst)
         .unwrap_or_else(|err| panic!("could not open btf dump file '{}': {err}", dst.display()));
     let mut btf = Command::new("btf");
@@ -226,7 +235,6 @@ fn compile_test() {
         &bpf_sysroot,
         Some(|cfg: &mut compiletest_rs::Config| {
             cfg.src_base = PathBuf::from("tests/btf");
-            cfg.llvm_filecheck_preprocess = Some(btf_dump);
         }),
     );
     // The `tests/nightly` directory contains tests which require unstable compiler
@@ -238,7 +246,6 @@ fn compile_test() {
             &bpf_sysroot,
             Some(|cfg: &mut compiletest_rs::Config| {
                 cfg.src_base = PathBuf::from("tests/nightly/btf");
-                cfg.llvm_filecheck_preprocess = Some(btf_dump);
             }),
         );
     }

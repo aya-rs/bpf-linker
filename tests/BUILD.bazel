@@ -102,6 +102,31 @@ bpf_assembly_test(
 )
 
 bpf_assembly_test(
+    name = "assembly-extern-linkage-ir",
+    src = "assembly/extern_linkage.rs",
+    check_prefixes = "CHECK,ir",
+    compile_data = ["assembly/auxiliary/extern.ll"],
+    crate_type = "cdylib",
+    emit = "llvm-ir",
+    rustc_flags = [
+        "-Clink-arg=-O3",
+        "-Clink-arg=$(execpath assembly/auxiliary/extern.ll)",
+    ],
+)
+
+bpf_btf_test(
+    name = "assembly-extern-linkage-btf",
+    src = "assembly/extern_linkage.rs",
+    check_prefixes = "CHECK,btf",
+    compile_data = ["assembly/auxiliary/extern.ll"],
+    # The two cdylib revisions need distinct output filenames.
+    crate_name = "extern_linkage_btf",
+    crate_type = "cdylib",
+    panic_handler = ":assembly-loop-panic-handler",
+    rustc_flags = ["-Clink-arg=$(execpath assembly/auxiliary/extern.ll)"],
+)
+
+bpf_assembly_test(
     name = "assembly-ignore-inline-never",
     src = "assembly/ignore-inline-never.rs",
     crate_type = "cdylib",
