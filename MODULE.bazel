@@ -17,10 +17,21 @@ bazel_dep(
     dev_dependency = True,
 )
 
+bazel_dep(name = "rules_qemu", version = "0.3.0")
 bazel_dep(name = "rules_rs", version = "0.0.104")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
+
+qemu = use_extension(
+    "@rules_qemu//qemu/extension:qemu.bzl",
+    "qemu",
+)
+use_repo(
+    qemu,
+    "qemu_system_toolchains",
+    "qemu_user_toolchains",
+)
 
 cargo_toml_version = use_repo_rule(
     "//bazel:cargo_toml_version.bzl",
@@ -135,3 +146,5 @@ register_toolchains(
     "//bazel/toolchains:all",
     "@llvm//toolchain:all",
 )
+
+register_toolchains("@qemu_user_toolchains//:all")

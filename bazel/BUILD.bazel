@@ -1,4 +1,12 @@
+load(":qemu_runner.bzl", "qemu_runner")
+
 exports_files([
     "defs.bzl",
     "release.bzl",
 ])
+
+qemu_runner(
+    name = "qemu-riscv64",
+    target_platform = "@rules_rs//rs/platforms:riscv64gc-unknown-linux-musl",
+    visibility = ["//visibility:public"],
+)
