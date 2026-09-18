@@ -22,6 +22,20 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "qemu_linux_amd64",
+    build_file_content = """
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["qemu-riscv64"])
+""",
+    dev_dependency = True,
+    integrity = "sha256-jn2PTAx4Cfw/6gCFGZ/WsW9nHnxz2b9r7HEeHLU1kgo=",
+    urls = ["https://github.com/tonistiigi/binfmt/releases/download/deploy/v10.2.3-68/qemu_v10.2.3_linux-amd64.tar.gz"],
+)
+
 cargo_toml_version = use_repo_rule(
     "//bazel:cargo_toml_version.bzl",
     "cargo_toml_version",
