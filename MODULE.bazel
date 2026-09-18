@@ -8,6 +8,7 @@ bazel_dep(name = "buildifier_prebuilt", version = "8.5.1.3", dev_dependency = Tr
 
 bazel_dep(name = "llvm", version = "0.8.17")
 bazel_dep(name = "bazel_lib", version = "3.2.2")
+bazel_dep(name = "hermetic_launcher", version = "0.0.8")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.22")
 
@@ -17,10 +18,21 @@ bazel_dep(
     dev_dependency = True,
 )
 
+bazel_dep(name = "rules_qemu", version = "0.3.0")
 bazel_dep(name = "rules_rs", version = "0.0.104")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
+
+qemu = use_extension(
+    "@rules_qemu//qemu/extension:qemu.bzl",
+    "qemu",
+)
+use_repo(
+    qemu,
+    "qemu_system_toolchains",
+    "qemu_user_toolchains",
+)
 
 cargo_toml_version = use_repo_rule(
     "//bazel:cargo_toml_version.bzl",
@@ -135,3 +147,5 @@ register_toolchains(
     "//bazel/toolchains:all",
     "@llvm//toolchain:all",
 )
+
+register_toolchains("@qemu_user_toolchains//:all")
