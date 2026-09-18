@@ -109,6 +109,7 @@ LLVM_ARCHIVE_TARGETS = [
     "x86_64-apple-darwin",
     "aarch64-unknown-linux-gnu",
     "aarch64-unknown-linux-musl",
+    "riscv64gc-unknown-linux-musl",
     "x86_64-unknown-linux-gnu",
     "x86_64-unknown-linux-musl",
 ]
@@ -177,48 +178,44 @@ bpf_linker_release(
     binary = ":bpf-linker",
 )
 
-RELEASE_ARCHES = [
-    "aarch64",
-    "x86_64",
-]
-
-RELEASE_FILEGROUPS = {
-    "apple-darwin": release_macos_filegroup,
-    "pc-windows-gnullvm": release_windows_filegroup,
-    "unknown-linux-musl": release_linux_filegroup,
+RELEASE_TARGETS = {
+    "aarch64-apple-darwin": release_macos_filegroup,
+    "aarch64-pc-windows-gnullvm": release_windows_filegroup,
+    "aarch64-unknown-linux-musl": release_linux_filegroup,
+    "riscv64gc-unknown-linux-musl": release_linux_filegroup,
+    "x86_64-apple-darwin": release_macos_filegroup,
+    "x86_64-pc-windows-gnullvm": release_windows_filegroup,
+    "x86_64-unknown-linux-musl": release_linux_filegroup,
 }
 
 [
     release_filegroup(
-        name = "release-%s-%s" % (arch, target_suffix),
+        name = "release-" + target,
         srcs = [":bpf-linker-release"],
         tags = ["manual"],
-        target_platform = "@rules_rs//rs/platforms:%s-%s" % (arch, target_suffix),
+        target_platform = "@rules_rs//rs/platforms:" + target,
     )
-    for target_suffix, release_filegroup in RELEASE_FILEGROUPS.items()
-    for arch in RELEASE_ARCHES
+    for target, release_filegroup in RELEASE_TARGETS.items()
 ]
 
 [
     release_filegroup(
-        name = "release-debuginfo-%s-%s" % (arch, target_suffix),
+        name = "release-debuginfo-" + target,
         srcs = [":bpf-linker-release-debuginfo"],
         tags = ["manual"],
-        target_platform = "@rules_rs//rs/platforms:%s-%s" % (arch, target_suffix),
+        target_platform = "@rules_rs//rs/platforms:" + target,
     )
-    for target_suffix, release_filegroup in RELEASE_FILEGROUPS.items()
-    for arch in RELEASE_ARCHES
+    for target, release_filegroup in RELEASE_TARGETS.items()
 ]
 
 filegroup(
     name = "release-archives",
     srcs = [
         archive
-        for target_suffix in RELEASE_FILEGROUPS
-        for arch in RELEASE_ARCHES
+        for target in RELEASE_TARGETS
         for archive in [
-            ":release-%s-%s" % (arch, target_suffix),
-            ":release-debuginfo-%s-%s" % (arch, target_suffix),
+            ":release-" + target,
+            ":release-debuginfo-" + target,
         ]
     ],
     tags = ["manual"],
