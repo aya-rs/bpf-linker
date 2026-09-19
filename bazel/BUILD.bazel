@@ -1,4 +1,14 @@
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+
 exports_files([
     "defs.bzl",
     "release.bzl",
 ])
+
+copy_file(
+    name = "qemu-riscv64",
+    src = "@qemu_linux_amd64//:qemu-riscv64",
+    out = "qemu-riscv64-bin",
+    is_executable = True,
+    visibility = ["//visibility:public"],
+)
