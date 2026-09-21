@@ -236,6 +236,18 @@ jobs:
               --run_under=//bazel:qemu-riscv64
               --test_lang_filters=rust
               --build_tests_only
+          # BuildBuddy workers run Linux, so Windows test executables must run
+          # on the GitHub-hosted Windows runner. Compilation remains remote.
+          # Bazel's Windows shell-test launcher does not build with the gnullvm
+          # toolchain, so run only tests that produce native Rust executables.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnullvm
+            test_strategy: local
+            test_options: >-
+              --run
+              --test_lang_filters=rust
+              --build_tests_only
+              --strategy=TestRunner=local
     defaults:
       run:
         shell: bash
