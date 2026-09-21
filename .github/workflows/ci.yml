@@ -226,11 +226,25 @@ jobs:
           - ubuntu-latest
           - macos-latest
         target:
+          - powerpc64-unknown-linux-musl
+          - powerpc64le-unknown-linux-musl
           - riscv64gc-unknown-linux-musl
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
         include:
-          # QEMU requires RISC-V binaries; exclude shell and Python launchers.
+          # QEMU requires target binaries; exclude shell and Python launchers.
+          - target: powerpc64-unknown-linux-musl
+            bazel_options: --@llvm//toolchain:bootstrap_stage=stage1_from_source
+            test_options: >-
+              --run_under=//bazel:qemu-ppc64
+              --test_lang_filters=rust
+              --build_tests_only
+          - target: powerpc64le-unknown-linux-musl
+            bazel_options: --@llvm//toolchain:bootstrap_stage=stage1_from_source
+            test_options: >-
+              --run_under=//bazel:qemu-ppc64le
+              --test_lang_filters=rust
+              --build_tests_only
           - target: riscv64gc-unknown-linux-musl
             test_options: >-
               --run_under=//bazel:qemu-riscv64
@@ -257,8 +271,10 @@ jobs:
           # The default JVM heap is under 2 GB on 7 GB macOS runners.
           # Bazel's default test toolchain requires the execution platform to
           # match the target platform constraints. Disable it because static
-          # musl tests can run on glibc workers, with RISC-V using QEMU.
+          # musl tests can run on glibc workers, with cross-architecture tests
+          # using QEMU.
           bazel --host_jvm_args=-Xmx4g test //... --config=remote \
+            ${{ matrix.bazel_options }} \
             ${{ matrix.test_options }} \
             --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false \

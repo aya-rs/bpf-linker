@@ -23,6 +23,18 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//bazel:llvm_powerpc64_musl.patch"],
+)
+
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//bazel:rules_rs_powerpc64_musl.patch"],
+)
+
 qemu = use_extension(
     "@rules_qemu//qemu/extension:qemu.bzl",
     "qemu",
@@ -31,6 +43,21 @@ use_repo(
     qemu,
     "qemu_system_toolchains",
     "qemu_user_toolchains",
+)
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# rules_qemu does not yet ship the big-endian qemu-ppc64 user emulator.
+http_archive(
+    name = "qemu_linux_amd64_ppc64",
+    build_file_content = """
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["qemu-ppc64-static"])
+""",
+    dev_dependency = True,
+    integrity = "sha256-XGnj9FUChwObI3mYkoGVxVfKT9V7J5AnWbYGDDZ1nqk=",
+    urls = ["https://github.com/multiarch/qemu-user-static/releases/download/v7.2.0-1/qemu-ppc64-static.tar.gz"],
 )
 
 cargo_toml_version = use_repo_rule(
@@ -53,6 +80,7 @@ llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
 # llvm.version only sets generated LLVM version constants; from_archive
 # below selects the LLVM source archive.
 llvm.version(llvm_version = "23.1.1")
+llvm.configure(targets = ["PowerPC"])
 llvm.from_archive(
     integrity = "sha256-xRPT5lAIfnfikXw0cNCN/BD+N0cMNeWapsuglG3LBPE=",
     patch_args = ["-p1"],
@@ -118,6 +146,8 @@ crate.from_cargo(
         "aarch64-unknown-linux-musl",
         "bpfeb-unknown-none",
         "bpfel-unknown-none",
+        "powerpc64-unknown-linux-musl",
+        "powerpc64le-unknown-linux-musl",
         "riscv64gc-unknown-linux-musl",
         "x86_64-apple-darwin",
         "x86_64-pc-windows-gnullvm",
@@ -145,6 +175,11 @@ use_repo(crate, "crates")
 register_toolchains(
     "//bazel/toolchains:all",
     "@llvm//toolchain:all",
+)
+
+register_toolchains(
+    "//bazel:qemu-ppc64-toolchain-linux-x86_64",
+    dev_dependency = True,
 )
 
 register_toolchains("@qemu_user_toolchains//:all")

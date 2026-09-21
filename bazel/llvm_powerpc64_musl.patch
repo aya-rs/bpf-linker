@@ -1,0 +1,338 @@
+diff --git a/extensions/toolchain.bzl b/extensions/toolchain.bzl
+index e850b7d..ef55fb2 100644
+--- a/extensions/toolchain.bzl
++++ b/extensions/toolchain.bzl
+@@ -93,6 +93,8 @@ _target_platform_tag = tag_class(
+                 "riscv64",
+                 "s390x",
+                 "armv7",
++                "ppc",
++                "ppc64le",
+                 "bpfeb",
+                 "bpfel",
+                 "wasm32",
+diff --git a/3rd_party/llvm-project/x.x/compiler-rt/compiler-rt.BUILD.bazel b/3rd_party/llvm-project/x.x/compiler-rt/compiler-rt.BUILD.bazel
+index 33919e5..a163f79 100644
+--- a/3rd_party/llvm-project/x.x/compiler-rt/compiler-rt.BUILD.bazel
++++ b/3rd_party/llvm-project/x.x/compiler-rt/compiler-rt.BUILD.bazel
+@@ -530,6 +530,26 @@ CF_PROTECTION_COPTS = select({
+     "//conditions:default": [],
+ })
+ 
++filter_builtin_sources(
++    name = "builtins_powerpc64_sources",
++    srcs = [
++        ":builtins_generic_srcs",
++        "lib/builtins/ppc/divtc3.c",
++        "lib/builtins/ppc/fixtfdi.c",
++        "lib/builtins/ppc/fixtfti.c",
++        "lib/builtins/ppc/fixunstfdi.c",
++        "lib/builtins/ppc/fixunstfti.c",
++        "lib/builtins/ppc/floatditf.c",
++        "lib/builtins/ppc/floattitf.c",
++        "lib/builtins/ppc/floatunditf.c",
++        "lib/builtins/ppc/gcc_qadd.c",
++        "lib/builtins/ppc/gcc_qdiv.c",
++        "lib/builtins/ppc/gcc_qmul.c",
++        "lib/builtins/ppc/gcc_qsub.c",
++        "lib/builtins/ppc/multc3.c",
++    ],
++)
++
+ cc_library(
+     name = "builtins",
+     srcs = select(
+@@ -539,6 +559,8 @@ cc_library(
+             "@platforms//cpu:riscv64": [":builtins_riscv64_sources"],
+             "@platforms//cpu:s390x": [":builtins_s390x_sources"],
+             "@platforms//cpu:armv7": [":builtins_armv7_sources"],
++            "@platforms//cpu:ppc": [":builtins_powerpc64_sources"],
++            "@platforms//cpu:ppc64le": [":builtins_powerpc64_sources"],
+             "@platforms//cpu:wasm32": [":builtins_wasm32_sources"],
+             "@platforms//cpu:wasm64": [":builtins_wasm64_sources"],
+         },
+diff --git a/kernel/extension/kernel_headers.bzl b/kernel/extension/kernel_headers.bzl
+index bbb672f..46015fc 100644
+--- a/kernel/extension/kernel_headers.bzl
++++ b/kernel/extension/kernel_headers.bzl
+@@ -24,7 +24,7 @@ _SUPPORTED_ARCHS = [
+     # "m68k",
+     # "mips",
+     # "openrisc",
+-    # "powerpc",
++    "powerpc",
+     "riscv",
+     "s390",
+     # "sh",
+diff --git a/kernel/extension/kernel_helpers.bzl b/kernel/extension/kernel_helpers.bzl
+index ebdf7d2..a67c56e 100644
+--- a/kernel/extension/kernel_helpers.bzl
++++ b/kernel/extension/kernel_helpers.bzl
+@@ -17,5 +17,7 @@ def arch_to_kernel_arch(arch):
+         return "s390"
+     elif arch == "armv7":
+         return "arm"
++    elif arch in ["ppc", "ppc64le"]:
++        return "powerpc"
+     else:
+         return arch
+diff --git a/kernel/extension/make_select_kernel_headers_repository_target.bzl b/kernel/extension/make_select_kernel_headers_repository_target.bzl
+index db366de..73e7e5a 100644
+--- a/kernel/extension/make_select_kernel_headers_repository_target.bzl
++++ b/kernel/extension/make_select_kernel_headers_repository_target.bzl
+@@ -5,7 +5,7 @@ load(
+ )
+ load("//constraints/kernel/linux:linux_kernel_versions.bzl", "LINUX_KERNEL_VERSIONS")
+ load("//constraints/libc:libc_versions.bzl", "LIBCS")
+-load("//platforms:common.bzl", "LIBC_SUPPORTED_TARGETS")
++load("//platforms:common.bzl", "LIBC_SUPPORTED_TARGETS", "MUSL_ONLY_TARGETS")
+ load(":kernel_helpers.bzl", "arch_to_kernel_arch")
+ load(":libc_kernel_versions.bzl", "LIBC_KERNEL_VERSIONS")
+ 
+@@ -31,7 +31,7 @@ def _make_select_kernel_headers_repository_target_for_linux_kernel(kernel_versio
+     """Select the right kernel headers repository based on the target architecture."""
+     selection = {}
+     full_kernel_version = _linux_kernel_headers_version(kernel_version)
+-    for (target_os, target_arch) in LIBC_SUPPORTED_TARGETS:
++    for (target_os, target_arch) in LIBC_SUPPORTED_TARGETS + MUSL_ONLY_TARGETS:
+         if not _kernel_headers_available(target_arch, full_kernel_version):
+             continue
+         apparent_target = _kernel_headers_repository_target(target_arch, full_kernel_version, bazel_target)
+@@ -46,6 +46,10 @@ def _make_select_kernel_headers_repository_target_from_libc(bazel_target):
+             apparent_target = _kernel_headers_repository_target(target_arch, kernel_version, bazel_target)
+             selection["@llvm//platforms/config:{}_{}_{}".format(target_os, target_arch, libc_version)] = apparent_target
+ 
++    for (target_os, target_arch) in MUSL_ONLY_TARGETS:
++        kernel_version = LIBC_KERNEL_VERSIONS["musl"]
++        selection["@llvm//platforms/config:{}_{}_musl".format(target_os, target_arch)] = _kernel_headers_repository_target(target_arch, kernel_version, bazel_target)
++
+     return select(selection)
+ 
+ def _make_select_kernel_headers_repository_target_from_linux_kernel(bazel_target):
+diff --git a/platforms/common.bzl b/platforms/common.bzl
+index d2ea44f..73ff8f0 100644
+--- a/platforms/common.bzl
++++ b/platforms/common.bzl
+@@ -4,6 +4,8 @@ ARCH_ALIASES = {
+     "riscv64": [],
+     "s390x": [],
+     "armv7": [],
++    "ppc": [],
++    "ppc64le": [],
+ }
+ 
+ SUPPORTED_TARGETS = [
+@@ -14,6 +16,8 @@ SUPPORTED_TARGETS = [
+     ("linux", "riscv64"),
+     ("linux", "s390x"),
+     ("linux", "armv7"),
++    ("linux", "ppc"),
++    ("linux", "ppc64le"),
+     ("windows", "x86_64"),
+     ("windows", "aarch64"),
+     ("none", "bpfeb"),
+@@ -38,3 +42,8 @@ LIBC_SUPPORTED_TARGETS = [
+     ("linux", "s390x"),
+     ("linux", "armv7"),
+ ]
++
++MUSL_ONLY_TARGETS = [
++    ("linux", "ppc"),
++    ("linux", "ppc64le"),
++]
+diff --git a/platforms/config/declare_config_settings.bzl b/platforms/config/declare_config_settings.bzl
+index 7c4fe7d..760d076 100644
+--- a/platforms/config/declare_config_settings.bzl
++++ b/platforms/config/declare_config_settings.bzl
+@@ -1,7 +1,7 @@
+ load("@bazel_skylib//lib:selects.bzl", "selects")
+ load("//constraints/libc:libc_versions.bzl", "GLIBCS", "LIBCS")
+ load("//constraints/windows/abi:abis.bzl", "WINDOWS_ABIS", "WINDOWS_MINGW_COMPATIBLE_ABIS")
+-load("//platforms:common.bzl", "LIBC_SUPPORTED_TARGETS", "SUPPORTED_TARGETS", "WINDOWS_TARGETS")
++load("//platforms:common.bzl", "LIBC_SUPPORTED_TARGETS", "MUSL_ONLY_TARGETS", "SUPPORTED_TARGETS", "WINDOWS_TARGETS")
+ load("//toolchain:bootstrap_stages.bzl", "BOOTSTRAP_STAGES")
+ 
+ def declare_config_settings():
+@@ -52,6 +52,17 @@ def declare_config_settings_libc_aware():
+             ],
+             visibility = ["//visibility:public"],
+         )
+ 
++    for (target_os, target_cpu) in MUSL_ONLY_TARGETS:
++        native.config_setting(
++            name = "{}_{}_musl".format(target_os, target_cpu),
++            constraint_values = [
++                "@platforms//cpu:{}".format(target_cpu),
++                "@platforms//os:{}".format(target_os),
++                "//constraints/libc:musl",
++            ],
++            visibility = ["//visibility:public"],
++        )
++
+     selects.config_setting_group(
+         name = "gnu",
+         match_any = [
+diff --git a/platforms/declare_platforms.bzl b/platforms/declare_platforms.bzl
+index 04ea853..f93b83b 100644
+--- a/platforms/declare_platforms.bzl
++++ b/platforms/declare_platforms.bzl
+@@ -1,7 +1,7 @@
+ load("//constraints/cxxstdlib:cxxstdlib_versions.bzl", "DEFAULT_CXXSTDLIB")
+ load("//constraints/libc:libc_versions.bzl", "LIBCS", "default_libc")
+ load("//constraints/windows/abi:abis.bzl", "WINDOWS_GENERIC_PLATFORM_ABI")
+-load("//platforms:common.bzl", "ARCH_ALIASES", "LIBC_SUPPORTED_TARGETS", "SUPPORTED_TARGETS")
++load("//platforms:common.bzl", "ARCH_ALIASES", "LIBC_SUPPORTED_TARGETS", "MUSL_ONLY_TARGETS", "SUPPORTED_TARGETS")
+ 
+ def declare_platforms():
+     for (target_os, target_cpu) in SUPPORTED_TARGETS:
+@@ -57,4 +57,16 @@ def declare_platforms_libc_aware():
+                         "//constraints/cxxstdlib:{}".format(DEFAULT_CXXSTDLIB),
+                     ],
+                     visibility = ["//visibility:public"],
+                 )
++
++    for target_os, target_cpu in MUSL_ONLY_TARGETS:
++        native.platform(
++            name = "{}_{}_musl".format(target_os, target_cpu),
++            constraint_values = [
++                "@platforms//cpu:{}".format(target_cpu),
++                "@platforms//os:{}".format(target_os),
++                "//constraints/libc:musl",
++                "//constraints/cxxstdlib:{}".format(DEFAULT_CXXSTDLIB),
++            ],
++            visibility = ["//visibility:public"],
++        )
+diff --git a/runtimes/copy_to_resource_directory.bzl b/runtimes/copy_to_resource_directory.bzl
+index 6f0e1b4..596e660 100644
+--- a/runtimes/copy_to_resource_directory.bzl
++++ b/runtimes/copy_to_resource_directory.bzl
+@@ -18,6 +18,8 @@ TRIPLE_SELECT_DICT = {
+     "@llvm//platforms/config:linux_riscv64_musl": "riscv64-unknown-linux-musl",
+     "@llvm//platforms/config:linux_s390x_musl": "s390x-unknown-linux-musl",
+     "@llvm//platforms/config:linux_armv7_musl": "armv7-unknown-linux-musleabihf",
++    "@llvm//platforms/config:linux_ppc_musl": "powerpc64-unknown-linux-musl",
++    "@llvm//platforms/config:linux_ppc64le_musl": "powerpc64le-unknown-linux-musl",
+     "@llvm//platforms/config:macos_x86_64": "darwin",
+     "@llvm//platforms/config:macos_aarch64": "darwin",
+     "@llvm//platforms/config:windows_x86_64": "x86_64-w64-windows-gnu",
+diff --git a/runtimes/musl/BUILD.bazel b/runtimes/musl/BUILD.bazel
+index 149c8ac..318430e 100644
+--- a/runtimes/musl/BUILD.bazel
++++ b/runtimes/musl/BUILD.bazel
+@@ -19,6 +19,8 @@ libc_musl_srcs_filegroup(
+             "@platforms//cpu:riscv64": "riscv64",
+             "@platforms//cpu:s390x": "s390x",
+             "@platforms//cpu:armv7": "arm",
++            "@platforms//cpu:ppc": "powerpc64",
++            "@platforms//cpu:ppc64le": "powerpc64",
+         },
+         no_match_error = "Unsupported platform",
+     ),
+diff --git a/3rd_party/libc/musl/musl.BUILD.bazel b/3rd_party/libc/musl/musl.BUILD.bazel
+index 789491a..5240be2 100644
+--- a/3rd_party/libc/musl/musl.BUILD.bazel
++++ b/3rd_party/libc/musl/musl.BUILD.bazel
+@@ -10,6 +10,7 @@ MUSL_SUPPORTED_ARCHS = [
+     "riscv64",
+     "s390x",
+     "arm",
++    "powerpc64",
+ ]
+ 
+ # Exposed for e2e tests that compare Starlark header generation against musl's sed scripts.
+@@ -106,6 +107,8 @@ alias(
+         "@platforms//cpu:riscv64": ":musl_internal_headers_riscv64",
+         "@platforms//cpu:s390x": ":musl_internal_headers_s390x",
+         "@platforms//cpu:armv7": ":musl_internal_headers_arm",
++        "@platforms//cpu:ppc": ":musl_internal_headers_powerpc64",
++        "@platforms//cpu:ppc64le": ":musl_internal_headers_powerpc64",
+     }),
+     visibility = ["//visibility:public"],
+ )
+@@ -253,6 +256,8 @@ alias(
+         "@platforms//cpu:riscv64": ":musl_libc_headers_riscv64",
+         "@platforms//cpu:s390x": ":musl_libc_headers_s390x",
+         "@platforms//cpu:armv7": ":musl_libc_headers_arm",
++        "@platforms//cpu:ppc": ":musl_libc_headers_powerpc64",
++        "@platforms//cpu:ppc64le": ":musl_libc_headers_powerpc64",
+     }),
+     visibility = ["//visibility:public"],
+ )
+@@ -265,6 +270,8 @@ alias(
+         "@platforms//cpu:riscv64": ":musl_libc_headers_riscv64_for_musl",
+         "@platforms//cpu:s390x": ":musl_libc_headers_s390x_for_musl",
+         "@platforms//cpu:armv7": ":musl_libc_headers_arm_for_musl",
++        "@platforms//cpu:ppc": ":musl_libc_headers_powerpc64_for_musl",
++        "@platforms//cpu:ppc64le": ":musl_libc_headers_powerpc64_for_musl",
+     }),
+     visibility = ["//visibility:public"],
+ )
+@@ -277,6 +284,8 @@ alias(
+         "@platforms//cpu:riscv64": ":headers_riscv64_include_directory",
+         "@platforms//cpu:s390x": ":headers_s390x_include_directory",
+         "@platforms//cpu:armv7": ":headers_arm_include_directory",
++        "@platforms//cpu:ppc": ":headers_powerpc64_include_directory",
++        "@platforms//cpu:ppc64le": ":headers_powerpc64_include_directory",
+     }),
+     visibility = ["//visibility:public"],
+ )
+diff --git a/toolchain/args/llvm_target_triple.bzl b/toolchain/args/llvm_target_triple.bzl
+index ef4662a..99e4e76 100644
+--- a/toolchain/args/llvm_target_triple.bzl
++++ b/toolchain/args/llvm_target_triple.bzl
+@@ -10,6 +10,8 @@ LLVM_TARGET_TRIPLE = select({
+     "@llvm//platforms/config:linux_riscv64_musl": ["riscv64-linux-musl"],
+     "@llvm//platforms/config:linux_s390x_musl": ["s390x-linux-musl"],
+     "@llvm//platforms/config:linux_armv7_musl": ["armv7-linux-musleabihf"],
++    "@llvm//platforms/config:linux_ppc_musl": ["powerpc64-linux-musl"],
++    "@llvm//platforms/config:linux_ppc64le_musl": ["powerpc64le-linux-musl"],
+     "@llvm//platforms/config:macos_x86_64": ["x86_64-apple-darwin"],
+     "@llvm//platforms/config:macos_aarch64": ["aarch64-apple-darwin"],
+     "@llvm//platforms/config:windows_x86_64": ["x86_64-w64-windows-gnu"],
+diff --git a/toolchain/bootstrap/transition_settings.bzl b/toolchain/bootstrap/transition_settings.bzl
+index 780fa3a..e9ab1a3 100644
+--- a/toolchain/bootstrap/transition_settings.bzl
++++ b/toolchain/bootstrap/transition_settings.bzl
+@@ -1,40 +1,31 @@
+ """Shared settings for LLVM bootstrap transitions."""
+ 
+-load("@llvm-project//:vars.bzl", "LLVM_VERSION_MAJOR")
+-
+-# Enable the same set of tools we provide with prebuilts.
++# Enable the tools needed by the source-built bootstrap compiler.
+-LLVM_TOOLS = ([
+-    "clang-format",
+-    "clang-tidy",
+-    "clangd",
+-] if int(LLVM_VERSION_MAJOR) >= 22 else []) + [
++LLVM_TOOLS = [
+     "clang",
+     "clang-scan-deps",
+     "dsymutil",
+     "lld",
+     "llvm-ar",
+     "llvm-cgdata",
+-    "llvm-cov",
+     "llvm-cxxfilt",
+     "llvm-debuginfod-find",
+     "llvm-dwp",
+     "llvm-gsymutil",
+     "llvm-ifs",
+     "llvm-libtool-darwin",
+-    "llvm-link",
+     "llvm-lipo",
+     "llvm-ml",
+     "llvm-mt",
+     "llvm-nm",
+     "llvm-objcopy",
+     "llvm-objdump",
+-    "llvm-profdata",
+     "llvm-rc",
+     "llvm-readobj",
+     "llvm-readtapi",
+     "llvm-size",
+     "llvm-symbolizer",
+     "sancov",
+ ]
+ 
+ SANITIZER_FLAGS = [

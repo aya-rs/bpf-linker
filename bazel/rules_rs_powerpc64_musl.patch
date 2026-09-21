@@ -1,0 +1,11 @@
+diff --git a/rs/platforms/triples.bzl b/rs/platforms/triples.bzl
+--- a/rs/platforms/triples.bzl
++++ b/rs/platforms/triples.bzl
+@@ -93,6 +93,7 @@ SUPPORTED_TIER_1_AND_2_TRIPLES = [
+     "i686-pc-windows-gnu",  # 32-bit MinGW (Windows 10+, Windows Server 2016+, Pentium 4) 1 2
+     "powerpc-unknown-linux-gnu",  # PowerPC Linux (kernel 3.2+, glibc 2.17)
+     "powerpc64-unknown-linux-gnu",  # PPC64 Linux (kernel 3.2+, glibc 2.17)
++    "powerpc64-unknown-linux-musl",  # PPC64 Linux (kernel 4.19+, musl 1.2.5)
+     "powerpc64le-unknown-linux-gnu",  # PPC64LE Linux (kernel 3.10+, glibc 2.17)
+     "powerpc64le-unknown-linux-musl",  # PPC64LE Linux (kernel 4.19+, musl 1.2.5)
+     "riscv64gc-unknown-linux-gnu",  # RISC-V Linux (kernel 4.20+, glibc 2.29)
