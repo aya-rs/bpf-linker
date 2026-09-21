@@ -230,16 +230,12 @@ jobs:
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
         include:
-          # There are no RISC-V GitHub runners. Running the bpf-linker tests
-          # with a user-space emulator works fine and requires less effort
-          # than setting up a VM. Run only the test targets that produce
-          # executables (Rust unit and compile tests).
+          # QEMU requires RISC-V binaries; exclude shell and Python launchers.
           - target: riscv64gc-unknown-linux-musl
-            run_under: //bazel:qemu-riscv64
-            test_targets: >-
-              //:bpf-linker-unit-test
-              //:bpf-linker-bin-unit-test
-              //tests:bpf-linker-link-ir-test
+            test_options: >-
+              --run_under=//bazel:qemu-riscv64
+              --test_lang_filters=rust
+              --build_tests_only
     defaults:
       run:
         shell: bash
@@ -255,24 +251,15 @@ jobs:
             --ignore_dev_dependency --lockfile_mode=off
 
       - name: Test
-        env:
-          RUN_UNDER: ${{ matrix.run_under }}
-          TEST_TARGETS: ${{ matrix.test_targets || '//...' }}
         run: |
           set -euo pipefail
-
-          read -r -a test_targets <<< "$TEST_TARGETS"
-          test_options=(--config=remote)
-          if [[ -n $RUN_UNDER ]]; then
-            test_options+=(--run_under="$RUN_UNDER")
-          fi
 
           # The default JVM heap is under 2 GB on 7 GB macOS runners.
           # Bazel's default test toolchain requires the execution platform to
           # match the target platform constraints. Disable it because static
           # musl tests can run on glibc workers, with RISC-V using QEMU.
-          bazel --host_jvm_args=-Xmx4g test "${test_options[@]}" \
-            "${test_targets[@]}" \
+          bazel --host_jvm_args=-Xmx4g test //... --config=remote \
+            ${{ matrix.test_options }} \
             --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
             --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false \
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
