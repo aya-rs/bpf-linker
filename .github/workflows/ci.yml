@@ -240,6 +240,17 @@ jobs:
               //:bpf-linker-unit-test
               //:bpf-linker-bin-unit-test
               //tests:bpf-linker-link-ir-test
+          # BuildBuddy workers run Linux, so Windows test executables must run
+          # on the GitHub-hosted Windows runner. Compilation remains remote.
+          # Bazel's Windows shell-test launcher does not build with the gnullvm
+          # toolchain, so run only tests that produce native Rust executables.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnullvm
+            test_strategy: local
+            test_targets: >-
+              //:bpf-linker-unit-test
+              //:bpf-linker-bin-unit-test
+              //tests:bpf-linker-link-ir-test
     defaults:
       run:
         shell: bash
@@ -257,6 +268,7 @@ jobs:
       - name: Test
         env:
           RUN_UNDER: ${{ matrix.run_under }}
+          TEST_STRATEGY: ${{ matrix.test_strategy }}
           TEST_TARGETS: ${{ matrix.test_targets || '//...' }}
         run: |
           set -euo pipefail
@@ -265,6 +277,9 @@ jobs:
           test_options=(--config=remote)
           if [[ -n $RUN_UNDER ]]; then
             test_options+=(--run_under="$RUN_UNDER")
+          fi
+          if [[ -n $TEST_STRATEGY ]]; then
+            test_options+=(--strategy=TestRunner="$TEST_STRATEGY")
           fi
 
           # The default JVM heap is under 2 GB on 7 GB macOS runners.
