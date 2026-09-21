@@ -23,11 +23,6 @@ common --enable_platform_specific_config
 # Rustc ships with msvc ABI and we must match it when compiling proc macros.
 common:windows --host_platform=//platforms:local_windows_msvc
 
-# Standard rust configuration to avoid passing libtool to build scripts that
-# use cc-rs and expect ar.
-# Can be removed once https://github.com/hermeticbuild/rules_rust/pull/24 lands.
-common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
-
 common --@llvm-project//llvm:enable_abi_breaking_checks
 
 # Default opt flags undef NDEBUG, force it on so release builds have assertions.
@@ -51,11 +46,6 @@ common:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
 # -Zsplit-dwarf-out-dir, but the Rust 1.96.0 toolchain is stable.
 # https://github.com/bazelbuild/rules_rust/pull/4186
 common:release --@rules_rust//rust/settings:skip_fission_for_rust
-
-# Bit of rules_rust magic that is required when the C linker drives the link.
-# This should be smoothed over, see
-# https://github.com/hermeticbuild/rules_rust/issues/27
-common:release --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
 
 # Keep remote connections healthy.
 common:remote --grpc_keepalive_time=10s
