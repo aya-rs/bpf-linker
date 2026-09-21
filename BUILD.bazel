@@ -101,12 +101,25 @@ llvm_archive(
     },
     filecheck = "@llvm-project//llvm:FileCheck",
     llvm = ":llvm",
-    shared = ":LLVM",
+    # Bazel builds and tests link LLVM statically. Cargo tests use shared LLVM
+    # with `cargo hack --feature-powerset` to avoid exhausting disk space on
+    # GitHub runners.
+    #
+    # Windows archives omit shared LLVM because a PE/COFF DLL can export at most
+    # 65,535 symbols, fewer than the monolithic LLVM library exposes. Therefore,
+    # Windows is covered by Bazel tests, but not by the Cargo feature-powerset
+    # tests.
+    shared = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": [":LLVM"],
+    }),
 )
 
 LLVM_ARCHIVE_TARGETS = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
+    "aarch64-pc-windows-gnullvm",
+    "x86_64-pc-windows-gnullvm",
     "aarch64-unknown-linux-gnu",
     "aarch64-unknown-linux-musl",
     "riscv64gc-unknown-linux-musl",

@@ -39,6 +39,7 @@ The tags mention the LLVM version, the platform, and our custom revision, e.g.
 * `23-x86_64-unknown-linux-gnu-4` - LLVM 23, x86_64 Linux, glibc, revision 4
 * `21-aarch64-unknown-linux-musl-4` - LLVM 21, aarch64 Linux, musl, revision 4
 * `22-aarch64-apple-darwin-4` - LLVM 22, aarch64 macOS, revision 4
+* `23-x86_64-pc-windows-gnullvm-4` - LLVM 23, x86_64 Windows, revision 4
 
 Always pick the latest revision available, if there are multiple.
 
@@ -72,9 +73,11 @@ mkdir llvm
 tar --zstd -xpf bazel-bin/llvm-archive.tar.zst -C llvm/
 ```
 
-The archive contains FileCheck, the shared LLVM library, and its static
-component libraries. It is intended for building and debugging bpf-linker,
-rather than as a complete LLVM developer installation.
+The archive contains FileCheck and LLVM's static component libraries. The
+macOS and Linux archives also contain the shared LLVM library; Windows archive
+does not, because its monolithic DLL exceeds the PE/COFF export limit. The
+archive is intended for building and debugging bpf-linker, rather than as a
+complete LLVM developer installation.
 
 #### Building LLVM with CMake
 
