@@ -4,6 +4,12 @@ load("@bazel_lib//lib:copy_file.bzl", "copy_file")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@tar.bzl", "tar")
+load("@with_cfg.bzl", "with_cfg")
+
+_powerpc_platform_transition_filegroup = with_cfg(platform_transition_filegroup).set(
+    Label("@llvm//toolchain:bootstrap_stage"),
+    "stage1_from_source",
+).build()[0]
 
 def _mtree_line(path, type, content = None):
     line = "{} uid=0 gid=0 time=1672560000 mode=0755 type={} nlink=1".format(
@@ -138,10 +144,18 @@ def llvm_archive(name, cxxstdlibs, filecheck, llvm, shared):
         testonly = True,
     )
 
-def llvm_archive_for_platform(name, archive, target_platform):
-    """Build an LLVM archive for a target platform and give it a unique name."""
+def llvm_archive_for_platform(name, archive, target_platform, bootstrap_from_source = False):
+    """Build an LLVM archive for a target platform and give it a unique name.
+
+    Args:
+        name: Name of the platform-specific archive target.
+        archive: LLVM archive target to transition.
+        target_platform: Target platform used to build the archive.
+        bootstrap_from_source: Whether to build the bootstrap compiler from source.
+    """
     transitioned = name + "-transitioned"
-    platform_transition_filegroup(
+    transition_filegroup = _powerpc_platform_transition_filegroup if bootstrap_from_source else platform_transition_filegroup
+    transition_filegroup(
         name = transitioned,
         srcs = [archive],
         target_platform = target_platform,

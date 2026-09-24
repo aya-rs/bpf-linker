@@ -9,6 +9,7 @@ load(
     "//bazel:release.bzl",
     "bpf_linker_release",
     "release_linux_filegroup",
+    "release_linux_powerpc_filegroup",
     "release_macos_filegroup",
     "release_windows_filegroup",
 )
@@ -109,6 +110,8 @@ LLVM_ARCHIVE_TARGETS = [
     "x86_64-apple-darwin",
     "aarch64-unknown-linux-gnu",
     "aarch64-unknown-linux-musl",
+    "powerpc64-unknown-linux-musl",
+    "powerpc64le-unknown-linux-musl",
     "riscv64gc-unknown-linux-musl",
     "x86_64-unknown-linux-gnu",
     "x86_64-unknown-linux-musl",
@@ -118,6 +121,7 @@ LLVM_ARCHIVE_TARGETS = [
     llvm_archive_for_platform(
         name = "llvm-archive-" + target,
         archive = ":llvm-archive",
+        bootstrap_from_source = target.startswith("powerpc64"),
         target_platform = "@rules_rs//rs/platforms:" + target,
     )
     for target in LLVM_ARCHIVE_TARGETS
@@ -182,6 +186,8 @@ RELEASE_TARGETS = {
     "aarch64-apple-darwin": release_macos_filegroup,
     "aarch64-pc-windows-gnullvm": release_windows_filegroup,
     "aarch64-unknown-linux-musl": release_linux_filegroup,
+    "powerpc64-unknown-linux-musl": release_linux_powerpc_filegroup,
+    "powerpc64le-unknown-linux-musl": release_linux_powerpc_filegroup,
     "riscv64gc-unknown-linux-musl": release_linux_filegroup,
     "x86_64-apple-darwin": release_macos_filegroup,
     "x86_64-pc-windows-gnullvm": release_windows_filegroup,

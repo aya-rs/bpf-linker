@@ -10,6 +10,14 @@ release_linux_filegroup, _release_linux_filegroup_internal = with_cfg(platform_t
     ["opt"],
 ).build()
 
+release_linux_powerpc_filegroup, _release_linux_powerpc_filegroup_internal = with_cfg(platform_transition_filegroup).set(
+    "fission",
+    ["opt"],
+).set(
+    Label("@llvm//toolchain:bootstrap_stage"),
+    "stage1_from_source",
+).build()
+
 # https://bazel.build/reference/command-line-reference#flag--apple_generate_dsym
 release_macos_filegroup, _release_macos_filegroup_internal = with_cfg(platform_transition_filegroup).set(
     "apple_generate_dsym",

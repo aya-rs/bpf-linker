@@ -1,9 +1,43 @@
+load("@rules_qemu//qemu:qemu_toolchain.bzl", "qemu_toolchain")
 load(":qemu_runner.bzl", "qemu_runner")
 
 exports_files([
     "defs.bzl",
+    "llvm_powerpc64_musl.patch",
     "release.bzl",
+    "rules_rs_powerpc64_musl.patch",
 ])
+
+qemu_toolchain(
+    name = "qemu-ppc64-toolchain-linux-x86_64-impl",
+    qemu = "@qemu_linux_amd64_ppc64//:qemu-ppc64-static",
+)
+
+toolchain(
+    name = "qemu-ppc64-toolchain-linux-x86_64",
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:ppc",
+        "@platforms//os:linux",
+    ],
+    toolchain = ":qemu-ppc64-toolchain-linux-x86_64-impl",
+    toolchain_type = "@rules_qemu//qemu:toolchain_type",
+)
+
+qemu_runner(
+    name = "qemu-ppc64",
+    target_platform = "@rules_rs//rs/platforms:powerpc64-unknown-linux-musl",
+    visibility = ["//visibility:public"],
+)
+
+qemu_runner(
+    name = "qemu-ppc64le",
+    target_platform = "@rules_rs//rs/platforms:powerpc64le-unknown-linux-musl",
+    visibility = ["//visibility:public"],
+)
 
 qemu_runner(
     name = "qemu-riscv64",
