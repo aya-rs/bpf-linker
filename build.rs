@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::{Context as _, anyhow};
+use bstr::{BStr, BString};
 use object::{AddressSize, Architecture};
 
 macro_rules! write_bytes {
@@ -43,9 +44,9 @@ macro_rules! write_bytes {
 }
 
 enum Cxxstdlibs<'a> {
-    EnvVar(OsString),
-    Single(&'static [u8]),
-    Multiple(&'a [&'static [u8]]),
+    EnvVar(BString),
+    Single(&'a BStr),
+    Multiple([&'a BStr; 2]),
 }
 
 impl Cxxstdlibs<'_> {
@@ -54,27 +55,27 @@ impl Cxxstdlibs<'_> {
         const CXXSTDLIB: &str = "CXXSTDLIB";
         writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
         Ok(match env::var_os(CXXSTDLIB) {
-            Some(cxxstdlib) => Self::EnvVar(cxxstdlib),
+            Some(cxxstdlib) => Self::EnvVar(cxxstdlib.into_encoded_bytes().into()),
             None => {
                 if cfg!(target_os = "linux") {
                     // Default to GNU libstdc++ on Linux. Can be overwritten through
                     // `CXXSTDLIB` variable on distributions using LLVM as default
                     // toolchain.
-                    Self::Single(b"stdc++")
+                    Self::Single(BStr::new(b"stdc++"))
                 } else if cfg!(target_os = "macos") {
                     // Default to LLVM libc++ on macOS, where LLVM is the default
                     // toolchain.
                     if cfg!(feature = "llvm-link-static") {
                         // Static LLVM libc++ has two files - libc++.a and libc++abi.a.
-                        Self::Multiple(&[b"c++", b"c++abi"])
+                        Self::Multiple([BStr::new(b"c++"), BStr::new(b"c++abi")])
                     } else {
                         // Shared LLVM libc++ has one file.
-                        Self::Single(b"c++")
+                        Self::Single(BStr::new(b"c++"))
                     }
                 } else {
                     // Fall back to GNU libstdc++ on all other platforms. Again,
                     // can be overwritten through `CXXSTDLIB`.
-                    Self::Single(b"stdc++")
+                    Self::Single(BStr::new(b"stdc++"))
                 }
             }
         })
@@ -82,18 +83,14 @@ impl Cxxstdlibs<'_> {
 
     fn iter(&self) -> impl Iterator<Item = &[u8]> {
         match self {
-            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.as_encoded_bytes().split(|b| *b == b',')),
+            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.split(|b| *b == b',')),
             Self::Single(s) => {
                 CxxstdlibsIter::Single(iter::once(
-                    // Coerce `&&[u8]` to `&[u8]`.
-                    *s,
+                    // Coerce `&&BStr` to `&[u8]`.
+                    s.as_ref(),
                 ))
             }
-            Self::Multiple(m) => CxxstdlibsIter::Multiple(
-                m.iter()
-                    // Coerce `&&[u8]` to `&[u8]`.
-                    .copied(),
-            ),
+            Self::Multiple(m) => CxxstdlibsIter::Multiple(m.iter().map(|lib| lib.as_ref())),
         }
     }
 
@@ -111,16 +108,16 @@ impl Display for Cxxstdlibs<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnvVar(p) => {
-                Display::fmt(&p.display(), f)?;
+                Display::fmt(p, f)?;
             }
-            Self::Single(s) => Display::fmt(&OsStr::from_bytes(s).display(), f)?,
+            Self::Single(s) => Display::fmt(s, f)?,
             Self::Multiple(m) => {
                 f.write_str("[")?;
                 for (i, lib) in m.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
-                    Display::fmt(&OsStr::from_bytes(lib).display(), f)?;
+                    Display::fmt(lib, f)?;
                 }
                 f.write_str("]")?;
             }
