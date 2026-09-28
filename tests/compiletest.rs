@@ -3,10 +3,11 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     io::{self, Write as _},
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     process::Command,
 };
+
+use bstr::{BStr, ByteSlice};
 
 fn rustc_cmd() -> Command {
     Command::new(env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc")))
@@ -128,7 +129,12 @@ fn toolchain_bpf_sysroot(target: &str) -> Option<PathBuf> {
     while matches!(sysroot.last(), Some(b'\n' | b'\r')) {
         let _newline = sysroot.pop();
     }
-    let sysroot = PathBuf::from(OsString::from_vec(sysroot));
+    let sysroot = PathBuf::from(sysroot.to_os_str().unwrap_or_else(|err| {
+        panic!(
+            "sysroot `{}` is not valid UTF-8: {err}",
+            BStr::new(&sysroot)
+        )
+    }));
     let target_libdir = sysroot.join("lib").join("rustlib").join(target).join("lib");
 
     let has_core = match fs::read_dir(&target_libdir) {
@@ -141,7 +147,7 @@ fn toolchain_bpf_sysroot(target: &str) -> Option<PathBuf> {
                     )
                 });
                 let name = entry.file_name();
-                let name = name.as_os_str().as_bytes();
+                let name = name.as_os_str().as_encoded_bytes();
                 name.starts_with(b"libcore-") && name.ends_with(b".rlib")
             });
             if !has_core {
