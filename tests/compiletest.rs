@@ -31,7 +31,7 @@ where
         sysroot.to_str().unwrap()
     );
 
-    let llvm_filecheck = Some(find_binary(r"^FileCheck(-\d+)?$"));
+    let llvm_filecheck = Some(find_binary(r"^FileCheck(-\d+)?(\.exe)?$"));
 
     let mode = mode.parse().expect("Invalid mode");
     let mut config = compiletest_rs::Config {
@@ -76,7 +76,7 @@ fn clang_build<P>(src: P, dst: P)
 where
     P: AsRef<Path>,
 {
-    let clang = find_binary(r"^clang(-\d+)?$");
+    let clang = find_binary(r"^clang(-\d+)?(\.exe)?$");
     let output = Command::new(clang)
         .arg("-target")
         .arg("bpf")
