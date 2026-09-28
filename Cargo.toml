@@ -48,11 +48,12 @@ scopeguard = { version = "1.2.0", default-features = false }
 
 [build-dependencies]
 anyhow = { workspace = true }
-bstr = { version = "1.13.1", default-features = false, features = ["std"] }
+bstr = { workspace = true }
 object = { version = "0.39.0", default-features = false }
 
 [dev-dependencies]
 assert_matches = { version = "1.5.0", default-features = false }
+bstr = { workspace = true }
 btfdump = { version = "0.0.5", default-features = false }
 compiletest_rs = { version = "0.11.0" }
 object = { version = "0.40.0", default-features = false, features = ["read"] }
@@ -90,6 +91,7 @@ edition = "2024"
 anyhow = { version = "1.0.102", default-features = false }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 # dev deps
+bstr = { version = "1.13.1", default-features = false, features = ["std"] }
 rustc-build-sysroot = { version = "0.5.13", default-features = false }
 
 [workspace.lints.clippy]
