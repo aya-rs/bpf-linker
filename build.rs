@@ -6,13 +6,12 @@ use std::{
     fs,
     io::{self, Write as _},
     iter,
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::{Context as _, anyhow};
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice as _};
 use object::{AddressSize, Architecture};
 
 macro_rules! write_bytes {
@@ -94,12 +93,18 @@ impl Cxxstdlibs<'_> {
         }
     }
 
-    fn iter_static_filenames(&self) -> impl Iterator<Item = OsString> {
+    fn iter_static_filenames(&self) -> impl Iterator<Item = anyhow::Result<OsString>> {
         self.iter().map(|lib| {
             let mut filename = OsString::from("lib");
-            filename.push(OsStr::from_bytes(lib));
+            let lib = lib.to_os_str().with_context(|| {
+                format!(
+                    "C++ standard library name `{}` is not valid UTF-8",
+                    BStr::new(lib)
+                )
+            })?;
+            filename.push(lib);
             filename.push(".a");
-            filename
+            Ok(filename)
         })
     }
 }
@@ -330,7 +335,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
                 // Use `cc` as the last option. Pretty much all UNIX-like operating
                 // systems provide `/usr/bin/cc` as a symlink to the default
                 // compiler (either clang or gcc).
-                None => Cow::Borrowed(OsStr::from_bytes(b"cc")),
+                None => Cow::Borrowed(OsStr::new("cc")),
             };
             let mut cmd = Command::new(&maybe_cc);
             let linker_output = cmd
@@ -392,10 +397,15 @@ to an appropriate compiler"
                 anyhow!(
                     "failed to find library paths in the output of `{} -print-search-dirs`: {}",
                     cc.display(),
-                    OsStr::from_bytes(&linker_stdout).display()
+                    BStr::new(&linker_stdout)
                 )
             })?;
-        let ld_paths = OsStr::from_bytes(ld_paths);
+        let ld_paths = ld_paths.to_os_str().with_context(|| {
+            format!(
+                "C compiler returned library paths that are not valid UTF-8: {}",
+                BStr::new(ld_paths)
+            )
+        })?;
 
         // Find directories with static libraries we're interested in:
         // - C++ standard library
@@ -410,6 +420,7 @@ to an appropriate compiler"
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
                 for cxxstdlib in cxxstdlibs.iter_static_filenames() {
+                    let cxxstdlib = cxxstdlib?;
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
                     if cxxstdlib_path.try_exists().with_context(|| {
                         format!("failed to inspect the file {}", cxxstdlib_path.display(),)
