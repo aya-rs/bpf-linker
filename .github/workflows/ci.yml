@@ -294,6 +294,7 @@ jobs:
     # the workspace.
     defaults:
       run:
+        shell: bash
         working-directory: bpf-linker
     strategy:
       fail-fast: false
@@ -308,6 +309,10 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
+          # Windows LLVM archives contain only static libraries, so this
+          # platform skips the dynamic-linking steps below.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnullvm
           # We don't use ubuntu-latest because we care about the apt packages available.
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -340,7 +345,11 @@ jobs:
         id: rustc-llvm
         run: |
           set -euo pipefail
-          selection=$(rustc -vV | python3 -B scripts/rustc-llvm.py llvm)
+          python_cmd=python3
+          if [[ $RUNNER_OS == Windows ]]; then
+            python_cmd=python
+          fi
+          selection=$(rustc -vV | "$python_cmd" -B scripts/rustc-llvm.py llvm)
           llvm=$(jq -r .llvm <<< "$selection")
           excluded=$(jq -r '.["exclude-features"]' <<< "$selection")
           printf 'llvm=%s\nexclude-features=%s\n' "$llvm" "$excluded" >> "$GITHUB_OUTPUT"
@@ -359,6 +368,7 @@ jobs:
         run: echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
 
       - name: Enforce dynamic linking
+        if: runner.os != 'Windows'
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> "$GITHUB_ENV"
 
       - uses: oras-project/setup-oras@v2
@@ -380,13 +390,17 @@ jobs:
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
-          echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
+          LLVM_INSTALL_DIR_ENV="$LLVM_INSTALL_DIR"
+          if [[ $RUNNER_OS == Windows ]]; then
+            LLVM_INSTALL_DIR_ENV=$(cygpath --mixed "$LLVM_INSTALL_DIR")
+          fi
+          echo "${LLVM_INSTALL_DIR_ENV}/bin" >> "$GITHUB_PATH"
           {
-            echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}"
+            echo "LLVM_PREFIX=${LLVM_INSTALL_DIR_ENV}"
             echo "CXXSTDLIB=libcxx,libcxxabi"
-            echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR}/lib"
-            echo "ZLIB_PATH=${LLVM_INSTALL_DIR}/lib"
-            echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR}/lib"
+            echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
+            echo "ZLIB_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
+            echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
           } >> "$GITHUB_ENV"
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
@@ -398,18 +412,20 @@ jobs:
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
 
       - name: Check (default features)
-        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
+        if: runner.os != 'Windows' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo check --target ${{ matrix.platform.target }}
 
       - name: Build (default features)
-        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
+        if: runner.os != 'Windows' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo build --target ${{ matrix.platform.target }}
 
       - uses: taiki-e/install-action@v2.87.12
+        if: runner.os != 'Windows'
         with:
           tool: cargo-hack
 
       - name: Check (dynamic linking, feature powerset)
+        if: runner.os != 'Windows'
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             check --feature-powerset --exclude-features \
@@ -417,6 +433,7 @@ jobs:
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build (dynamic linking, feature powerset)
+        if: runner.os != 'Windows'
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             hack build --feature-powerset --exclude-features \
@@ -432,6 +449,7 @@ jobs:
       #
       # `RUSTC_BOOTSTRAP` is needed to use `rustc-build-sysroot` on stable Rust.
       - name: Test (sysroot built on demand, dynamic linking)
+        if: runner.os != 'Windows'
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack --target ${{ matrix.platform.target }} \
             test --feature-powerset --exclude-features \
@@ -459,6 +477,7 @@ jobs:
             --target bpfel-unknown-none
 
       - name: Test (prebuilt BPF standard library, dynamic linking)
+        if: runner.os != 'Windows'
         run: |
           BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
             cargo hack --target ${{ matrix.platform.target }} test \
@@ -532,7 +551,7 @@ jobs:
             --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Report disk usage
-        if: ${{ always() }}
+        if: ${{ always() && runner.os != 'Windows' }}
         uses: ./bpf-linker/.github/actions/report-disk-usage
 
   release:
