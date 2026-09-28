@@ -82,7 +82,7 @@ impl Cxxstdlibs<'_> {
 
     fn iter(&self) -> impl Iterator<Item = &[u8]> {
         match self {
-            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.as_bytes().split(|b| *b == b',')),
+            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.as_encoded_bytes().split(|b| *b == b',')),
             Self::Single(s) => {
                 CxxstdlibsIter::Single(iter::once(
                     // Coerce `&&[u8]` to `&[u8]`.
@@ -159,7 +159,7 @@ fn target_architecture_from_env() -> anyhow::Result<Architecture> {
     let arch = env::var_os(CARGO_CFG_TARGET_ARCH).with_context(|| {
         format!("`{CARGO_CFG_TARGET_ARCH}` is not set, cannot determine the target architecture")
     })?;
-    let arch = match arch.as_bytes() {
+    let arch = match arch.as_encoded_bytes() {
         b"aarch64" => Architecture::Aarch64,
         b"aarch64_ilp32" => Architecture::Aarch64_Ilp32,
         b"alpha" => Architecture::Alpha,
@@ -222,7 +222,7 @@ where
                     write_bytes!(
                         stdout,
                         "cargo:warning=directory does not exist: ",
-                        candidate.as_os_str().as_bytes()
+                        candidate.as_os_str().as_encoded_bytes()
                     )?;
                     Ok(None)
                 }
@@ -247,7 +247,7 @@ fn emit_search_path_if_defined(
             write_bytes!(
                 stdout,
                 "cargo:rustc-link-search=",
-                path.as_os_str().as_bytes(),
+                path.as_os_str().as_encoded_bytes(),
             )?;
             Ok(true)
         }
@@ -281,7 +281,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
             )
         })?;
         let file_name = entry.file_name();
-        let file_name = file_name.as_bytes();
+        let file_name = file_name.as_encoded_bytes();
         let Some(trimmed) = file_name
             .strip_prefix(b"libLLVM")
             .and_then(|name| name.strip_suffix(b".a"))
@@ -444,7 +444,7 @@ to an appropriate compiler"
                 write_bytes!(
                     stdout,
                     "cargo:rustc-link-search=",
-                    ld_path.as_os_str().as_bytes(),
+                    ld_path.as_os_str().as_encoded_bytes(),
                 )?;
             }
         }
@@ -545,7 +545,7 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
     write_bytes!(
         stdout,
         "cargo:rustc-link-arg=-Wl,-rpath,",
-        llvm_lib_dir.as_os_str().as_bytes()
+        llvm_lib_dir.as_os_str().as_encoded_bytes()
     )?;
     write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
 
@@ -653,7 +653,7 @@ variable `{PATH}` {}",
         )
     })?;
     {
-        let llvm_lib_dir = llvm_lib_dir.as_os_str().as_bytes();
+        let llvm_lib_dir = llvm_lib_dir.as_os_str().as_encoded_bytes();
         write_bytes!(stdout, b"cargo:rustc-link-search=", llvm_lib_dir)?;
         write_bytes!(
             stdout,
