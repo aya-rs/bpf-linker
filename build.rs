@@ -531,6 +531,17 @@ to an appropriate compiler"
     write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
     write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
 
+    if env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(OsStr::new("windows")) {
+        // LLVM's Support and HTTP components depend on these Windows system
+        // libraries.
+        for library in [
+            "psapi", "shell32", "ole32", "uuid", "advapi32", "ws2_32", "ntdll", "crypt32",
+            "winhttp",
+        ] {
+            writeln!(stdout, "cargo:rustc-link-lib={library}")?;
+        }
+    }
+
     Ok(())
 }
 
