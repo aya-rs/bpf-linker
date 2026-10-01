@@ -27,7 +27,7 @@ tracing-tree = { version = "0.4.1", default-features = false }
 
 # lib deps
 ar = { version = "0.9.0" }
-gimli = { version = "0.32.0" }
+gimli = { version = "0.34.0" }
 libc = { version = "0.2.174" }
 llvm-sys-21 = { package = "llvm-sys", features = [
   "disable-alltargets-init",
@@ -48,7 +48,7 @@ scopeguard = { version = "1.2.0", default-features = false }
 
 [build-dependencies]
 anyhow = { workspace = true }
-object = { version = "0.39.0", default-features = false }
+object = { version = "0.40.0", default-features = false }
 
 [dev-dependencies]
 assert_matches = { version = "1.5.0", default-features = false }
