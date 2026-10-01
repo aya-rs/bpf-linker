@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     # Shared Rust channel discovery (aya-rs/aya#1688).
-    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@4ce418825fa722a2377f0c1a924a824129d0331c
+    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@2a07daa48ae467480d7a456710ecd6bc7b1dd6c8
     with:
       channels: stable beta nightly
 
