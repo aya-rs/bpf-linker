@@ -229,6 +229,10 @@ jobs:
           - riscv64gc-unknown-linux-musl
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
+        # When enabled, this requires the test execution platform to satisfy
+        # the target constraints, selecting Bazel's platform-native wrapper.
+        incompatible_use_default_test_toolchain:
+          - false
         include:
           # QEMU requires RISC-V binaries; exclude shell and Python launchers.
           - target: riscv64gc-unknown-linux-musl
@@ -236,6 +240,23 @@ jobs:
               --run_under=//bazel:qemu-riscv64
               --test_lang_filters=rust
               --build_tests_only
+          # BuildBuddy workers run Linux, so Windows test executables and
+          # genrules that invoke the host shell must run on the GitHub-hosted
+          # Windows runner. Compilation remains remote.
+          # Keep the remote Linux execution platform when adding Windows for
+          # the native test wrapper: --extra_execution_platforms replaces the
+          # value from --config=remote rather than extending it.
+          # Bazel's Windows shell-test launcher does not build with the gnullvm
+          # toolchain, so run only tests that produce native Rust executables.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnullvm
+            incompatible_use_default_test_toolchain: true
+            test_options: >-
+              --test_lang_filters=rust
+              --build_tests_only
+              --genrule_strategy=local
+              --strategy=TestRunner=local
+              --extra_execution_platforms=//bazel/toolchains:rbe_x86_64_linux,@rules_rs//rs/platforms:x86_64-pc-windows-gnullvm
     defaults:
       run:
         shell: bash
@@ -243,6 +264,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Check Starlark
+        if: runner.os != 'Windows'
         run: bazel run //bazel/format:format.check
 
       - name: Check production target without dev dependencies
@@ -256,12 +278,13 @@ jobs:
 
           # The default JVM heap is under 2 GB on 7 GB macOS runners.
           # Bazel's default test toolchain requires the execution platform to
-          # match the target platform constraints. Disable it because static
-          # musl tests can run on glibc workers, with RISC-V using QEMU.
+          # match the target platform constraints. Keep it disabled for static
+          # musl tests running on glibc workers, but enable it on Windows to
+          # select the native test wrapper.
           bazel --host_jvm_args=-Xmx4g test //... --config=remote \
             ${{ matrix.test_options }} \
             --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
-            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false \
+            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=${{ matrix.incompatible_use_default_test_toolchain }} \
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
   build:
@@ -284,6 +307,7 @@ jobs:
     # the workspace.
     defaults:
       run:
+        shell: bash
         working-directory: bpf-linker
     strategy:
       fail-fast: false
@@ -298,6 +322,10 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
+          # Windows LLVM archives contain only static libraries, so this
+          # platform skips the dynamic-linking steps below.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnullvm
           # We don't use ubuntu-latest because we care about the apt packages available.
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -326,11 +354,27 @@ jobs:
           targets: ${{ matrix.platform.target }}
           components: rust-src
 
+      - name: Install the Windows LLVM toolchain
+        id: msys2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          # Bazel builds the LLVM archives against MSVCRT. MINGW64 provides
+          # matching runtime libraries; CLANG64 provides UCRT libraries.
+          msystem: MINGW64
+          pacboy: >-
+            clang:p
+            libunwind:p
+
       - name: Select LLVM for the installed compiler
         id: rustc-llvm
         run: |
           set -euo pipefail
-          selection=$(rustc -vV | python3 -B scripts/rustc-llvm.py llvm)
+          python_cmd=python3
+          if [[ $RUNNER_OS == Windows ]]; then
+            python_cmd=python
+          fi
+          selection=$(rustc -vV | "$python_cmd" -B scripts/rustc-llvm.py llvm)
           llvm=$(jq -r .llvm <<< "$selection")
           excluded=$(jq -r '.["exclude-features"]' <<< "$selection")
           printf 'llvm=%s\nexclude-features=%s\n' "$llvm" "$excluded" >> "$GITHUB_OUTPUT"
@@ -348,7 +392,17 @@ jobs:
         # [2] https://github.com/llvm/llvm-project/commit/055893bea
         run: echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
 
+      - name: Configure the Windows linker
+        if: runner.os == 'Windows'
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          mingw64_bin=$(cygpath --mixed "$MSYS2_LOCATION")/mingw64/bin
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=${mingw64_bin}/clang.exe" \
+            >> "$GITHUB_ENV"
+
       - name: Enforce dynamic linking
+        if: runner.os != 'Windows'
         run: echo "RUSTFLAGS=-C target-feature=-crt-static" >> "$GITHUB_ENV"
 
       - uses: oras-project/setup-oras@v2
@@ -370,13 +424,17 @@ jobs:
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
           oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
-          echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
+          LLVM_INSTALL_DIR_ENV="$LLVM_INSTALL_DIR"
+          if [[ $RUNNER_OS == Windows ]]; then
+            LLVM_INSTALL_DIR_ENV=$(cygpath --mixed "$LLVM_INSTALL_DIR")
+          fi
+          echo "${LLVM_INSTALL_DIR_ENV}/bin" >> "$GITHUB_PATH"
           {
-            echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}"
+            echo "LLVM_PREFIX=${LLVM_INSTALL_DIR_ENV}"
             echo "CXXSTDLIB=libcxx,libcxxabi"
-            echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR}/lib"
-            echo "ZLIB_PATH=${LLVM_INSTALL_DIR}/lib"
-            echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR}/lib"
+            echo "CXXSTDLIB_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
+            echo "ZLIB_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
+            echo "LIBZSTD_PATH=${LLVM_INSTALL_DIR_ENV}/lib"
           } >> "$GITHUB_ENV"
 
       # llvm-sys discovers link flags at build script time; these are cached by cargo. The cached
@@ -388,18 +446,20 @@ jobs:
           cargo clean --target ${{ matrix.platform.target }} -p llvm-sys --release
 
       - name: Check (default features)
-        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
+        if: runner.os != 'Windows' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo check --target ${{ matrix.platform.target }}
 
       - name: Build (default features)
-        if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
+        if: runner.os != 'Windows' && steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo build --target ${{ matrix.platform.target }}
 
       - uses: taiki-e/install-action@v2.87.12
+        if: runner.os != 'Windows'
         with:
           tool: cargo-hack
 
       - name: Check (dynamic linking, feature powerset)
+        if: runner.os != 'Windows'
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             check --feature-powerset --exclude-features \
@@ -407,6 +467,7 @@ jobs:
             --features ${{ env.LLVM_FEATURES_DYNAMIC }}
 
       - name: Build (dynamic linking, feature powerset)
+        if: runner.os != 'Windows'
         run: |
           cargo hack --target ${{ matrix.platform.target }} \
             hack build --feature-powerset --exclude-features \
@@ -422,6 +483,7 @@ jobs:
       #
       # `RUSTC_BOOTSTRAP` is needed to use `rustc-build-sysroot` on stable Rust.
       - name: Test (sysroot built on demand, dynamic linking)
+        if: runner.os != 'Windows'
         run: |
           RUSTC_BOOTSTRAP=1 cargo hack --target ${{ matrix.platform.target }} \
             test --feature-powerset --exclude-features \
@@ -449,6 +511,7 @@ jobs:
             --target bpfel-unknown-none
 
       - name: Test (prebuilt BPF standard library, dynamic linking)
+        if: runner.os != 'Windows'
         run: |
           BPFEL_SYSROOT_DIR="$(pwd)/bpf-sysroot" \
             cargo hack --target ${{ matrix.platform.target }} test \
@@ -522,7 +585,7 @@ jobs:
             --no-default-features --features ${{ env.LLVM_FEATURES_STATIC }}
 
       - name: Report disk usage
-        if: ${{ always() }}
+        if: ${{ always() && runner.os != 'Windows' }}
         uses: ./bpf-linker/.github/actions/report-disk-usage
 
   release:

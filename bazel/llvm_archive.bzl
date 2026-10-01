@@ -30,7 +30,11 @@ def _llvm_archive_mtree_impl(ctx):
                     is_llvm = is_llvm,
                 )
     static_libraries = libraries.values()
-    shared_libraries = ctx.attr.shared[DefaultInfo].files.to_list()
+    shared_libraries = [
+        library
+        for target in ctx.attr.shared
+        for library in target[DefaultInfo].files.to_list()
+    ]
     cxxstdlibs = []
     for target, destination in ctx.attr.cxxstdlibs.items():
         files = target[DefaultInfo].files.to_list()
@@ -47,7 +51,11 @@ def _llvm_archive_mtree_impl(ctx):
     content.set_param_file_format("multiline")
     content.add("#mtree")
     content.add(_mtree_line("bin", "dir"))
-    content.add(_mtree_line("bin/FileCheck", "file", filecheck.path))
+    content.add(_mtree_line(
+        "bin/{}".format(filecheck.basename),
+        "file",
+        filecheck.path,
+    ))
     content.add(_mtree_line("lib", "dir"))
 
     # Keep the mtree content stable so changes in the input order do not
@@ -95,7 +103,7 @@ _llvm_archive_mtree = rule(
         "cxxstdlibs": attr.label_keyed_string_dict(mandatory = True),
         "filecheck": attr.label(allow_single_file = True, mandatory = True),
         "llvm": attr.label(mandatory = True, providers = [CcInfo]),
-        "shared": attr.label(mandatory = True),
+        "shared": attr.label_list(),
     },
 )
 
@@ -107,7 +115,7 @@ def llvm_archive(name, cxxstdlibs, filecheck, llvm, shared):
         cxxstdlibs: C++ runtime library targets mapped to archive filenames.
         filecheck: FileCheck executable target.
         llvm: LLVM library target supplying headers and static libraries.
-        shared: Shared LLVM library target.
+        shared: Shared LLVM library targets.
     """
     mtree = name + "-mtree"
     _llvm_archive_mtree(

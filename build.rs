@@ -6,12 +6,12 @@ use std::{
     fs,
     io::{self, Write as _},
     iter,
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::{Context as _, anyhow};
+use bstr::{BStr, BString, ByteSlice as _};
 use object::{AddressSize, Architecture};
 
 macro_rules! write_bytes {
@@ -43,9 +43,9 @@ macro_rules! write_bytes {
 }
 
 enum Cxxstdlibs<'a> {
-    EnvVar(OsString),
-    Single(&'static [u8]),
-    Multiple(&'a [&'static [u8]]),
+    EnvVar(BString),
+    Single(&'a BStr),
+    Multiple([&'a BStr; 2]),
 }
 
 impl Cxxstdlibs<'_> {
@@ -54,27 +54,27 @@ impl Cxxstdlibs<'_> {
         const CXXSTDLIB: &str = "CXXSTDLIB";
         writeln!(stdout, "cargo:rerun-if-env-changed={CXXSTDLIB}")?;
         Ok(match env::var_os(CXXSTDLIB) {
-            Some(cxxstdlib) => Self::EnvVar(cxxstdlib),
+            Some(cxxstdlib) => Self::EnvVar(cxxstdlib.into_encoded_bytes().into()),
             None => {
                 if cfg!(target_os = "linux") {
                     // Default to GNU libstdc++ on Linux. Can be overwritten through
                     // `CXXSTDLIB` variable on distributions using LLVM as default
                     // toolchain.
-                    Self::Single(b"stdc++")
+                    Self::Single(BStr::new(b"stdc++"))
                 } else if cfg!(target_os = "macos") {
                     // Default to LLVM libc++ on macOS, where LLVM is the default
                     // toolchain.
                     if cfg!(feature = "llvm-link-static") {
                         // Static LLVM libc++ has two files - libc++.a and libc++abi.a.
-                        Self::Multiple(&[b"c++", b"c++abi"])
+                        Self::Multiple([BStr::new(b"c++"), BStr::new(b"c++abi")])
                     } else {
                         // Shared LLVM libc++ has one file.
-                        Self::Single(b"c++")
+                        Self::Single(BStr::new(b"c++"))
                     }
                 } else {
                     // Fall back to GNU libstdc++ on all other platforms. Again,
                     // can be overwritten through `CXXSTDLIB`.
-                    Self::Single(b"stdc++")
+                    Self::Single(BStr::new(b"stdc++"))
                 }
             }
         })
@@ -82,27 +82,29 @@ impl Cxxstdlibs<'_> {
 
     fn iter(&self) -> impl Iterator<Item = &[u8]> {
         match self {
-            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.as_bytes().split(|b| *b == b',')),
+            Self::EnvVar(p) => CxxstdlibsIter::Parsed(p.split(|b| *b == b',')),
             Self::Single(s) => {
                 CxxstdlibsIter::Single(iter::once(
-                    // Coerce `&&[u8]` to `&[u8]`.
-                    *s,
+                    // Coerce `&&BStr` to `&[u8]`.
+                    s.as_ref(),
                 ))
             }
-            Self::Multiple(m) => CxxstdlibsIter::Multiple(
-                m.iter()
-                    // Coerce `&&[u8]` to `&[u8]`.
-                    .copied(),
-            ),
+            Self::Multiple(m) => CxxstdlibsIter::Multiple(m.iter().map(|lib| lib.as_ref())),
         }
     }
 
-    fn iter_static_filenames(&self) -> impl Iterator<Item = OsString> {
+    fn iter_static_filenames(&self) -> impl Iterator<Item = anyhow::Result<OsString>> {
         self.iter().map(|lib| {
             let mut filename = OsString::from("lib");
-            filename.push(OsStr::from_bytes(lib));
+            let lib = lib.to_os_str().with_context(|| {
+                format!(
+                    "C++ standard library name `{}` is not valid UTF-8",
+                    BStr::new(lib)
+                )
+            })?;
+            filename.push(lib);
             filename.push(".a");
-            filename
+            Ok(filename)
         })
     }
 }
@@ -111,16 +113,16 @@ impl Display for Cxxstdlibs<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnvVar(p) => {
-                Display::fmt(&p.display(), f)?;
+                Display::fmt(p, f)?;
             }
-            Self::Single(s) => Display::fmt(&OsStr::from_bytes(s).display(), f)?,
+            Self::Single(s) => Display::fmt(s, f)?,
             Self::Multiple(m) => {
                 f.write_str("[")?;
                 for (i, lib) in m.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
-                    Display::fmt(&OsStr::from_bytes(lib).display(), f)?;
+                    Display::fmt(lib, f)?;
                 }
                 f.write_str("]")?;
             }
@@ -159,7 +161,7 @@ fn target_architecture_from_env() -> anyhow::Result<Architecture> {
     let arch = env::var_os(CARGO_CFG_TARGET_ARCH).with_context(|| {
         format!("`{CARGO_CFG_TARGET_ARCH}` is not set, cannot determine the target architecture")
     })?;
-    let arch = match arch.as_bytes() {
+    let arch = match arch.as_encoded_bytes() {
         b"aarch64" => Architecture::Aarch64,
         b"aarch64_ilp32" => Architecture::Aarch64_Ilp32,
         b"alpha" => Architecture::Alpha,
@@ -222,7 +224,7 @@ where
                     write_bytes!(
                         stdout,
                         "cargo:warning=directory does not exist: ",
-                        candidate.as_os_str().as_bytes()
+                        candidate.as_os_str().as_encoded_bytes()
                     )?;
                     Ok(None)
                 }
@@ -247,7 +249,7 @@ fn emit_search_path_if_defined(
             write_bytes!(
                 stdout,
                 "cargo:rustc-link-search=",
-                path.as_os_str().as_bytes(),
+                path.as_os_str().as_encoded_bytes(),
             )?;
             Ok(true)
         }
@@ -281,7 +283,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
             )
         })?;
         let file_name = entry.file_name();
-        let file_name = file_name.as_bytes();
+        let file_name = file_name.as_encoded_bytes();
         let Some(trimmed) = file_name
             .strip_prefix(b"libLLVM")
             .and_then(|name| name.strip_suffix(b".a"))
@@ -333,7 +335,7 @@ fn link_llvm_static(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> any
                 // Use `cc` as the last option. Pretty much all UNIX-like operating
                 // systems provide `/usr/bin/cc` as a symlink to the default
                 // compiler (either clang or gcc).
-                None => Cow::Borrowed(OsStr::from_bytes(b"cc")),
+                None => Cow::Borrowed(OsStr::new("cc")),
             };
             let mut cmd = Command::new(&maybe_cc);
             let linker_output = cmd
@@ -395,10 +397,15 @@ to an appropriate compiler"
                 anyhow!(
                     "failed to find library paths in the output of `{} -print-search-dirs`: {}",
                     cc.display(),
-                    OsStr::from_bytes(&linker_stdout).display()
+                    BStr::new(&linker_stdout)
                 )
             })?;
-        let ld_paths = OsStr::from_bytes(ld_paths);
+        let ld_paths = ld_paths.to_os_str().with_context(|| {
+            format!(
+                "C compiler returned library paths that are not valid UTF-8: {}",
+                BStr::new(ld_paths)
+            )
+        })?;
 
         // Find directories with static libraries we're interested in:
         // - C++ standard library
@@ -413,6 +420,7 @@ to an appropriate compiler"
             let mut found_any = false;
             if let Some(ref mut cxxstdlib_paths) = cxxstdlib_paths {
                 for cxxstdlib in cxxstdlibs.iter_static_filenames() {
+                    let cxxstdlib = cxxstdlib?;
                     let cxxstdlib_path = ld_path.join(cxxstdlib);
                     if cxxstdlib_path.try_exists().with_context(|| {
                         format!("failed to inspect the file {}", cxxstdlib_path.display(),)
@@ -444,7 +452,7 @@ to an appropriate compiler"
                 write_bytes!(
                     stdout,
                     "cargo:rustc-link-search=",
-                    ld_path.as_os_str().as_bytes(),
+                    ld_path.as_os_str().as_encoded_bytes(),
                 )?;
             }
         }
@@ -523,6 +531,17 @@ to an appropriate compiler"
     write_bytes!(stdout, "cargo:rustc-link-lib=static=z")?;
     write_bytes!(stdout, "cargo:rustc-link-lib=static=zstd")?;
 
+    if env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(OsStr::new("windows")) {
+        // LLVM's Support and HTTP components depend on these Windows system
+        // libraries.
+        for library in [
+            "psapi", "shell32", "ole32", "uuid", "advapi32", "ws2_32", "ntdll", "crypt32",
+            "winhttp",
+        ] {
+            writeln!(stdout, "cargo:rustc-link-lib={library}")?;
+        }
+    }
+
     Ok(())
 }
 
@@ -545,7 +564,7 @@ fn link_llvm_dynamic(stdout: &mut io::StdoutLock<'_>, llvm_lib_dir: &Path) -> an
     write_bytes!(
         stdout,
         "cargo:rustc-link-arg=-Wl,-rpath,",
-        llvm_lib_dir.as_os_str().as_bytes()
+        llvm_lib_dir.as_os_str().as_encoded_bytes()
     )?;
     write_bytes!(stdout, "cargo:rustc-link-lib=dylib=LLVM")?;
 
@@ -653,7 +672,7 @@ variable `{PATH}` {}",
         )
     })?;
     {
-        let llvm_lib_dir = llvm_lib_dir.as_os_str().as_bytes();
+        let llvm_lib_dir = llvm_lib_dir.as_os_str().as_encoded_bytes();
         write_bytes!(stdout, b"cargo:rustc-link-search=", llvm_lib_dir)?;
         write_bytes!(
             stdout,
