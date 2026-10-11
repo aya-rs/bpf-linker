@@ -91,7 +91,7 @@ toolchains.toolchain(
 toolchains.toolchain(
     name = "nightly_rust_toolchains",
     edition = "2024",
-    version = "nightly/2026-10-10",
+    version = "nightly/2026-10-11",
 )
 use_repo(
     toolchains,
