@@ -204,3 +204,17 @@ but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
 ```sh
 RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-23
 ```
+
+## GitHub Actions dependencies
+
+After changing workflow dependencies, update and verify their lockfile with
+the [gh-actions-lock](https://github.com/github/gh-actions-lock) extension:
+
+```sh
+gh actions-lock --no-narrow
+gh actions-lock --verify
+```
+
+`--no-narrow` preserves major version tags such as `@v2`. Existing pins stay
+unchanged; use `gh actions-lock --no-narrow --relock` to refresh them explicitly.
+Commit `.github/workflows/actions.lock` with the workflow changes.
