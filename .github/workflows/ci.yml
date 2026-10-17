@@ -198,7 +198,7 @@ jobs:
           CARGO_BUILD_WARNINGS: deny
         run: cargo fetch --locked
 
-      - uses: taiki-e/install-action@v2.87.21
+      - uses: taiki-e/install-action@v2
         with:
           tool: taplo-cli,typos-cli
 
@@ -395,7 +395,7 @@ jobs:
         if: steps.rustc-llvm.outputs.llvm == env.LATEST_LLVM
         run: cargo build --target ${{ matrix.platform.target }}
 
-      - uses: taiki-e/install-action@v2.87.21
+      - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack
 
@@ -523,7 +523,7 @@ jobs:
 
       - name: Report disk usage
         if: ${{ always() }}
-        uses: ./bpf-linker/.github/actions/report-disk-usage
+        uses: $/.github/actions/report-disk-usage
 
   release:
     name: release
