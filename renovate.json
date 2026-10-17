@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["schedule:monthly"],
+  "enabledManagers": ["bazel-module", "cargo", "github-actions"],
+  "separateMajorMinor": false,
+  "packageRules": [
+    {
+      "matchManagers": ["bazel-module"],
+      "groupName": "bazel-modules"
+    },
+    {
+      "matchManagers": ["cargo"],
+      "minimumReleaseAge": "3 days",
+      "groupName": "cargo-crates"
+    },
+    {
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["llvm-sys"],
+      "rangeStrategy": "in-range-only"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "minimumReleaseAge": "3 days",
+      "groupName": "github-actions"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["workflow"],
+      "matchPackageNames": ["aya-rs/aya"],
+      "minimumReleaseAge": null
+    }
+  ]
+}
