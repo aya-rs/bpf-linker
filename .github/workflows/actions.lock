@@ -40,6 +40,6 @@ dependencies:
         repo_id: 197176365
     'taiki-e/install-action@v2':
         ref: 'v2'
-        commit: 'sha1-8cca0918f8471c33515202b73f56ab27f2bed283'
+        commit: 'sha1-a4d3f3f761dcd95cce1b72cb61cb6d1963438177'
         owner_id: 43724913
         repo_id: 442947557
