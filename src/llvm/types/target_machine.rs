@@ -26,7 +26,9 @@ impl LLVMTargetMachine {
                 cpu.as_ptr(),
                 features.as_ptr(),
                 LLVMCodeGenOptLevel::LLVMCodeGenLevelAggressive,
-                LLVMRelocMode::LLVMRelocDefault,
+                // BPF has no position-independent code; use the static model like clang does.
+                // Leaving the choice to the BPF backend selects PIC.
+                LLVMRelocMode::LLVMRelocStatic,
                 LLVMCodeModel::LLVMCodeModelDefault,
             )
         };
