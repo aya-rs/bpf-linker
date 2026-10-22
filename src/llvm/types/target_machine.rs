@@ -26,7 +26,15 @@ impl LLVMTargetMachine {
                 cpu.as_ptr(),
                 features.as_ptr(),
                 LLVMCodeGenOptLevel::LLVMCodeGenLevelAggressive,
-                LLVMRelocMode::LLVMRelocDefault,
+                // BPF has no position-independent code.
+                //
+                // Use the static model like clang does:
+                // https://github.com/llvm/llvm-project/blob/5f4b94d324ce95d2f1ba1c570fa55d6c2d5657fe/clang/lib/Driver/ToolChains/CommonArgs.cpp#L2110-L2115
+                // https://github.com/llvm/llvm-project/blob/5f4b94d324ce95d2f1ba1c570fa55d6c2d5657fe/clang/lib/Driver/ToolChains/Gnu.cpp#L3108-L3122
+                //
+                // Leaving the choice to the BPF backend selects PIC:
+                // https://github.com/llvm/llvm-project/blob/5f4b94d324ce95d2f1ba1c570fa55d6c2d5657fe/llvm/lib/Target/BPF/BPFTargetMachine.cpp#L61-L62
+                LLVMRelocMode::LLVMRelocStatic,
                 LLVMCodeModel::LLVMCodeModelDefault,
             )
         };
