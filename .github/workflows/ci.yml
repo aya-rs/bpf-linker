@@ -36,6 +36,7 @@ jobs:
     outputs:
       llvm: ${{ steps.llvm.outputs.llvm }}
       llvm-targets: ${{ steps.llvm.outputs.llvm-targets }}
+      llvm-majors: ${{ steps.llvm.outputs.llvm-majors }}
       rust-toolchains: ${{ steps.pin.outputs.rust-toolchains }}
     steps:
       - uses: actions/checkout@v7
@@ -59,25 +60,26 @@ jobs:
               sed 's|^//:llvm-archive-||' |
               paste -sd ' '
           )
-          printf 'llvm=%s\nllvm-targets=%s\n' \
-            "$llvm" "$llvm_targets" >> "$GITHUB_OUTPUT"
+          printf 'llvm=%s\nllvm-targets=%s\nllvm-majors=%s\n' \
+            "$llvm" "$llvm_targets" "$(jq -c 'keys' <<< "$llvm")" >> "$GITHUB_OUTPUT"
 
   llvm:
     needs: prepare
     permissions:
       contents: read
-      # Needed to upload LLVM binaries as OCI artifacts to GHCR.
-      packages: write
+      packages: read
     runs-on: ubuntu-latest
-    name: llvm (${{ matrix.llvm }})
     strategy:
       matrix:
-        llvm:
-          - 21
-          - 22
-          - 23
+        llvm: ${{ fromJSON(needs.prepare.outputs.llvm-majors) }}
+    # GitHub merges matrix outputs by name. Keep each builder's artifact ID.
+    outputs:
+      artifact-21: ${{ matrix.llvm == '21' && steps.upload.outputs.artifact-id || '' }}
+      artifact-22: ${{ matrix.llvm == '22' && steps.upload.outputs.artifact-id || '' }}
+      artifact-23: ${{ matrix.llvm == '23' && steps.upload.outputs.artifact-id || '' }}
     env:
       LLVM_TARGETS: ${{ needs.prepare.outputs.llvm-targets }}
+      LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
     steps:
       - uses: oras-project/setup-oras@v2
 
@@ -90,13 +92,11 @@ jobs:
 
       - name: Check LLVM artifacts
         id: artifact-restore
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
         run: |
           set -euxo pipefail
           missing=false
           for target in $LLVM_TARGETS; do
-            ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
+            ref="${TAG_PREFIX}:${LLVM_COMMIT}-${target}-${LLVM_BUILD_REV}"
             if output=$(oras manifest fetch --descriptor "$ref" 2>&1); then
               continue
             fi
@@ -112,72 +112,76 @@ jobs:
 
       - uses: actions/checkout@v7
         if: steps.artifact-restore.outputs.missing == 'true'
-
-      - name: Apply the rustc LLVM candidate
-        if: steps.artifact-restore.outputs.missing == 'true'
-        env:
-          MODULE: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].module }}
-        run: |
-          if [[ -n $MODULE ]]; then
-            printf '%s' "$MODULE" | base64 --decode > MODULE.bazel
-          fi
+        with:
+          persist-credentials: false
 
       - name: Build and package LLVM with Bazel
         if: steps.artifact-restore.outputs.missing == 'true'
+        env:
+          LLVM_MODULE: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].module }}
+        # A PR consumer only retrieves the archive for its own target.
+        run: >-
+          scripts/build-llvm.sh //:llvm-archives
+          ${{ github.event_name == 'pull_request' && '--remote_download_minimal' || '' }}
+
+      - uses: actions/upload-artifact@v7
+        id: upload
+        if: steps.artifact-restore.outputs.missing == 'true' && github.event_name != 'pull_request'
+        with:
+          name: llvm-${{ matrix.llvm }}
+          path: bazel-bin/llvm-archive-*.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish-llvm:
+    if: >-
+      ((github.event_name == 'push' || github.event_name == 'schedule') &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      github.event_name == 'release'
+    needs: [prepare, llvm]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        llvm: ${{ fromJSON(needs.prepare.outputs.llvm-majors) }}
+    env:
+      ARTIFACT_ID: ${{ needs.llvm.outputs[format('artifact-{0}', matrix.llvm)] }}
+      LLVM_TARGETS: ${{ needs.prepare.outputs.llvm-targets }}
+      LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
+    steps:
+      - uses: oras-project/setup-oras@v2
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+
+      - uses: actions/download-artifact@v8
+        if: env.ARTIFACT_ID != ''
+        with:
+          artifact-ids: ${{ env.ARTIFACT_ID }}
+
+      - name: Publish LLVM
+        env:
+          LLVM_MAJOR: ${{ matrix.llvm }}
         run: |
           set -euo pipefail
-          # These archives are intended for general use with linkers that may
-          # use an older LLVM. Disable ThinLTO so they contain native objects
-          # instead of version-specific LLVM bitcode.
-          bazel build //:llvm-archives \
-            --config=release \
-            --config=remote \
-            --features=-thin_lto \
-            --remote_timeout=120 \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
-
-      - name: Publish LLVM OCI artifact
-        # Build jobs fetch commit-tagged archives, so same-repo PRs must be
-        # able to publish them when selecting a new LLVM commit.
-        #
-        # GitHub does not allow foreign-repository pull requests to push
-        # container images. Attempting to do so fails with:
-        #
-        #   Error response from registry: denied: installation not allowed to
-        #   Write organization package
-        #
-        # Disable artifact publishing for forked pull requests. This
-        # restriction is a reasonable security measure.
-        if: >-
-          steps.artifact-restore.outputs.missing == 'true' &&
-          (
-            github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
-            github.event_name == 'release' ||
-            github.event.pull_request.head.repo.full_name == github.repository
-          )
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
-        working-directory: bazel-bin
-        run: |
-          set -euxo pipefail
           for target in $LLVM_TARGETS; do
-            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            oras push "$sha" \
-              --artifact-type application/vnd.aya.llvm.install \
-              "llvm-archive-${target}.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd"
-          done
-
-      - name: Publish validated LLVM version
-        if: >-
-          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
-        run: |
-          set -euxo pipefail
-          for target in $LLVM_TARGETS; do
-            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            version="${{ env.TAG_PREFIX }}:${{ matrix.llvm }}-${target}-${{ env.LLVM_BUILD_REV }}"
-            oras tag "$sha" "$version"
+            ref="${TAG_PREFIX}:${LLVM_COMMIT}-${target}-${LLVM_BUILD_REV}"
+            if [[ -n $ARTIFACT_ID ]]; then
+              oras push "$ref" \
+                --artifact-type application/vnd.aya.llvm.install \
+                "llvm-archive-${target}.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd"
+            fi
+            if [[ $GITHUB_EVENT_NAME != release ]]; then
+              oras tag "$ref" "${TAG_PREFIX}:${LLVM_MAJOR}-${target}-${LLVM_BUILD_REV}"
+            elif [[ -z $ARTIFACT_ID ]]; then
+              # Releases do not move major tags. Verify an existing archive
+              # when the builder did not hand one to the publisher.
+              oras manifest fetch --descriptor "$ref" >/dev/null
+            fi
           done
 
   lint:
@@ -265,6 +269,8 @@ jobs:
             --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
 
   build:
+    # A PR uses the read-only LLVM build and skips the publisher.
+    if: ${{ !cancelled() && !failure() }}
     permissions:
       contents: read
       # Needed to pull LLVM binaries as OCI artifacts from GHCR.
@@ -307,6 +313,7 @@ jobs:
     needs:
       - prepare
       - llvm
+      - publish-llvm
 
     env:
       RUST_BACKTRACE: full
@@ -360,16 +367,29 @@ jobs:
           set -euxo pipefail
           oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
 
-      - name: Restore LLVM from ghcr.io
+      - name: Restore LLVM for this target
         env:
           LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[steps.rustc-llvm.outputs.llvm].commit }}
+          LLVM_MODULE: ${{ fromJSON(needs.prepare.outputs.llvm)[steps.rustc-llvm.outputs.llvm].module }}
+          TARGET: ${{ matrix.platform.target }}
         run: |
-          set -euxo pipefail
-          ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
-          digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
+          set -euo pipefail
+          ref="${TAG_PREFIX}:${LLVM_COMMIT}-${TARGET}-${LLVM_BUILD_REV}"
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
-          oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
+          manifest="$RUNNER_TEMP/llvm-manifest.json"
+          if error=$(oras manifest fetch "$ref" --output "$manifest" 2>&1); then
+            digest=$(jq -er '.layers[0].digest' "$manifest")
+            oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
+          elif [[ $GITHUB_EVENT_NAME == pull_request && $error == *": not found" ]]; then
+            # PRs cannot publish to GHCR. Reuse the producer's Bazel build
+            # and download only the archive for this target.
+            scripts/build-llvm.sh "//:llvm-archive-${TARGET}"
+            tar --zstd -xf "bazel-bin/llvm-archive-${TARGET}.tar.zst" -C "$LLVM_INSTALL_DIR"
+          else
+            printf '%s\n' "$error" >&2
+            exit 1
+          fi
           echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
           {
             echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}"
@@ -530,10 +550,13 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
-      # Upload published GitHub release assets.
-      contents: write
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Build release
         run: |
@@ -558,11 +581,34 @@ jobs:
             --config=release \
             --config=remote)
 
-      - name: Upload release assets
+      - uses: actions/upload-artifact@v7
+        id: upload
         if: github.event_name == 'release'
+        with:
+          name: release-archives
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish-release:
+    if: github.event_name == 'release' && needs.release.outputs.artifact-id != ''
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.release.outputs.artifact-id }}
+          path: dist
+
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/*
 
   check:
     if: always()
@@ -572,9 +618,14 @@ jobs:
       - bazel
       - build
       - release
+      - publish-release
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs succeeded
         env:
-          RESULTS: ${{ toJSON(needs.*.result) }}
-        run: jq --exit-status 'length > 0 and all(.[]; . == "success")' <<< "$RESULTS"
+          JOBS: ${{ toJSON(needs) }}
+        run: |
+          jq --exit-status --arg event "$GITHUB_EVENT_NAME" '
+            .["publish-release"].result == (if $event == "release" then "success" else "skipped" end)
+            and (del(.["publish-release"]) | all(.[]; .result == "success"))
+          ' <<< "$JOBS"
