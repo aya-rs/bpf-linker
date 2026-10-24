@@ -293,23 +293,30 @@ def select_llvm(text: str, source: Source) -> str:
     return replace_llvm_source(updated, replacements)
 
 
-def configurations(text: str, pin: LlvmPin) -> dict[str, dict[str, str]]:
-    configurations = {
-        pin.version.partition(".")[0]: {
-            "commit": pin.commit,
-            "module": base64.b64encode(text.encode()).decode(),
-        }
+def supported_llvm(pin: LlvmPin) -> dict[int, str]:
+    return {major: source.commit for major, source in COMPATIBILITY_SOURCES.items()} | {
+        int(pin.version.partition(".")[0]): pin.commit,
     }
-    for version, source in COMPATIBILITY_SOURCES.items():
-        configurations[str(version)] = {
-            "commit": source.commit,
-            "module": base64.b64encode(select_llvm(text, source).encode()).decode(),
-        }
-    return configurations
 
 
-def supported_llvm(pin: LlvmPin) -> set[int]:
-    return {int(pin.version.partition(".")[0]), *COMPATIBILITY_SOURCES}
+def build_archives(selected: str, bazel_args: list[str]) -> None:
+    lock = MODULE.with_name("MODULE.bazel.lock")
+    original = MODULE.read_bytes()
+    original_lock = lock.read_bytes()
+    try:
+        MODULE.write_text(selected)
+        # Linkers using an older LLVM need native objects, not newer bitcode.
+        subprocess.run(
+            [
+                "bazel", "build", "--config=release", "--config=ci",
+                "--features=-thin_lto", "--remote_timeout=120", *bazel_args,
+            ],
+            check=True,
+        )
+    finally:
+        # The next build or Cargo test uses the checkout's original selection.
+        MODULE.write_bytes(original)
+        lock.write_bytes(original_lock)
 
 
 def read_candidate(value: object, channel: Channel) -> Candidate:
@@ -449,7 +456,10 @@ def update_toolchains(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("configurations")
+    commands.add_parser("commits")
+    build = commands.add_parser("build-archives")
+    build.add_argument("major", type=int)
+    build.add_argument("bazel_args", nargs=argparse.REMAINDER)
     commands.add_parser("toolchains")
     commands.add_parser("llvm")
     update = commands.add_parser("update")
@@ -461,8 +471,17 @@ def main() -> None:
         return
     text = MODULE.read_text()
     pin = read_pin(text)
-    if arguments.command == "configurations":
-        print(json.dumps(configurations(text, pin), separators=(",", ":"), sort_keys=True))
+    if arguments.command == "commits":
+        print(json.dumps(supported_llvm(pin), separators=(",", ":"), sort_keys=True))
+        return
+    if arguments.command == "build-archives":
+        if not arguments.bazel_args:
+            build.error("expected Bazel arguments to build LLVM archives")
+        if arguments.major != int(pin.version.partition(".")[0]):
+            if (source := COMPATIBILITY_SOURCES.get(arguments.major)) is None:
+                build.error(f"unsupported LLVM {arguments.major}")
+            text = select_llvm(text, source)
+        build_archives(text, arguments.bazel_args)
         return
     if arguments.command == "llvm":
         print(json.dumps(llvm_selection(sys.stdin.read(), pin)))

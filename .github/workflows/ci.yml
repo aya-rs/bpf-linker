@@ -15,8 +15,6 @@ on:
     - cron: 00 4 * * *
 
 env:
-  # This key is intentionally public so fork pull requests can use BuildBuddy.
-  BUILDBUDDY_API_KEY: 5CeVmFS0jDnutd00x9Xl
   CARGO_TERM_COLOR: always
   TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
   # Suffix used to distinguish incompatible LLVM build variants.
@@ -34,8 +32,10 @@ jobs:
     permissions:
       contents: read
     outputs:
+      build-revision: ${{ env.LLVM_BUILD_REV }}
       llvm: ${{ steps.llvm.outputs.llvm }}
       llvm-targets: ${{ steps.llvm.outputs.llvm-targets }}
+      llvm-majors: ${{ steps.llvm.outputs.llvm-majors }}
       rust-toolchains: ${{ steps.pin.outputs.rust-toolchains }}
     steps:
       - uses: actions/checkout@v7
@@ -53,132 +53,30 @@ jobs:
         run: |
           set -euo pipefail
 
-          llvm=$(python3 -B scripts/rustc-llvm.py configurations)
+          llvm=$(python3 -B scripts/rustc-llvm.py commits)
           llvm_targets=$(
             bazel query 'labels(srcs, //:llvm-archives)' --output=label |
               sed 's|^//:llvm-archive-||' |
               paste -sd ' '
           )
-          printf 'llvm=%s\nllvm-targets=%s\n' \
-            "$llvm" "$llvm_targets" >> "$GITHUB_OUTPUT"
+          printf 'llvm=%s\nllvm-targets=%s\nllvm-majors=%s\n' \
+            "$llvm" "$llvm_targets" "$(jq -c 'keys' <<< "$llvm")" >> "$GITHUB_OUTPUT"
 
+  # Each matrix entry passes its own immutable artifact ID from build to publish.
   llvm:
     needs: prepare
     permissions:
       contents: read
-      # Needed to upload LLVM binaries as OCI artifacts to GHCR.
       packages: write
-    runs-on: ubuntu-latest
-    name: llvm (${{ matrix.llvm }})
     strategy:
       matrix:
-        llvm:
-          - 21
-          - 22
-          - 23
-    env:
-      LLVM_TARGETS: ${{ needs.prepare.outputs.llvm-targets }}
-    steps:
-      - uses: oras-project/setup-oras@v2
-
-      - name: Login to ghcr.io
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euxo pipefail
-          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
-
-      - name: Check LLVM artifacts
-        id: artifact-restore
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
-        run: |
-          set -euxo pipefail
-          missing=false
-          for target in $LLVM_TARGETS; do
-            ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            if output=$(oras manifest fetch --descriptor "$ref" 2>&1); then
-              continue
-            fi
-            # ORAS uses the same exit status for missing manifests and registry
-            # errors. Rebuild only when GHCR explicitly reports a cache miss.
-            if [[ $output != *": not found" ]]; then
-              printf '%s\n' "$output" >&2
-              exit 1
-            fi
-            missing=true
-          done
-          echo "missing=$missing" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v7
-        if: steps.artifact-restore.outputs.missing == 'true'
-
-      - name: Apply the rustc LLVM candidate
-        if: steps.artifact-restore.outputs.missing == 'true'
-        env:
-          MODULE: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].module }}
-        run: |
-          if [[ -n $MODULE ]]; then
-            printf '%s' "$MODULE" | base64 --decode > MODULE.bazel
-          fi
-
-      - name: Build and package LLVM with Bazel
-        if: steps.artifact-restore.outputs.missing == 'true'
-        run: |
-          set -euo pipefail
-          # These archives are intended for general use with linkers that may
-          # use an older LLVM. Disable ThinLTO so they contain native objects
-          # instead of version-specific LLVM bitcode.
-          bazel build //:llvm-archives \
-            --config=release \
-            --config=remote \
-            --features=-thin_lto \
-            --remote_timeout=120 \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
-
-      - name: Publish LLVM OCI artifact
-        # Build jobs fetch commit-tagged archives, so same-repo PRs must be
-        # able to publish them when selecting a new LLVM commit.
-        #
-        # GitHub does not allow foreign-repository pull requests to push
-        # container images. Attempting to do so fails with:
-        #
-        #   Error response from registry: denied: installation not allowed to
-        #   Write organization package
-        #
-        # Disable artifact publishing for forked pull requests. This
-        # restriction is a reasonable security measure.
-        if: >-
-          steps.artifact-restore.outputs.missing == 'true' &&
-          (
-            github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
-            github.event_name == 'release' ||
-            github.event.pull_request.head.repo.full_name == github.repository
-          )
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
-        working-directory: bazel-bin
-        run: |
-          set -euxo pipefail
-          for target in $LLVM_TARGETS; do
-            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            oras push "$sha" \
-              --artifact-type application/vnd.aya.llvm.install \
-              "llvm-archive-${target}.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd"
-          done
-
-      - name: Publish validated LLVM version
-        if: >-
-          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm].commit }}
-        run: |
-          set -euxo pipefail
-          for target in $LLVM_TARGETS; do
-            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
-            version="${{ env.TAG_PREFIX }}:${{ matrix.llvm }}-${target}-${{ env.LLVM_BUILD_REV }}"
-            oras tag "$sha" "$version"
-          done
+        llvm: ${{ fromJSON(needs.prepare.outputs.llvm-majors) }}
+    uses: ./.github/workflows/llvm.yml
+    with:
+      major: ${{ matrix.llvm }}
+      commit: ${{ fromJSON(needs.prepare.outputs.llvm)[matrix.llvm] }}
+      targets: ${{ needs.prepare.outputs.llvm-targets }}
+      build-revision: ${{ needs.prepare.outputs.build-revision }}
 
   lint:
     needs: prepare
@@ -258,11 +156,10 @@ jobs:
           # Bazel's default test toolchain requires the execution platform to
           # match the target platform constraints. Disable it because static
           # musl tests can run on glibc workers, with RISC-V using QEMU.
-          bazel --host_jvm_args=-Xmx4g test //... --config=remote \
+          bazel --host_jvm_args=-Xmx4g test //... --config=ci \
             ${{ matrix.test_options }} \
             --platforms=@rules_rs//rs/platforms:${{ matrix.target }} \
-            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+            --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
 
   build:
     permissions:
@@ -360,16 +257,29 @@ jobs:
           set -euxo pipefail
           oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
 
-      - name: Restore LLVM from ghcr.io
+      - name: Restore LLVM for this target
         env:
-          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[steps.rustc-llvm.outputs.llvm].commit }}
+          LLVM_MAJOR: ${{ steps.rustc-llvm.outputs.llvm }}
+          LLVM_COMMIT: ${{ fromJSON(needs.prepare.outputs.llvm)[steps.rustc-llvm.outputs.llvm] }}
+          TARGET: ${{ matrix.platform.target }}
         run: |
-          set -euxo pipefail
-          ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${{ matrix.platform.target }}-${{ env.LLVM_BUILD_REV }}"
-          digest=$(oras manifest fetch "$ref" | jq -r '.layers[0].digest')
+          set -euo pipefail
+          ref="${TAG_PREFIX}:${LLVM_COMMIT}-${TARGET}-${LLVM_BUILD_REV}"
           LLVM_INSTALL_DIR="$(pwd)/llvm-install"
           mkdir -p "$LLVM_INSTALL_DIR"
-          oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
+          manifest="$RUNNER_TEMP/llvm-manifest.json"
+          if error=$(oras manifest fetch "$ref" --output "$manifest" 2>&1); then
+            digest=$(jq -er '.layers[0].digest' "$manifest")
+            oras blob fetch "${ref}@${digest}" --output - | tar --zstd -xf - -C "$LLVM_INSTALL_DIR"
+          elif [[ $GITHUB_EVENT_NAME == pull_request && $error == *": not found" ]]; then
+            # PRs cannot publish to GHCR. Reuse the producer's Bazel build
+            # and download only the archive for this target.
+            python3 -B scripts/rustc-llvm.py build-archives "$LLVM_MAJOR" "//:llvm-archive-${TARGET}"
+            tar --zstd -xf "bazel-bin/llvm-archive-${TARGET}.tar.zst" -C "$LLVM_INSTALL_DIR"
+          else
+            printf '%s\n' "$error" >&2
+            exit 1
+          fi
           echo "${LLVM_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
           {
             echo "LLVM_PREFIX=${LLVM_INSTALL_DIR}"
@@ -530,10 +440,13 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
-      # Upload published GitHub release assets.
-      contents: write
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Build release
         run: |
@@ -541,8 +454,7 @@ jobs:
 
           bazel build //:release-archives \
             --config=release \
-            --config=remote \
-            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+            --config=ci
 
           mkdir -p dist
           # Rename bazel-out/<target>-opt-.../bin/bpf-linker-release[-debuginfo].tar.zst
@@ -556,13 +468,36 @@ jobs:
           done < <(bazel cquery //:release-archives \
             --output=files \
             --config=release \
-            --config=remote)
+            --config=ci)
+
+      - uses: actions/upload-artifact@v7
+        id: upload
+        if: github.event_name == 'release'
+        with:
+          name: release-archives-${{ github.run_attempt }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish-release:
+    if: github.event_name == 'release' && needs.release.outputs.artifact-id != ''
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.release.outputs.artifact-id }}
+          path: dist
 
       - name: Upload release assets
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/*
 
   check:
     if: always()
@@ -572,9 +507,14 @@ jobs:
       - bazel
       - build
       - release
+      - publish-release
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs succeeded
         env:
-          RESULTS: ${{ toJSON(needs.*.result) }}
-        run: jq --exit-status 'length > 0 and all(.[]; . == "success")' <<< "$RESULTS"
+          JOBS: ${{ toJSON(needs) }}
+        run: |
+          jq --exit-status --arg event "$GITHUB_EVENT_NAME" '
+            .["publish-release"].result == (if $event == "release" then "success" else "skipped" end)
+            and (del(.["publish-release"]) | all(.[]; .result == "success"))
+          ' <<< "$JOBS"
