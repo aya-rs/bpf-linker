@@ -1,0 +1,154 @@
+name: Build and publish LLVM
+
+on:
+  workflow_call:
+    inputs:
+      llvm:
+        type: number
+        required: true
+      llvm-commit:
+        type: string
+        required: true
+      llvm-module:
+        type: string
+        required: true
+      llvm-targets:
+        type: string
+        required: true
+      build-revision:
+        type: number
+        required: true
+      buildbuddy-api-key:
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  BUILDBUDDY_API_KEY: ${{ inputs.buildbuddy-api-key }}
+  TAG_PREFIX: ghcr.io/${{ github.repository_owner }}/llvm
+  LLVM_BUILD_REV: ${{ inputs.build-revision }}
+  LLVM_TARGETS: ${{ inputs.llvm-targets }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: oras-project/setup-oras@v2
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - name: Check LLVM artifacts
+        id: artifact-restore
+        env:
+          LLVM_COMMIT: ${{ inputs.llvm-commit }}
+        run: |
+          set -euxo pipefail
+          missing=false
+          for target in $LLVM_TARGETS; do
+            ref="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
+            if output=$(oras manifest fetch --descriptor "$ref" 2>&1); then
+              continue
+            fi
+            # ORAS uses the same exit status for missing manifests and registry
+            # errors. Rebuild only when GHCR explicitly reports a cache miss.
+            if [[ $output != *": not found" ]]; then
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+            missing=true
+          done
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.artifact-restore.outputs.missing == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Build and package LLVM with Bazel
+        if: steps.artifact-restore.outputs.missing == 'true'
+        env:
+          LLVM_MODULE: ${{ inputs.llvm-module }}
+        # A PR consumer only retrieves the archive for its own target.
+        run: >-
+          scripts/build-llvm.sh //:llvm-archives
+          ${{ github.event_name == 'pull_request' && '--remote_download_minimal' || '' }}
+
+      - uses: actions/upload-artifact@v7
+        id: upload
+        if: >-
+          steps.artifact-restore.outputs.missing == 'true' &&
+          (
+            (
+              (github.event_name == 'push' || github.event_name == 'schedule') &&
+              github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+            ) ||
+            github.event_name == 'release'
+          )
+        with:
+          name: llvm-${{ inputs.llvm }}
+          path: bazel-bin/llvm-archive-*.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build
+    # Only trusted workflows may run an action with a package-write token.
+    if: >-
+      (
+        (github.event_name == 'push' || github.event_name == 'schedule') &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      ) ||
+      (github.event_name == 'release' && needs.build.outputs.artifact-id != '')
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      LLVM_COMMIT: ${{ inputs.llvm-commit }}
+    steps:
+      - uses: oras-project/setup-oras@v2
+
+      - name: Login to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          oras login ghcr.io --username "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+
+      - uses: actions/download-artifact@v8
+        if: needs.build.outputs.artifact-id != ''
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+
+      - name: Publish LLVM OCI artifact
+        if: needs.build.outputs.artifact-id != ''
+        run: |
+          set -euo pipefail
+          for target in $LLVM_TARGETS; do
+            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
+            oras push "$sha" \
+              --artifact-type application/vnd.aya.llvm.install \
+              "llvm-archive-${target}.tar.zst:application/vnd.aya.llvm.install.layer.v1.tar+zstd"
+          done
+
+      - name: Publish validated LLVM version
+        if: >-
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          set -euo pipefail
+          for target in $LLVM_TARGETS; do
+            sha="${{ env.TAG_PREFIX }}:${LLVM_COMMIT}-${target}-${{ env.LLVM_BUILD_REV }}"
+            version="${{ env.TAG_PREFIX }}:${{ inputs.llvm }}-${target}-${{ env.LLVM_BUILD_REV }}"
+            oras tag "$sha" "$version"
+          done
