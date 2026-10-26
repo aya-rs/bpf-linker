@@ -172,12 +172,13 @@ impl Metadata<'_> {
     }
 }
 
-impl<'ctx> TryFrom<MDNode<'ctx>> for Metadata<'ctx> {
-    type Error = ();
-
-    fn try_from(md_node: MDNode<'_>) -> Result<Self, Self::Error> {
-        // FIXME: fail if md_node isn't a Metadata node
-        Ok(unsafe { Self::from_value_ref(md_node.value_ref) })
+impl<'ctx> From<MDNode<'ctx>> for Metadata<'ctx> {
+    fn from(node: MDNode<'ctx>) -> Self {
+        let MDNode {
+            value_ref,
+            _marker: _,
+        } = node;
+        unsafe { Self::from_value_ref(value_ref) }
     }
 }
 
@@ -208,10 +209,7 @@ impl MDNode<'_> {
     ///
     /// # Safety
     ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `MDNode`](https://llvm.org/doxygen/classllvm_1_1MDNode.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
+    /// `value_ref` must be a live LLVM value accepted by [`LLVMIsAMDNode`].
     pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
         Self {
             value_ref,
