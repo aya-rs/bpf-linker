@@ -4,10 +4,9 @@ use llvm_sys::{
     core::{
         LLVMCountParams, LLVMDisposeValueMetadataEntries, LLVMGetNumOperands, LLVMGetOperand,
         LLVMGetParam, LLVMGlobalCopyAllMetadata, LLVMIsAFunction, LLVMIsAGlobalObject,
-        LLVMIsAInstruction, LLVMIsAMDNode, LLVMIsAUser, LLVMMDNodeInContext2,
-        LLVMMDStringInContext2, LLVMMetadataAsValue, LLVMPrintValueToString,
-        LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata, LLVMValueMetadataEntriesGetKind,
-        LLVMValueMetadataEntriesGetMetadata,
+        LLVMIsAInstruction, LLVMIsAMDNode, LLVMIsAUser, LLVMMDStringInContext2,
+        LLVMMetadataAsValue, LLVMPrintValueToString, LLVMReplaceMDNodeOperandWith,
+        LLVMValueAsMetadata, LLVMValueMetadataEntriesGetKind, LLVMValueMetadataEntriesGetMetadata,
     },
     debuginfo::{LLVMGetMetadataKind, LLVMGetSubprogram, LLVMMetadataKind, LLVMSetSubprogram},
     prelude::{
@@ -16,10 +15,10 @@ use llvm_sys::{
 };
 
 use crate::llvm::{
-    LLVMContext, Message,
+    Message,
     iter::IterBasicBlocks as _,
     symbol_name,
-    types::di::{DICompositeType, DIDerivedType, DISubprogram, DIType},
+    types::di::{DICompositeType, DISubprogram, DIType},
 };
 
 pub(crate) fn replace_name(
@@ -66,10 +65,15 @@ impl std::fmt::Debug for Value<'_> {
 }
 
 impl Value<'_> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
+    /// # Safety
+    ///
+    /// `value` must point to an LLVM value that outlives this wrapper.
+    pub(crate) unsafe fn from_value_ref(value: LLVMValueRef) -> Self {
         if unsafe { !LLVMIsAMDNode(value).is_null() } {
-            let mdnode = unsafe { MDNode::from_value_ref(value) };
-            return Value::MDNode(mdnode);
+            return Value::MDNode(MDNode {
+                value_ref: value,
+                _marker: PhantomData,
+            });
         } else if unsafe { !LLVMIsAFunction(value).is_null() } {
             return Value::Function(unsafe { Function::from_value_ref(value) });
         }
@@ -101,7 +105,7 @@ impl Value<'_> {
 
 pub(crate) enum Metadata<'ctx> {
     DICompositeType(DICompositeType<'ctx>),
-    DIDerivedType(DIDerivedType<'ctx>),
+    DIDerivedType(DIType<'ctx>),
     DISubprogram(DISubprogram<'ctx>),
     Other(#[expect(dead_code)] LLVMValueRef),
 }
@@ -121,11 +125,11 @@ impl Metadata<'_> {
 
             match LLVMGetMetadataKind(metadata) {
                 LLVMMetadataKind::LLVMDICompositeTypeMetadataKind => {
-                    let di_composite_type = DICompositeType::from_value_ref(value);
+                    let di_composite_type = DICompositeType::from_refs(value, metadata);
                     Metadata::DICompositeType(di_composite_type)
                 }
                 LLVMMetadataKind::LLVMDIDerivedTypeMetadataKind => {
-                    let di_derived_type = DIDerivedType::from_value_ref(value);
+                    let di_derived_type = DIType::from_metadata_ref(metadata);
                     Metadata::DIDerivedType(di_derived_type)
                 }
                 LLVMMetadataKind::LLVMDISubprogramMetadataKind => {
@@ -182,60 +186,12 @@ impl<'ctx> From<MDNode<'ctx>> for Metadata<'ctx> {
     }
 }
 
-/// Represents a metadata node.
+/// A `MetadataAsValue` wrapping an `MDNode` or `ValueAsMetadata`, as recognized
+/// by [`LLVMIsAMDNode`].
 #[derive(Clone)]
 pub(crate) struct MDNode<'ctx> {
-    pub(super) value_ref: LLVMValueRef,
+    value_ref: LLVMValueRef,
     _marker: PhantomData<&'ctx ()>,
-}
-
-impl MDNode<'_> {
-    /// Constructs a new [`MDNode`] from the given `metadata`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the given `metadata` corresponds to a valid
-    /// instance of [LLVM `MDNode`](https://llvm.org/doxygen/classllvm_1_1MDNode.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_metadata_ref(
-        context: LLVMContextRef,
-        metadata: LLVMMetadataRef,
-    ) -> Self {
-        unsafe { MDNode::from_value_ref(LLVMMetadataAsValue(context, metadata)) }
-    }
-
-    /// Constructs a new [`MDNode`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// `value_ref` must be a live LLVM value accepted by [`LLVMIsAMDNode`].
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        Self {
-            value_ref,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Constructs a new metadata node from an array of [`DIType`] elements.
-    ///
-    /// This function is used to create composite metadata structures, such as
-    /// arrays or tuples of different types or values, which can then be used
-    /// to represent complex data structures within the metadata system.
-    pub(crate) fn with_elements(context: &LLVMContext, elements: &[DIType<'_>]) -> Self {
-        let metadata = unsafe {
-            let mut elements: Vec<LLVMMetadataRef> = elements
-                .iter()
-                .map(|di_type| LLVMValueAsMetadata(di_type.value_ref))
-                .collect();
-            LLVMMDNodeInContext2(
-                context.as_mut_ptr(),
-                elements.as_mut_slice().as_mut_ptr(),
-                elements.len(),
-            )
-        };
-        unsafe { Self::from_metadata_ref(context.as_mut_ptr(), metadata) }
-    }
 }
 
 pub(crate) struct MetadataEntries {

@@ -10,10 +10,7 @@ use gimli::{DW_TAG_structure_type, DW_TAG_union_type};
 use llvm_sys::{core::*, debuginfo::*, prelude::*};
 use tracing::{Level, span, trace};
 
-use super::types::{
-    di::DIType,
-    ir::{Function, MDNode, Metadata, Value},
-};
+use super::types::ir::{Function, MDNode, Metadata, Value};
 use crate::llvm::{DIBuilder, LLVMContext, LLVMModule, iter::*};
 
 // KSYM_NAME_LEN from linux kernel intentionally set
@@ -82,24 +79,7 @@ impl<'ctx> DISanitizer<'ctx> {
                             return;
                         }
 
-                        let mut members: Vec<DIType<'_>> = Vec::new();
-                        for element in di_composite_type.elements() {
-                            match element {
-                                Metadata::DICompositeType(di_composite_type) => {
-                                    members.push(di_composite_type.into());
-                                }
-                                Metadata::DIDerivedType(di_derived_type) => {
-                                    members.push(di_derived_type.into());
-                                }
-                                _ => {}
-                            }
-                        }
-                        if !members.is_empty() {
-                            members.sort_by_cached_key(|di_type| di_type.offset_in_bits());
-                            let sorted_elements =
-                                MDNode::with_elements(self.context, members.as_mut_slice());
-                            di_composite_type.replace_elements(sorted_elements);
-                        }
+                        di_composite_type.sort_members(self.context);
                         if let Some((_, sanitized_name)) = names {
                             // Clear the name from characters incompatible with C.
                             di_composite_type.replace_name(self.context, sanitized_name.as_slice())
@@ -132,7 +112,7 @@ impl<'ctx> DISanitizer<'ctx> {
             // An operand with no value is valid and means that the operand is
             // not set
             (v, Item::Operand { .. }) if v.is_null() => return,
-            (v, _) if !v.is_null() => Value::new(v),
+            (v, _) if !v.is_null() => unsafe { Value::from_value_ref(v) },
             // All other items should have values
             (_, item) => panic!("{item:?} has no value"),
         };

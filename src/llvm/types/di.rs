@@ -2,7 +2,10 @@ use std::{marker::PhantomData, slice};
 
 use gimli::DwTag;
 use llvm_sys::{
-    core::{LLVMGetNumOperands, LLVMGetOperand, LLVMReplaceMDNodeOperandWith, LLVMValueAsMetadata},
+    core::{
+        LLVMGetNumOperands, LLVMGetOperand, LLVMMDNodeInContext2, LLVMReplaceMDNodeOperandWith,
+        LLVMValueAsMetadata,
+    },
     debuginfo::{
         LLVMDIFlags, LLVMDIScopeGetFile, LLVMDISubprogramGetLine, LLVMDITypeGetFlags,
         LLVMDITypeGetName, LLVMDITypeGetOffsetInBits, LLVMGetDINodeTag,
@@ -10,10 +13,7 @@ use llvm_sys::{
     prelude::{LLVMMetadataRef, LLVMValueRef},
 };
 
-use crate::llvm::{
-    LLVMContext, LLVMGetMDString,
-    types::ir::{MDNode, Metadata},
-};
+use crate::llvm::{LLVMContext, LLVMGetMDString, types::ir::Metadata};
 
 fn mdstring<'a>(mdstring: LLVMValueRef) -> &'a [u8] {
     let mut len = 0;
@@ -69,68 +69,28 @@ unsafe fn di_type_name<'a>(metadata_ref: LLVMMetadataRef) -> Option<&'a [u8]> {
     (!ptr.is_null()).then(|| unsafe { slice::from_raw_parts(ptr.cast(), len) })
 }
 
-/// Represents the debug information for a primitive type in LLVM IR.
+/// Represents an LLVM debug info type.
 pub(crate) struct DIType<'ctx> {
-    pub(super) metadata_ref: LLVMMetadataRef,
-    pub(super) value_ref: LLVMValueRef,
+    metadata_ref: LLVMMetadataRef,
     _marker: PhantomData<&'ctx ()>,
 }
 
 impl DIType<'_> {
-    /// Constructs a new [`DIType`] from the given `value`.
-    ///
     /// # Safety
     ///
-    /// This method assumes that the given `value` corresponds to a valid
-    /// instance of [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+    /// `metadata_ref` must refer to a live [LLVM `DIType`](https://llvm.org/doxygen/classllvm_1_1DIType.html)
+    /// for the lifetime of this wrapper.
+    pub(super) unsafe fn from_metadata_ref(metadata_ref: LLVMMetadataRef) -> Self {
         Self {
             metadata_ref,
-            value_ref,
             _marker: PhantomData,
         }
     }
 
     /// Returns the offset of the type in bits. This offset is used in case the
     /// type is a member of a composite type.
-    pub(crate) fn offset_in_bits(&self) -> u64 {
+    fn offset_in_bits(&self) -> u64 {
         unsafe { LLVMDITypeGetOffsetInBits(self.metadata_ref) }
-    }
-}
-
-impl<'ctx> From<DIDerivedType<'ctx>> for DIType<'ctx> {
-    fn from(di_derived_type: DIDerivedType<'_>) -> Self {
-        unsafe { Self::from_value_ref(di_derived_type.value_ref) }
-    }
-}
-
-/// Represents the debug information for a derived type in LLVM IR.
-///
-/// The types derived from other types usually add a level of indirection or an
-/// alternative name. The examples of derived types are pointers, references,
-/// typedefs, etc.
-pub(crate) struct DIDerivedType<'ctx> {
-    value_ref: LLVMValueRef,
-    _marker: PhantomData<&'ctx ()>,
-}
-
-impl DIDerivedType<'_> {
-    /// Constructs a new [`DIDerivedType`] from the given `value`.
-    ///
-    /// # Safety
-    ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DIDerivedType`](https://llvm.org/doxygen/classllvm_1_1DIDerivedType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        Self {
-            value_ref,
-            _marker: PhantomData,
-        }
     }
 }
 
@@ -149,38 +109,35 @@ enum DICompositeTypeOperand {
 /// Composite type is a kind of type that can include other types, such as
 /// structures, enums, unions, etc.
 pub(crate) struct DICompositeType<'ctx> {
-    metadata_ref: LLVMMetadataRef,
+    di_type: DIType<'ctx>,
     value_ref: LLVMValueRef,
-    _marker: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx> From<DICompositeType<'ctx>> for DIType<'ctx> {
-    fn from(di_composite_type: DICompositeType<'_>) -> Self {
-        unsafe { Self::from_value_ref(di_composite_type.value_ref) }
+    fn from(composite: DICompositeType<'ctx>) -> Self {
+        let DICompositeType {
+            di_type,
+            value_ref: _,
+        } = composite;
+        di_type
     }
 }
 
 impl DICompositeType<'_> {
-    /// Constructs a new [`DICompositeType`] from the given `value`.
-    ///
     /// # Safety
     ///
-    /// This method assumes that the provided `value` corresponds to a valid
-    /// instance of [LLVM `DICompositeType`](https://llvm.org/doxygen/classllvm_1_1DICompositeType.html).
-    /// It's the caller's responsibility to ensure this invariant, as this
-    /// method doesn't perform any validation checks.
-    pub(crate) unsafe fn from_value_ref(value_ref: LLVMValueRef) -> Self {
-        let metadata_ref = unsafe { LLVMValueAsMetadata(value_ref) };
+    /// Both handles must refer to the same live [LLVM `DICompositeType`](https://llvm.org/doxygen/classllvm_1_1DICompositeType.html)
+    /// for the lifetime of this wrapper.
+    pub(super) unsafe fn from_refs(value_ref: LLVMValueRef, metadata_ref: LLVMMetadataRef) -> Self {
         Self {
-            metadata_ref,
+            di_type: unsafe { DIType::from_metadata_ref(metadata_ref) },
             value_ref,
-            _marker: PhantomData,
         }
     }
 
     /// Returns an iterator over elements (struct fields, enum variants, etc.)
     /// of the composite type.
-    pub(crate) fn elements(&self) -> impl Iterator<Item = Metadata<'_>> {
+    fn elements(&self) -> impl Iterator<Item = Metadata<'_>> {
         let elements =
             unsafe { LLVMGetOperand(self.value_ref, DICompositeTypeOperand::Elements as u32) };
         let operands = if elements.is_null() {
@@ -196,24 +153,40 @@ impl DICompositeType<'_> {
 
     /// Returns the name of the composite type.
     pub(crate) fn name(&self) -> Option<&[u8]> {
-        unsafe { di_type_name(self.metadata_ref) }
+        unsafe { di_type_name(self.di_type.metadata_ref) }
     }
 
-    /// Returns the flags associated with the composity type.
+    /// Returns the flags associated with the composite type.
     pub(crate) fn flags(&self) -> LLVMDIFlags {
-        unsafe { LLVMDITypeGetFlags(self.metadata_ref) }
+        unsafe { LLVMDITypeGetFlags(self.di_type.metadata_ref) }
     }
 
-    /// Replaces the elements of the composite type with a new metadata node.
-    /// The provided metadata node should contain new composite type elements
-    /// as operands. The metadata node can be empty if the intention is to
-    /// remove all elements of the composite type.
-    pub(crate) fn replace_elements(&mut self, mdnode: MDNode<'_>) {
+    /// Sorts the type members by their bit offsets for BTF emission.
+    pub(crate) fn sort_members(&mut self, context: &LLVMContext) {
+        let mut members: Vec<DIType<'_>> = self
+            .elements()
+            .filter_map(|element| match element {
+                Metadata::DICompositeType(composite) => Some(composite.into()),
+                Metadata::DIDerivedType(member) => Some(member),
+                Metadata::DISubprogram(_) => None,
+                Metadata::Other(_) => None,
+            })
+            .collect();
+        if members.is_empty() {
+            return;
+        }
+        members.sort_by_cached_key(DIType::offset_in_bits);
+        let mut elements: Vec<_> = members
+            .into_iter()
+            .map(|member| member.metadata_ref)
+            .collect();
         unsafe {
+            let tuple =
+                LLVMMDNodeInContext2(context.as_mut_ptr(), elements.as_mut_ptr(), elements.len());
             LLVMReplaceMDNodeOperandWith(
                 self.value_ref,
                 DICompositeTypeOperand::Elements as u32,
-                LLVMValueAsMetadata(mdnode.value_ref),
+                tuple,
             )
         }
     }
@@ -235,7 +208,7 @@ impl DICompositeType<'_> {
 
     /// Returns a DWARF tag of the given composite type.
     pub(crate) fn tag(&self) -> DwTag {
-        unsafe { di_node_tag(self.metadata_ref) }
+        unsafe { di_node_tag(self.di_type.metadata_ref) }
     }
 }
 
