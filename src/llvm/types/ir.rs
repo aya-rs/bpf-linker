@@ -176,11 +176,12 @@ impl<'ctx> TryFrom<MDNode<'ctx>> for Metadata<'ctx> {
     type Error = ();
 
     fn try_from(md_node: MDNode<'_>) -> Result<Self, Self::Error> {
-        // FIXME: fail if md_node isn't a Metadata node
+        if unsafe { LLVMIsAMDNode(md_node.value_ref).is_null() } {
+            return Err(());
+        }
         Ok(unsafe { Self::from_value_ref(md_node.value_ref) })
     }
 }
-
 /// Represents a metadata node.
 #[derive(Clone)]
 pub(crate) struct MDNode<'ctx> {
@@ -329,4 +330,10 @@ impl<'ctx> Function<'ctx> {
     pub(crate) fn set_subprogram(&mut self, subprogram: &DISubprogram<'_>) {
         unsafe { LLVMSetSubprogram(self.value_ref, LLVMValueAsMetadata(subprogram.value_ref)) };
     }
+}
+
+#[test]
+fn test_is_valid_md_node() {
+    let md_node = unsafe { MDNode::from_value_ref(std::ptr::null_mut()) };
+    assert!(Metadata::try_from(md_node).is_err());
 }
