@@ -205,16 +205,21 @@ but in case of Rust stable it requires `RUSTC_BOOTSTRAP=1`:
 RUSTC_BOOTSTRAP=1 cargo test --no-default-features --features llvm-23
 ```
 
-## GitHub Actions dependencies
+## Workflow Dependencies
 
-After changing workflow dependencies, update and verify their lockfile with
-the [gh-actions-lock](https://github.com/github/gh-actions-lock) extension:
+Install GitHub's lockfile generator with
+`gh extension install github/gh-actions-lock`. After editing workflows or
+repository actions, regenerate and verify their dependencies:
 
 ```sh
 gh actions-lock --no-narrow
 gh actions-lock --verify
 ```
 
-`--no-narrow` preserves major version tags such as `@v2`. Existing pins stay
-unchanged; use `gh actions-lock --no-narrow --relock` to refresh them explicitly.
-Commit `.github/workflows/actions.lock` with the workflow changes.
+Commit `.github/workflows/actions.lock` with the workflow changes. The
+`--no-narrow` option preserves major-version references such as `@v2`; the
+lockfile records their exact commits. Dependabot groups action version bumps
+into a monthly pull request and updates the corresponding lockfile entries.
+If a tag or branch advances without changing its name, its locked commit stays
+in place. Use `gh actions-lock --relock --no-narrow` to update those pins
+manually.
