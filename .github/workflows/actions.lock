@@ -30,7 +30,7 @@ dependencies:
         repo_id: 260749683
     'oras-project/setup-oras@v2':
         ref: 'v2'
-        commit: 'sha1-005458ad77f1c8facd38a094e4af2e69e5607ff4'
+        commit: 'sha1-5e2f2482b30b0cb3e14e67f89a80c88c659a7c63'
         owner_id: 81890686
         repo_id: 590286646
     'peter-evans/create-pull-request@v8':
@@ -40,6 +40,6 @@ dependencies:
         repo_id: 197176365
     'taiki-e/install-action@v2':
         ref: 'v2'
-        commit: 'sha1-5488ac5a951645ce95062214902ac4b6bc1a1037'
+        commit: 'sha1-86f7a0ffb25f40114606501a311ebcfaf882ea32'
         owner_id: 43724913
         repo_id: 442947557
