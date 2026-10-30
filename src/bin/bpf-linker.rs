@@ -2,7 +2,7 @@ use std::{
     env,
     ffi::CString,
     fs, io,
-    path::{Component, Path, PathBuf},
+    path::{Component, PathBuf},
     str::FromStr,
 };
 
@@ -63,16 +63,12 @@ impl FromStr for CliOutputType {
 
 fn parent_and_file_name(p: PathBuf) -> anyhow::Result<(PathBuf, PathBuf)> {
     let mut comps = p.components();
-    let file_name = comps
-        .next_back()
-        .map(|p| match p {
-            Component::Normal(p) => Ok(p),
-            p => Err(anyhow::anyhow!("unexpected path component {:?}", p)),
-        })
-        .transpose()?
-        .ok_or_else(|| anyhow::anyhow!("unexpected empty path"))?;
-    let parent = comps.as_path();
-    Ok((parent.to_path_buf(), Path::new(file_name).to_path_buf()))
+    let file_name = match comps.next_back() {
+        Some(Component::Normal(p)) => p,
+        Some(p) => anyhow::bail!("unexpected path component {p:?}"),
+        None => anyhow::bail!("unexpected empty path"),
+    };
+    Ok((comps.as_path().to_path_buf(), PathBuf::from(file_name)))
 }
 
 #[derive(Debug, Parser)]
