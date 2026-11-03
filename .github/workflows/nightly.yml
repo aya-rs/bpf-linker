@@ -19,8 +19,8 @@ jobs:
     permissions:
       contents: read
     # Shared Rust channel discovery (aya-rs/aya#1688).
-    # gh-actions-lock v0.2.0 does not lock external reusable workflows.
-    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@2a07daa48ae467480d7a456710ecd6bc7b1dd6c8
+    # gh-actions-lock does not lock external reusable workflows.
+    uses: aya-rs/aya/.github/workflows/rust-toolchains.yml@2a07daa48ae467480d7a456710ecd6bc7b1dd6c8 # main
     with:
       channels: stable beta nightly
 
@@ -49,6 +49,9 @@ jobs:
 
           candidate=$(python3 -B scripts/rustc-llvm.py update "$RUST_TOOLCHAINS")
           if [[ -n "$candidate" ]]; then
+            # Cargo-only Renovate PRs don't refresh Bazel's crate facts. This
+            # Rust toolchain update picks up those changes.
+            # https://github.com/renovatebot/renovate/discussions/47308#discussioncomment-19148695
             bazel mod deps --lockfile_mode=update
             toolchains=$(jq -c .toolchains <<< "$candidate")
             commit=$(jq -r '.["llvm-commit"]' <<< "$candidate")
